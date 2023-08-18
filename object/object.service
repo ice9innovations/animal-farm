@@ -1,0 +1,14 @@
+[Unit]
+Description=Object Service for Discord
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=0
+User=pi
+WorkingDirectory=/home/pi/object
+ExecStart=/home/pi/object/discord-service-object.sh
+
+[Install]
+WantedBy=multi-user.target
