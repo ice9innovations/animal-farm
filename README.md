@@ -5,12 +5,12 @@
 
 # Enviornment File Template
 
-Create a .env file in each directory with this template.
+Create a .env file in each directory with this template:
 
-DISCORD_TOKEN=""
+<code>DISCORD_TOKEN=""
 DISCORD_GUILD=""
 DISCORD_CHANNEL=""
 MYSQL_HOST=""
 MYSQL_USERNAME=""
 MYSQL_PASSWORD=""
-MYSQL_DB=""
+MYSQL_DB=""</code>
