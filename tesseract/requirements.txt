@@ -8,3 +8,4 @@ requests
 pillow
 download
 exif
+imutils
