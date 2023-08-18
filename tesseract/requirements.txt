@@ -1,0 +1,10 @@
+python-dotenv
+pytesseract
+argparse
+opencv-contrib-python
+numpy
+discord
+requests
+pillow
+download
+exif
