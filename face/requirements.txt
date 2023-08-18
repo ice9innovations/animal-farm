@@ -1,0 +1,11 @@
+python-dotenv
+numpy
+discord
+requests
+pillow
+download
+exif
+imutils
+dlib
+uuid
+opencv-contrib-python
