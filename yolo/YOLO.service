@@ -1,0 +1,14 @@
+[Unit]
+Description=YOLOv7 Service for Discord
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=0
+User=orin
+WorkingDirectory=/home/orin/yolov7
+ExecStart=/home/orin/yolov7/discord.sh
+
+[Install]
+WantedBy=multi-user.target
