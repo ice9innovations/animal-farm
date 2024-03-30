@@ -1,9 +1,0 @@
-python-dotenv
-numpy
-discord
-requests
-pillow
-download
-dlib
-uuid
-opencv-contrib-python

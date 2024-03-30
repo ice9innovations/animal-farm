@@ -1,0 +1,12 @@
+[Unit]
+Description=Inception v3 REST API Service
+
+[Service]
+Type=simple
+User=ubuntu
+Environment="LD_PRELOAD=/usr/lib/aarch64-linux-gnu/libgomp.so.1"
+WorkingDirectory=/home/ubuntu/inception_v3
+ExecStart=/home/ubuntu/inception_v3/inception.sh
+
+[Install]
+WantedBy=default.target

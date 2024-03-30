@@ -1,0 +1,14 @@
+[Unit]
+Description=Ollama REST API Service
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=0
+User=ubuntu
+WorkingDirectory=/home/ubuntu/ollama-api
+ExecStart=/home/ubuntu/ollama-api/llama.sh
+
+[Install]
+WantedBy=default.target

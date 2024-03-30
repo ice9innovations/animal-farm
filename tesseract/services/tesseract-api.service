@@ -1,0 +1,11 @@
+[Unit]
+Description=Tesseract REST API
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/tesseract/
+ExecStart=/home/ubuntu/tesseract/tesseract.sh
+
+[Install]
+WantedBy=default.target

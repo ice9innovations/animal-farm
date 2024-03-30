@@ -1,0 +1,14 @@
+[Unit]
+Description=Face REST API Service
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=0
+User=ubuntu
+WorkingDirectory=/home/ubuntu/face
+ExecStart=/home/ubuntu/face/face.sh
+
+[Install]
+WantedBy=default.target

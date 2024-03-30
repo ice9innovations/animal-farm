@@ -1,0 +1,11 @@
+[Unit]
+Description=YOLOv8 Discord Service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/yolov8/
+ExecStart=/home/ubuntu/yolov8/discord.sh
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=YOLOv8 REST API
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/yolov8/
+ExecStart=/home/ubuntu/yolov8/yolo.sh
+
+[Install]
+WantedBy=default.target

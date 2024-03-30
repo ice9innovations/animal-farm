@@ -72,6 +72,9 @@ async def classify(msg, img, image_url):
     net.setInput(blob)
     detections = net.forward()
 
+    # delete image file
+    os.remove(img)
+
     # loop over the detections
     for i in np.arange(0, detections.shape[2]):
         # extract the confidence (i.e., probability) associated with the
@@ -96,8 +99,8 @@ async def classify(msg, img, image_url):
                         
             await emoji(msg, label, image_url)
         
-            cv2.putText(image, label, (startX, y),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLORS[idx], 2)
+            #cv2.putText(image, label, (startX, y),
+            #cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLORS[idx], 2)
 
 	# show the output image
 	#cv2.imshow("Output", image)
@@ -108,24 +111,6 @@ intents.message_content = True
 
 #client = discord.Client(intents=discord.Intents.default())
 client = discord.Client(intents=intents)
-
-async def tnail(img, message, image_url):
-    try:
-        tn_filename = uuid.uuid4().hex + ".jpg"
-
-        image = Image.open(img)
-        image.thumbnail((160,160))
-        image.save(tn_filename)
-        #image1 = Image.open('tn.png')
-        #image1.show()
-
-        os.remove(img) # delete the original image
-
-        #await classify(tn_filename, message, image_url)
-        await classify(message, tn_filename, image_url)
-
-    except IOError:
-        pass
    
 async def download_image(image_file, message, image_url):
     print(image_file)
@@ -144,7 +129,9 @@ async def download_image(image_file, message, image_url):
 
     dl_filename = uuid.uuid4().hex + ".jpg"
     open(dl_filename, "wb").write(response.content)
-    await tnail(dl_filename, message, image_url)
+
+    await classify(message, dl_filename, image_url)
+    #await tnail(dl_filename, message, image_url)
 
     return dl_filename #image
 

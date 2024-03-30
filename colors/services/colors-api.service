@@ -1,0 +1,14 @@
+[Unit]
+Description=Colors REST API Service
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=0
+User=ubuntu
+WorkingDirectory=/home/ubuntu/colors
+ExecStart=/home/ubuntu/colors/colors.sh
+
+[Install]
+WantedBy=default.target

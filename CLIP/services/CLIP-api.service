@@ -1,0 +1,14 @@
+[Unit]
+Description=CLIP REST API Service
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=0
+User=ubuntu
+WorkingDirectory=/home/ubuntu/CLIP
+ExecStart=/home/ubuntu/CLIP/clip.sh
+
+[Install]
+WantedBy=default.target

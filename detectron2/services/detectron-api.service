@@ -1,0 +1,14 @@
+[Unit]
+Description=Detectron REST API Service
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=0
+User=ubuntu
+WorkingDirectory=/home/ubuntu/detectron2
+ExecStart=/home/ubuntu/detectron2/detectron.sh
+
+[Install]
+WantedBy=default.target
