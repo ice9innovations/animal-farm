@@ -1,3 +1,5 @@
 #!/bin/bash
-
-/usr/bin/python /home/ubuntu/BLIP/REST.py
+cd /home/sd/BLIP
+source blip_venv/bin/activate
+source .env
+python REST.py

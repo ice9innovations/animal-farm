@@ -5,10 +5,15 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-Restart=0
+Restart=always
+RestartSec=5
 User=ubuntu
-WorkingDirectory=/home/ubuntu/BLIP
-ExecStart=/home/ubuntu/BLIP/BLIP.sh
+Group=ubuntu
+WorkingDirectory=/home/sd/animal-farm/BLIP
+ExecStart=/home/sd/animal-farm/BLIP/BLIP.sh
+EnvironmentFile=/home/sd/animal-farm/BLIP/.env
+StandardOutput=journal
+StandardError=journal
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target
