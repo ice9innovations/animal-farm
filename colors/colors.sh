@@ -1,3 +1,5 @@
 #!/bin/bash
-
-/usr/bin/python /home/ubuntu/colors/REST.py
+cd /home/sd/colors
+source colors_venv/bin/activate
+source .env
+python REST.py
