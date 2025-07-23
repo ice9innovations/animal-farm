@@ -4,17 +4,26 @@ This service provides AI-powered image captioning using the BLIP (Bootstrapping 
 
 ## Features
 
-- REST API for image captioning
+- REST API for image captioning with v1 and v2 endpoints
 - Multiple model sizes for different performance needs
 - Secure file handling with validation
 - Comprehensive error handling and logging
+- Emoji extraction from captions
+- CORS support for direct browser access
 
 ## Setup
 
-### 1. Install Dependencies
+### 1. Create Python Virtual Environment
 
 ```bash
-pip install -r ../requirements.txt
+# Create virtual environment
+python3 -m venv blip_venv
+
+# Activate virtual environment
+source blip_venv/bin/activate
+
+# Install dependencies
+pip install torch torchvision transformers flask flask-cors pillow requests python-dotenv nltk
 ```
 
 ### 2. Download BLIP Models
@@ -27,28 +36,30 @@ git clone https://github.com/salesforce/BLIP.git
 cp -r BLIP/models ./
 ```
 
-Then download the pre-trained models:
+Then download the required model:
 
 ```bash
-python download_model.py
+wget https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base_capfilt_large.pth
 ```
-
-**Recommended**: Download `model_base.pth` for the best balance of speed and quality.
 
 ### 3. Configure Environment
 
 Create a `.env` file with your configuration:
 
 ```bash
-# API Configuration
+# Service Settings
 PORT=7777
-PRIVATE=True
+PRIVATE=False
 
-# API URL
-API_URL=http://localhost
+# API Configuration (required for emoji lookup)
+API_HOST=localhost
 API_PORT=8080
 API_TIMEOUT=2.0
 ```
+
+**PRIVATE mode explanation:**
+- `PRIVATE=False`: Service binds to all network interfaces (0.0.0.0) and allows local file path access via `/?path=` parameter
+- `PRIVATE=True`: Service binds to localhost only (127.0.0.1) and disables local file path access for security
 
 ### 4. Run Services
 
@@ -60,10 +71,15 @@ API_TIMEOUT=2.0
 
 ### REST API Endpoints
 
+**V1 Endpoints:**
 - `GET /health` - Health check
 - `GET /?url=<image_url>` - Caption image from URL
 - `GET /?path=<local_path>` - Caption local image (if not in private mode)
 - `POST /` - Upload and caption image file
+
+**V2 Endpoints (Unified Response Format):**
+- `GET /v2/analyze?image_url=<image_url>` - Caption image from URL with v2 format
+- `GET /v2/analyze_file?file_path=<file_path>` - Caption image from file path with v2 format
 
 ### Example Usage
 
