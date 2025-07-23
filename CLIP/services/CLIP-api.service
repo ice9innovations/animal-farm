@@ -5,10 +5,15 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-Restart=0
+Restart=always
+RestartSec=5
 User=ubuntu
-WorkingDirectory=/home/ubuntu/CLIP
-ExecStart=/home/ubuntu/CLIP/clip.sh
+Group=ubuntu
+WorkingDirectory=/home/sd/animal-farm/CLIP
+ExecStart=/home/sd/animal-farm/CLIP/CLIP.sh
+EnvironmentFile=/home/sd/animal-farm/CLIP/.env
+StandardOutput=journal
+StandardError=journal
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target
