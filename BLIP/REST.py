@@ -200,23 +200,12 @@ def load_model() -> bool:
             logger.error("BLIP models not found. Please install BLIP or ensure models directory exists.")
             return False
             
-        # Try to load a pre-trained model
-        model_path = None
-        # Check for available model files (prioritize the correct model)
-        possible_models = [
-            "./model_base_capfilt_large.pth",  # Preferred model
-            "./model_base.pth",
-            "./model_large.pth",
-            "./model_base_14M.pth"
-        ]
+        # Load the required model
+        model_path = "./model_base_capfilt_large.pth"
         
-        for path in possible_models:
-            if os.path.exists(path):
-                model_path = path
-                break
-                
-        if not model_path:
-            logger.error("No BLIP model found. Please download a model first.")
+        if not os.path.exists(model_path):
+            logger.error(f"BLIP model not found: {model_path}")
+            logger.error("Please download the required model: model_base_capfilt_large.pth")
             return False
             
         logger.info(f"Loading BLIP model from {model_path}")
