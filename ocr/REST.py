@@ -29,7 +29,7 @@ load_dotenv()
 
 FOLDER = './uploads'
 PRIVATE = os.getenv('PRIVATE', 'False').lower() in ['true', '1', 'yes']
-API_PORT = os.getenv('API_PORT', '7775')
+PORT = os.getenv('PORT', '7775')
 MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
 
 # Ensure upload directory exists
@@ -499,4 +499,4 @@ def analyze_v2():
             cleanup_file(filepath)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(API_PORT), debug=False)
+    app.run(host='0.0.0.0', port=int(PORT), debug=False)

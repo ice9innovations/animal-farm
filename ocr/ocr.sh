@@ -23,5 +23,5 @@ else
 fi
 
 # Start the PaddleOCR service
-echo "Starting PaddleOCR service on port ${API_PORT:-7785}..."
+echo "Starting PaddleOCR service on port ${PORT:-7775}..."
 python REST.py
