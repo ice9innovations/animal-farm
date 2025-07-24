@@ -1,3 +1,5 @@
 #!/bin/bash
-
-/usr/bin/python /home/ubuntu/face/REST.py
+cd /home/sd/face
+source face_venv/bin/activate
+source .env
+python REST.py
