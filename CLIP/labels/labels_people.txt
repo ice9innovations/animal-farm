@@ -1,0 +1,157 @@
+# People & Professions - Human-related terms with emoji representations
+person
+man
+woman
+boy
+girl
+baby
+child
+adult
+teenager
+elderly
+senior
+family
+couple
+group
+crowd
+people
+human
+individual
+someone
+selfie
+portrait
+face
+head
+profile
+silhouette
+shadow
+doctor
+nurse
+teacher
+student
+engineer
+scientist
+artist
+musician
+singer
+dancer
+actor
+actress
+writer
+author
+journalist
+photographer
+chef
+cook
+waiter
+waitress
+bartender
+barista
+cashier
+salesperson
+manager
+boss
+employee
+worker
+builder
+construction worker
+electrician
+plumber
+mechanic
+driver
+pilot
+sailor
+soldier
+police officer
+firefighter
+paramedic
+judge
+lawyer
+accountant
+banker
+farmer
+gardener
+cleaner
+janitor
+security guard
+lifeguard
+coach
+trainer
+therapist
+counselor
+dentist
+veterinarian
+pharmacist
+optometrist
+hairdresser
+barber
+beautician
+massage therapist
+personal trainer
+yoga instructor
+swim instructor
+ski instructor
+tour guide
+translator
+interpreter
+librarian
+secretary
+receptionist
+customer service
+tech support
+programmer
+developer
+designer
+architect
+surveyor
+real estate agent
+insurance agent
+travel agent
+event planner
+wedding planner
+party planner
+caterer
+florist
+decorator
+organizer
+coordinator
+supervisor
+director
+president
+ceo
+entrepreneur
+business owner
+startup founder
+investor
+consultant
+advisor
+mentor
+intern
+apprentice
+volunteer
+activist
+politician
+mayor
+governor
+celebrity
+influencer
+blogger
+youtuber
+streamer
+gamer
+athlete
+sports player
+referee
+umpire
+commentator
+announcer
+news anchor
+tv host
+radio host
+dj
+comedian
+magician
+clown
+mime
+street performer
+busker
