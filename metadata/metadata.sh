@@ -1,3 +1,5 @@
 #!/bin/bash
-
-/usr/bin/python /home/ubuntu/metadata/REST.py
+cd "$(dirname "$0")"
+source metadata_venv/bin/activate
+source .env
+python REST.py

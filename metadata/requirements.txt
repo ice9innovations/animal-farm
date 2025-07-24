@@ -1,0 +1,8 @@
+flask==3.1.1
+flask-cors==6.0.1
+python-dotenv==1.1.1
+pillow==11.3.0
+requests==2.32.4
+opencv-python==4.6.0.66
+numpy==1.26.4
+PyExifTool==0.5.6
