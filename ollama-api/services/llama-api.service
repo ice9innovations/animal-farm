@@ -1,14 +1,15 @@
 [Unit]
-Description=Ollama REST API Service
+Description=Ollama LLM REST API Service
 After=network.target
 StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-Restart=0
-User=ubuntu
-WorkingDirectory=/home/ubuntu/ollama-api
-ExecStart=/home/ubuntu/ollama-api/llama.sh
+Restart=always
+RestartSec=10
+User=sd
+WorkingDirectory=/home/sd/animal-farm/ollama-api
+ExecStart=/home/sd/animal-farm/ollama-api/llama.sh
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target
