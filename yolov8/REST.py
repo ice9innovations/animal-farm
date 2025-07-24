@@ -1,461 +1,786 @@
-#https://discord.com/oauth2/authorize?client_id=1121941169476222987&permissions=3136&scope=bot%20applications.commands%20messages.read
-#INSERT INTO discord (server,channel,user,bot,image,reaction) VALUES ('test','test','test','test','test','test');
+#!/usr/bin/env python3
+"""
+YOLOv8 Object Detection REST API Service
+Provides object detection using Ultralytics YOLOv8 model.
+"""
 
-#import mysql.connector
-# import the necessary packages
-from flask import Flask, request
-
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 from ultralytics import YOLO
-
+import torch
 import json
 import requests
 import os
-from dotenv import load_dotenv
 import uuid
+import logging
+from typing import List, Dict, Any, Optional, Tuple
+from urllib.parse import urlparse
+from PIL import Image, ImageDraw
+import numpy as np
 
-from urllib.parse import urlparse, parse_qs
-from PIL import Image
+from dotenv import load_dotenv
 
-import argparse
-import time
-from pathlib import Path
+# Load environment variables first
+load_dotenv()
 
-import re
-import torch
+# API Configuration for emoji downloads (required)
+API_HOST = os.getenv('API_HOST')  # Must be set in .env
+API_PORT = int(os.getenv('API_PORT'))  # Must be set in .env
+API_TIMEOUT = float(os.getenv('API_TIMEOUT', '2.0'))
 
-PRIVATE = False # change this for security to limit API requests to only local access
-API_PORT = os.getenv('API_PORT')
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# HTTP port for endpoint
+PORT = int(os.getenv('PORT', '7773'))
+
+
+# Configuration
+UPLOAD_FOLDER = './uploads'
+MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
+PRIVATE = os.getenv('PRIVATE', 'False').lower() == 'true'
+CONFIDENCE_THRESHOLD = 0.25  # Minimum confidence for detections
+IOU_THRESHOLD = 0.45  # IoU threshold for NMS
+MAX_DETECTIONS = 100  # Maximum number of detections per image
 
 load_dotenv()
 
+# Ensure upload directory exists
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# Environment variables validation
+for var in ['DISCORD_TOKEN', 'DISCORD_GUILD', 'DISCORD_CHANNEL']:
+    if not os.getenv(var):
+        logger.warning(f"Environment variable {var} not set")
+
 TOKEN = os.getenv('DISCORD_TOKEN')
 GUILD = os.getenv('DISCORD_GUILD')
-CHANNELS = os.getenv('DISCORD_CHANNEL')
-CHANNELS = CHANNELS.split(",")
+CHANNELS = os.getenv('DISCORD_CHANNEL', '').split(',') if os.getenv('DISCORD_CHANNEL') else []
 
-#HOST =  os.getenv('MYSQL_HOST')
-#USER =  os.getenv('MYSQL_USERNAME')
-#PW =  os.getenv('MYSQL_PASSWORD')
-#DB = os.getenv('MYSQL_DB')
-
-#mydb = mysql.connector.connect(
-#  host=HOST,
-#  user=USER,
-#  password=PW,
-#  database=DB,
-#  charset='utf8mb4'
-#)
-
-image_size = 160
-max = 2
-
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# Device configuration
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 if torch.backends.mps.is_available():
-    device = torch.device("mps")
+    device = 'mps'
 
+logger.info(f"Using device: {device}")
 
-# copied and pasted directly from
-# https://gist.github.com/gaulinmp/7107e3bac5ea94af6c9d
+# Global variables for model and data
+model = None
 
-_singular_rules = [
-    (r'(?i)(.)ae$', '\\1a'),
-    (r'(?i)(.)itis$', '\\1itis'),
-    (r'(?i)(.)eaux$', '\\1eau'),
-    (r'(?i)(quiz)zes$', '\\1'),
-    (r'(?i)(matr)ices$', '\\1ix'),
-    (r'(?i)(ap|vert|ind)ices$', '\\1ex'),
-    (r'(?i)^(ox)en', '\\1'),
-    (r'(?i)(alias|status)es$', '\\1'),
-    (r'(?i)([octop|vir])i$',  '\\1us'),
-    (r'(?i)(cris|ax|test)es$', '\\1is'),
-    (r'(?i)(shoe)s$', '\\1'),
-    (r'(?i)(o)es$', '\\1'),
-    (r'(?i)(bus)es$', '\\1'),
-    (r'(?i)([m|l])ice$', '\\1ouse'),
-    (r'(?i)(x|ch|ss|sh)es$', '\\1'),
-    (r'(?i)(m)ovies$', '\\1ovie'),
-    (r'(?i)(.)ombies$', '\\1ombie'),
-    (r'(?i)(s)eries$', '\\1eries'),
-    (r'(?i)([^aeiouy]|qu)ies$', '\\1y'),
-    # -f, -fe sometimes take -ves in the plural
-    # (e.g., lives, wolves).
-    (r"([aeo]l)ves$", "\\1f"),
-    (r"([^d]ea)ves$", "\\1f"),
-    (r"arves$", "arf"),
-    (r"erves$", "erve"),
-    (r"([nlw]i)ves$", "\\1fe"),
-    (r'(?i)([lr])ves$', '\\1f'),
-    (r"([aeo])ves$", "\\1ve"),
-    (r'(?i)(sive)s$', '\\1'),
-    (r'(?i)(tive)s$', '\\1'),
-    (r'(?i)(hive)s$', '\\1'),
-    (r'(?i)([^f])ves$', '\\1fe'),
-    # -ses suffixes.
-    (r'(?i)(^analy)ses$', '\\1sis'),
-    (r'(?i)((a)naly|(b)a|(d)iagno|(p)arenthe|(p)rogno|(s)ynop|(t)he)ses$',
-     '\\1\\2sis'),
-    (r'(?i)(.)opses$', '\\1opsis'),
-    (r'(?i)(.)yses$', '\\1ysis'),
-    (r'(?i)(h|d|r|o|n|b|cl|p)oses$', '\\1ose'),
-    (r'(?i)(fruct|gluc|galact|lact|ket|malt|rib|sacchar|cellul)ose$',
-     '\\1ose'),
-    (r'(?i)(.)oses$', '\\1osis'),
-    # -a
-    (r'(?i)([ti])a$', '\\1um'),
-    (r'(?i)(n)ews$', '\\1ews'),
-    (r'(?i)([^s])s$', '\\1'),  # don't make ss singularize to s.
+# Load emoji mappings from central API
+emoji_mappings = {}
+
+def load_emoji_mappings():
+    """Load fresh emoji mappings from central API"""
+    global emoji_mappings
+    
+    api_url = f"http://{API_HOST}:{API_PORT}/emoji_mappings.json"
+    logger.info(f"🔄 YOLO: Loading fresh emoji mappings from {api_url}")
+    
+    response = requests.get(api_url, timeout=API_TIMEOUT)
+    response.raise_for_status()
+    emoji_mappings = response.json()
+    
+    logger.info(f"✅ YOLO: Loaded fresh emoji mappings from API ({len(emoji_mappings)} entries)")
+
+# Load emoji mappings on startup
+load_emoji_mappings()
+
+def get_emoji(word: str) -> str:
+    """Get emoji using direct mapping lookup"""
+    if not word:
+        return None
+    
+    word_clean = word.lower().strip()
+    return emoji_mappings.get(word_clean)
+
+# COCO class names (YOLOv8 uses COCO dataset classes)
+COCO_CLASSES = [
+    'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat',
+    'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat',
+    'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack',
+    'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball',
+    'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket',
+    'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple',
+    'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake',
+    'chair', 'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop',
+    'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink',
+    'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush'
 ]
 
-# For performance, compile the regular expressions only once:
-_singular_rules = [(re.compile(r[0]), r[1]) for r in _singular_rules]
-
-_singular_uninflected = set((
-    "bison", "debris", "headquarters", "pincers", "trout",
-    "bream", "diabetes", "herpes", "pliers", "tuna",
-    "breeches", "djinn", "high-jinks", "proceedings", "whiting",
-    "britches", "eland", "homework", "rabies", "wildebeest"
-    "carp", "elk", "innings", "salmon",
-    "chassis", "flounder", "jackanapes", "scissors",
-    "christmas", "gallows", "mackerel", "series",
-    "clippers", "georgia", "measles", "shears",
-    "cod", "graffiti", "mews", "species",
-    "contretemps", "mumps", "swine",
-    "corps", "news", "swiss",
-    # Custom added from MD&A corpus
-    "api", "mae", "sae", "basis", "india", "media",
-))
-_singular_uncountable = set((
-    "advice", "equipment", "happiness", "luggage", "news", "software",
-    "bread", "fruit", "information", "mathematics", "progress", "understanding",
-    "butter", "furniture", "ketchup", "mayonnaise", "research", "water"
-    "cheese", "garbage", "knowledge", "meat", "rice",
-    "electricity", "gravel", "love", "mustard", "sand",
-))
-_singular_ie = set((
-    "alergie", "cutie", "hoagie", "newbie", "softie", "veggie",
-    "auntie", "doggie", "hottie", "nightie", "sortie", "weenie",
-    "beanie", "eyrie", "indie", "oldie", "stoolie", "yuppie",
-    "birdie", "freebie", "junkie", "^pie", "sweetie", "zombie"
-    "bogie", "goonie", "laddie", "pixie", "techie",
-    "bombie", "groupie", "laramie", "quickie", "^tie",
-    "collie", "hankie", "lingerie", "reverie", "toughie",
-    "cookie", "hippie", "meanie", "rookie", "valkyrie",
-))
-_singular_irregular = {
-    "abuses": "abuse",
-    "ads": "ad",
-    "atlantes": "atlas",
-    "atlases": "atlas",
-    "analysis": "analysis",
-    "axes": "axe",
-    "beeves": "beef",
-    "brethren": "brother",
-    "children": "child",
-    "children": "child",
-    "corpora": "corpus",
-    "corpuses": "corpus",
-    "ephemerides": "ephemeris",
-    "feet": "foot",
-    "ganglia": "ganglion",
-    "geese": "goose",
-    "genera": "genus",
-    "genii": "genie",
-    "graffiti": "graffito",
-    "helves": "helve",
-    "kine": "cow",
-    "leaves": "leaf",
-    "loaves": "loaf",
-    "men": "man",
-    "mongooses": "mongoose",
-    "monies": "money",
-    "moves": "move",
-    "mythoi": "mythos",
-    "numena": "numen",
-    "occipita": "occiput",
-    "octopodes": "octopus",
-    "opera": "opus",
-    "opuses": "opus",
-    "our": "my",
-    "oxen": "ox",
-    "penes": "penis",
-    "penises": "penis",
-    "people": "person",
-    "sexes": "sex",
-    "soliloquies": "soliloquy",
-    "teeth": "tooth",
-    "testes": "testis",
-    "trilbys": "trilby",
-    "turves": "turf",
-    "zoa": "zoon",
-}
-
-_plural_prepositions = set((
-    "about", "before", "during", "of", "till",
-    "above", "behind", "except", "off", "to",
-    "across", "below", "for", "on", "under",
-    "after", "beneath", "from", "onto", "until",
-    "among", "beside", "in", "out", "unto",
-    "around", "besides", "into", "over", "upon",
-    "at", "between", "near", "since", "with",
-    "athwart", "betwixt", "beyond", "but", "by"
-))
-
- 
-def singularize(word, custom={}):
-    """Returns the singular of a given word."""
-    if word in custom:
-        return custom[word]
-    # Recurse compound words (e.g. mothers-in-law).
-    if "-" in word:
-        w = word.split("-")
-        if len(w) > 1 and w[1] in _plural_prepositions:
-            return singularize(w[0], custom) + "-" + "-".join(w[1:])
-    # dogs' => dog's
-    if word.endswith("'"):
-        return singularize(word[:-1], custom) + "'s"
-    w = word.lower()
-    for x in _singular_uninflected:
-        if x.endswith(w):
-            return word
-    for x in _singular_uncountable:
-        if x.endswith(w):
-            return word
-    for x in _singular_ie:
-        if w.endswith(x + "s"):
-            return w
-    for x in _singular_irregular:
-        if w.endswith(x):
-            return re.sub('(?i)' + x + '$', _singular_irregular[x], word)
-    for suffix, inflection in _singular_rules:
-        m = suffix.search(word)
-        g = m and m.groups() or []
-        if m:
-            for k in range(len(g)):
-                if g[k] is None:
-                    inflection = inflection.replace('\\' + str(k + 1), '')
-            return suffix.sub(inflection, word)
-    return word
-
-def emoji(preds):
-    emojis = []
-    #print (preds)
-    #tags = ''.join(preds).split(", ")
-    count = 1
-    emojis = []
-    json_str = ""
-    for tag in preds:
-        print(tag)
-
-        if tag != "" and tag != " ":
-            aTag = tag.split("|")
-            conf = round(float(aTag[1]), 3)
-            print(conf)
-
-            tag = aTag[0]
-
-            #current_emoji = 
-            #print("COUNT: " + str(count))
-            count = count + 1
-            emoji = lookup_emoji(tag)
-            emoji = emoji.split(":")
-
-            #if emoji != "" and emoji != " ":
-            tag_str = '{"tag": "' + tag.strip() + '", "clean_tag": "' + emoji[0] + '", "confidence": ' + str(conf) + ',"emoji": "' + emoji[1] + '"},'
-            json_str = json_str + tag_str
-            #print(current_emoji)
-    
-    #json_str = '{"emojis": '
-    #tmp = ""
-    #for emo in emojis:
-    #    tmp = tmp + emo + ","
-    #json_str = json_str + '"' + tmp.rstrip(',') + '"}'
-    json_str = "[" + json_str.rstrip(",") + "]" # remove last comma
-
-    print (json_str)
-
-    return json_str
-
-def lookup_emoji(tag):
-    f = open('./emojis.json')
-    data = json.load(f)
-
-    emoji = ""
-    for d in data:
-        for key, value in d.items():
-            #print(key, value)
-            aTags = tag.split(", ")
-
-            if len(aTags) > 0:
-                for aTag in aTags:
-                    aTag = aTag.strip() #.replace(" ", "_")
-                    #clean_tags = aTag.split(" ")
-
-                    cnt = 0
-                    clean_tag = aTag
-
-                    #for clean_tag in clean_tags:
-                    #if clean_tags[1] and len(clean_tags) > 0: #why???
-                    clean_tag = re.sub(r'\b\d+\b ', '', clean_tag)
-                    clean_tag = clean_tag.replace(" ","_")
-
-                    #if cnt == 1:
-                    #clean_tag = clean_tags[1]
-                    clean_tag = singularize(clean_tag.replace(",","").strip()) # drop extra comma
-                    clean_tag = clean_tag.replace(" ","_")
-                    #print(clean_tag)
-
-                    if (value == clean_tag or key == clean_tag):
-                        #print("TAG: " + clean_tag)
-                        print(key, value)
-
-                        if value:
-                            emoji = value
-                            #await update_database(msg, discord_image, value)
-                            #await msg.add_reaction(value)
-
-                    #cnt = cnt + 1
-
-    ret = clean_tag + ":" + emoji
-    return ret
-
-def update_database(msg, image_url, reaction):
-    #mycursor = mydb.cursor()
-
-    sql = "INSERT INTO discord (server, channel, user, bot, image, reaction) VALUES (%s, %s, %s, %s, %s, %s)"
-    val = (msg.guild.id, msg.channel.id, msg.author.id, "YOLO", image_url, reaction)
-    #mycursor.execute(sql, val)
-
-    #mydb.commit()
-
-
-def tnail(img):
-    try:
-        tn_filename = uuid.uuid4().hex + ".jpg"
-
-        image = Image.open(img)
-        image.thumbnail((160,160))
-        image.save(tn_filename)
-        #image1 = Image.open('tn.png')
-        #image1.show()
-
-        os.remove(img) # delete the original image
-
-
-    except IOError:
-        pass
-
-#weights = opt.weights
-#model = attempt_load(weights, map_location=device)  # load FP32 model
-model = YOLO('yolov8l.pt')
-
-def classify(discord_image):
+def initialize_yolo_model(model_path: str = None) -> bool:
+    """Initialize YOLOv8 model with FP16 optimization"""
     global model
-    results = model.predict(discord_image,verbose=False)
-    result = results[0]
-
-    preds = []
-    for box in result.boxes:
-
-        cords = box.xyxy[0].tolist()
-        cords = [round(x) for x in cords]
-        class_id = result.names[box.cls[0].item()]
-        conf = round(box.conf[0].item(), 2)
-
-        print("Object type:", class_id)
-        print("Coordinates:", cords)
-        print("Probability:", conf)
-        print("----")
-
-        preds.append(class_id + "|" + str(round(conf,3)))
-    
-    path = "./" + discord_image
     try:
-        os.remove(path)
-    except:
-        print("Cannot remove downloaded image")
+        # Try different model sizes in order of preference (largest to smallest)
+        model_candidates = [
+            model_path,
+            'yolov8x.pt',  # Extra Large - most accurate
+            'yolov8l.pt',  # Large
+            'yolov8m.pt',  # Medium
+            'yolov8s.pt',  # Small
+            'yolov8n.pt',  # Nano - fastest
+        ]
+        
+        for model_file in model_candidates:
+            if model_file is None:
+                continue
+                
+            try:
+                logger.info(f"Attempting to load YOLO model: {model_file}")
+                model = YOLO(model_file)
+                
+                # FP16 disabled for stability - causing model load failures on some systems
+                # TODO: Implement proper FP16 support for YOLO models
+                precision = "FP32"
+                logger.info(f"Using {precision} for YOLO model stability")
+                
+                # Test the model with a dummy prediction
+                dummy_image = np.zeros((640, 640, 3), dtype=np.uint8)
+                test_results = model.predict(dummy_image, verbose=False, device=device)
+                
+                logger.info(f"YOLO model loaded successfully: {model_file}")
+                logger.info(f"Model device: {model.device}")
+                logger.info(f"Model precision: {precision}")
+                return True
+                
+            except Exception as e:
+                logger.warning(f"Failed to load {model_file}: {e}")
+                continue
+                
+        logger.error("No YOLO model could be loaded")
+        return False
+        
+    except Exception as e:
+        logger.error(f"Error initializing YOLO model: {e}")
+        return False
 
-    return preds
 
-def update_database(msg, image_url, reaction):
-    #mycursor = mydb.cursor()
+def lookup_emoji(class_name: str) -> Optional[str]:
+    """Look up emoji for a given class name using local emoji service (optimized - no HTTP requests)"""
+    clean_name = class_name.lower().strip()
+    
+    try:
+        # Use simple local emoji lookup
+        emoji = get_emoji(clean_name)
+        if emoji:
+            logger.debug(f"Local emoji lookup: '{clean_name}' → {emoji}")
+            return emoji
+        
+        logger.debug(f"Local emoji lookup: no emoji found for '{clean_name}'")
+        return None
+        
+    except Exception as e:
+        logger.warning(f"Local emoji service lookup failed for '{clean_name}': {e}")
+        return None
 
-    sql = "INSERT INTO discord (server, channel, user, bot, image, reaction) VALUES (%s, %s, %s, %s, %s, %s)"
-    val = (msg.guild.id, msg.channel.id, msg.author.id, "inception_v3", image_url, reaction)
-    #mycursor.execute(sql, val)
+def is_allowed_file(filename: str) -> bool:
+    """Check if file extension is allowed"""
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-    #mydb.commit()
+def validate_file_size(file_path: str) -> bool:
+    """Validate file size"""
+    try:
+        return os.path.getsize(file_path) <= MAX_FILE_SIZE
+    except OSError:
+        return False
 
-# create folder for uploaded data
-FOLDER = './'
-#os.makedirs(FOLDER, exist_ok=True)
+def process_yolo_results(results) -> List[Dict[str, Any]]:
+    """Process YOLO model results into structured format"""
+    detections = []
+    
+    if not results or len(results) == 0:
+        return detections
+        
+    result = results[0]
+    
+    if result.boxes is None or len(result.boxes) == 0:
+        return detections
+        
+    for box in result.boxes:
+        try:
+            # Get bounding box coordinates
+            coords = box.xyxy[0].tolist()
+            coords = [round(x) for x in coords]
+            x1, y1, x2, y2 = coords
+            
+            # Get class information
+            class_id = int(box.cls[0].item())
+            class_name = result.names[class_id] if class_id < len(result.names) else f"class_{class_id}"
+            confidence = round(box.conf[0].item(), 3)
+            
+            # Only include detections above confidence threshold
+            if confidence >= CONFIDENCE_THRESHOLD:
+                # Look up emoji from central API
+                try:
+                    emoji = lookup_emoji(class_name)
+                except RuntimeError as e:
+                    logger.error(f"Emoji lookup failed for '{class_name}': {e}")
+                    raise RuntimeError(f"Detection failed due to emoji lookup failure: {e}")
+                
+                detection = {
+                    "class_id": class_id,
+                    "class_name": class_name,
+                    "confidence": confidence,
+                    "bbox": {
+                        "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                        "width": x2 - x1,
+                        "height": y2 - y1
+                    },
+                    "emoji": emoji
+                }
+                
+                detections.append(detection)
+                
+        except Exception as e:
+            logger.warning(f"Error processing detection: {e}")
+            continue
+            
+    # Sort by confidence (highest first)
+    detections.sort(key=lambda x: x['confidence'], reverse=True)
+    
+    # Deduplicate by class name - keep only highest confidence per class
+    seen_classes = {}
+    deduplicated = []
+    
+    for detection in detections:
+        class_name = detection.get('class_name', '')
+        if class_name:
+            if class_name not in seen_classes:
+                seen_classes[class_name] = detection
+                deduplicated.append(detection)
+                logger.debug(f"YOLO: Keeping highest confidence {class_name}: {detection['confidence']}")
+            else:
+                logger.debug(f"YOLO: Skipping duplicate {class_name}: {detection['confidence']}")
+    
+    # Limit number of detections
+    return deduplicated[:MAX_DETECTIONS]
 
+def detect_objects(image_path: str, cleanup: bool = True) -> Dict[str, Any]:
+    """Detect objects in image using YOLOv8"""
+    if not model:
+        return {"error": "Model not loaded", "status": "error"}
+        
+    try:
+        # Validate file
+        if not os.path.exists(image_path):
+            return {"error": "Image file not found", "status": "error"}
+            
+        if not validate_file_size(image_path):
+            return {"error": "File too large", "status": "error"}
+            
+        # Run YOLO detection with FP16 optimization
+        logger.info(f"Running YOLO detection on: {image_path}")
+        
+        # Use standard FP32 inference for stability
+        results = model.predict(
+            image_path,
+            conf=CONFIDENCE_THRESHOLD,
+            iou=IOU_THRESHOLD,
+            verbose=False,
+            device=device
+        )
+        
+        # Process results
+        detections = process_yolo_results(results)
+        
+        logger.info(f"Detected {len(detections)} objects")
+        
+        # Get image dimensions for context
+        try:
+            with Image.open(image_path) as img:
+                image_width, image_height = img.size
+        except Exception:
+            image_width = image_height = None
+            
+        # Build response
+        response = {
+            "YOLO": {
+                "detections": detections,
+                "total_detections": len(detections),
+                "image_dimensions": {
+                    "width": image_width,
+                    "height": image_height
+                } if image_width and image_height else None,
+                "model_info": {
+                    "confidence_threshold": CONFIDENCE_THRESHOLD,
+                    "iou_threshold": IOU_THRESHOLD,
+                    "device": str(model.device) if hasattr(model, 'device') else device
+                },
+                "status": "success"
+            }
+        }
+        
+        # Cleanup (only for temporary files)
+        if cleanup:
+            try:
+                if os.path.exists(image_path) and image_path.startswith(UPLOAD_FOLDER):
+                    os.remove(image_path)
+            except Exception as e:
+                logger.warning(f"Failed to cleanup file {image_path}: {e}")
+            
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error detecting objects in {image_path}: {e}")
+        return {"error": f"Detection failed: {str(e)}", "status": "error"}
+
+# Flask app setup
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
+
+# Enable CORS for direct browser access (eliminates PHP proxy)
+CORS(app, origins=["*"], methods=["GET", "POST", "OPTIONS"])
+print("YOLO service: CORS enabled for direct browser communication")
+
+@app.errorhandler(413)
+def too_large(e):
+    return jsonify({"error": "File too large", "status": "error"}), 413
+
+@app.errorhandler(400)
+def bad_request(e):
+    return jsonify({"error": "Bad request", "status": "error"}), 400
+
+@app.errorhandler(500)
+def internal_error(e):
+    return jsonify({"error": "Internal server error", "status": "error"}), 500
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    model_status = "loaded" if model else "not_loaded"
+    model_info = {}
+    
+    if model:
+        try:
+            model_info = {
+                "device": str(model.device) if hasattr(model, 'device') else device,
+                "model_name": str(model.model.model[-1].__class__.__name__) if hasattr(model, 'model') else "unknown"
+            }
+        except Exception:
+            pass
+            
+    return jsonify({
+        "status": "healthy",
+        "model_status": model_status,
+        "model_info": model_info,
+        "confidence_threshold": CONFIDENCE_THRESHOLD,
+        "iou_threshold": IOU_THRESHOLD,
+        "supported_classes": len(COCO_CLASSES)
+    })
+
+@app.route('/classes', methods=['GET'])
+def get_classes():
+    """Get supported object classes"""
+    return jsonify({
+        "classes": COCO_CLASSES,
+        "total_classes": len(COCO_CLASSES)
+    })
+
+@app.route('/v2/analyze_file', methods=['GET'])
+def analyze_file_v2():
+    """V2 API endpoint for direct file path analysis"""
+    import time
+    start_time = time.time()
+    
+    try:
+        # Get file path from query parameters
+        file_path = request.args.get('file_path')
+        if not file_path:
+            return jsonify({
+                "service": "yolo",
+                "status": "error",
+                "predictions": [],
+                "error": {"message": "Missing file_path parameter"},
+                "metadata": {"processing_time": round(time.time() - start_time, 3)}
+            }), 400
+        
+        # Validate file path
+        if not os.path.exists(file_path):
+            return jsonify({
+                "service": "yolo",
+                "status": "error",
+                "predictions": [],
+                "error": {"message": f"File not found: {file_path}"},
+                "metadata": {"processing_time": round(time.time() - start_time, 3)}
+            }), 404
+        
+        if not is_allowed_file(file_path):
+            return jsonify({
+                "service": "yolo",
+                "status": "error",
+                "predictions": [],
+                "error": {"message": "File type not allowed"},
+                "metadata": {"processing_time": round(time.time() - start_time, 3)}
+            }), 400
+        
+        # Detect objects directly from file (no cleanup needed - we don't own the file)
+        result = detect_objects(file_path, cleanup=False)
+        
+        if result.get('status') == 'error':
+            return jsonify({
+                "service": "yolo",
+                "status": "error",
+                "predictions": [],
+                "error": {"message": result.get('error', 'Detection failed')},
+                "metadata": {"processing_time": round(time.time() - start_time, 3)}
+            }), 500
+        
+        # Convert to v2 format
+        yolo_data = result.get('YOLO', {})
+        detections = yolo_data.get('detections', [])
+        image_dims = yolo_data.get('image_dimensions', {})
+        
+        # Create unified prediction format
+        predictions = []
+        for detection in detections:
+            bbox = detection.get('bbox', {})
+            prediction = {
+                "type": "object_detection",
+                "label": detection.get('class_name', ''),
+                "confidence": float(detection.get('confidence', 0)),  # Already normalized 0-1
+                "bbox": {
+                    "x": bbox.get('x1', 0),
+                    "y": bbox.get('y1', 0),
+                    "width": bbox.get('width', 0),
+                    "height": bbox.get('height', 0)
+                }
+            }
+            
+            # Add emoji if present
+            if detection.get('emoji'):
+                prediction["emoji"] = detection['emoji']
+            
+            predictions.append(prediction)
+        
+        return jsonify({
+            "service": "yolo",
+            "status": "success",
+            "predictions": predictions,
+            "metadata": {
+                "processing_time": round(time.time() - start_time, 3),
+                "model_info": {
+                    "name": "YOLOv8",
+                    "framework": "Ultralytics"
+                },
+                "image_dimensions": image_dims,
+                "parameters": {
+                    "confidence_threshold": CONFIDENCE_THRESHOLD,
+                    "iou_threshold": IOU_THRESHOLD
+                }
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"V2 file analysis error: {e}")
+        return jsonify({
+            "service": "yolo",
+            "status": "error",
+            "predictions": [],
+            "error": {"message": f"Internal error: {str(e)}"},
+            "metadata": {"processing_time": round(time.time() - start_time, 3)}
+        }), 500
+
+@app.route('/v2/analyze', methods=['GET'])
+def analyze_v2():
+    """V2 API endpoint with unified response format"""
+    import time
+    start_time = time.time()
+    filepath = None
+    
+    try:
+        # Get image URL from query parameters
+        image_url = request.args.get('image_url')
+        if not image_url:
+            return jsonify({
+                "service": "yolo",
+                "status": "error",
+                "predictions": [],
+                "error": {"message": "Missing image_url parameter"},
+                "metadata": {"processing_time": round(time.time() - start_time, 3)}
+            }), 400
+        
+        # Download and process image (reuse existing logic)
+        try:
+            parsed_url = urlparse(image_url)
+            if not parsed_url.scheme or not parsed_url.netloc:
+                raise ValueError("Invalid URL format")
+            
+            # Download image
+            filename = uuid.uuid4().hex + ".jpg"
+            filepath = os.path.join(UPLOAD_FOLDER, filename)
+            
+            response = requests.get(image_url, timeout=10, stream=True)
+            response.raise_for_status()
+            
+            content_type = response.headers.get('content-type', '')
+            if not content_type.startswith('image/'):
+                raise ValueError("URL does not point to an image")
+            
+            with open(filepath, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            
+            if not validate_file_size(filepath):
+                os.remove(filepath)
+                raise ValueError("Downloaded file too large")
+            
+            # Detect objects using existing function
+            result = detect_objects(filepath)
+            
+            # Clear filepath after successful processing (detect_objects handles cleanup)
+            filepath = None
+            
+            if result.get('status') == 'error':
+                return jsonify({
+                    "service": "yolo",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": result.get('error', 'Detection failed')},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 500
+            
+            # Convert to v2 format
+            yolo_data = result.get('YOLO', {})
+            detections = yolo_data.get('detections', [])
+            image_dims = yolo_data.get('image_dimensions', {})
+            
+            # Create unified prediction format
+            predictions = []
+            for detection in detections:
+                bbox = detection.get('bbox', {})
+                prediction = {
+                    "type": "object_detection",
+                    "label": detection.get('class_name', ''),
+                    "confidence": float(detection.get('confidence', 0)),  # Already normalized 0-1
+                    "bbox": {
+                        "x": bbox.get('x1', 0),
+                        "y": bbox.get('y1', 0),
+                        "width": bbox.get('width', 0),
+                        "height": bbox.get('height', 0)
+                    }
+                }
+                
+                # Add emoji if present
+                if detection.get('emoji'):
+                    prediction["emoji"] = detection['emoji']
+                
+                predictions.append(prediction)
+            
+            # Get model info
+            model_info = yolo_data.get('model_info', {})
+            
+            return jsonify({
+                "service": "yolo",
+                "status": "success",
+                "predictions": predictions,
+                "metadata": {
+                    "processing_time": round(time.time() - start_time, 3),
+                    "model_info": {
+                        "name": "YOLOv8",
+                        "framework": "Ultralytics"
+                    },
+                    "image_dimensions": image_dims,
+                    "parameters": {
+                        "confidence_threshold": CONFIDENCE_THRESHOLD,
+                        "iou_threshold": IOU_THRESHOLD
+                    }
+                }
+            })
+            
+        except Exception as e:
+            logger.error(f"Error processing image URL {image_url}: {e}")
+            return jsonify({
+                "service": "yolo",
+                "status": "error", 
+                "predictions": [],
+                "error": {"message": f"Failed to process image: {str(e)}"},
+                "metadata": {"processing_time": round(time.time() - start_time, 3)}
+            }), 500
+        
+    except Exception as e:
+        logger.error(f"V2 API error: {e}")
+        return jsonify({
+            "service": "yolo",
+            "status": "error",
+            "predictions": [],
+            "error": {"message": f"Internal error: {str(e)}"},
+            "metadata": {"processing_time": round(time.time() - start_time, 3)}
+        }), 500
+    finally:
+        # Safe cleanup
+        if filepath and os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+                logger.debug(f"Cleaned up file: {filepath}")
+            except Exception as e:
+                logger.warning(f"Failed to cleanup file {filepath}: {e}")
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
-
     if request.method == 'GET':
-        url = request.args.get('url')
+        # Handle URL parameter
+        url = request.args.get('url') or request.args.get('img')
         path = request.args.get('path')
-
+        
         if url:
-            print (url)
-            fn =  uuid.uuid4().hex + ".jpg"
-
-            response = requests.get(url)
-            with open(fn, mode="wb") as file:
-                file.write(response.content)
-
-            emojis = classify(fn)
-            emo = emoji(emojis)
-            print(emojis)
-            #emo = emoji(emojis)
-
-            return emo
+            filepath = None
+            try:
+                # Validate URL
+                parsed_url = urlparse(url)
+                if not parsed_url.scheme or not parsed_url.netloc:
+                    return jsonify({"error": "Invalid URL", "status": "error"}), 400
+                    
+                # Download image
+                filename = uuid.uuid4().hex + ".jpg"
+                filepath = os.path.join(UPLOAD_FOLDER, filename)
+                
+                response = requests.get(url, timeout=10, stream=True)
+                response.raise_for_status()
+                
+                # Check content type
+                content_type = response.headers.get('content-type', '')
+                if not content_type.startswith('image/'):
+                    return jsonify({"error": "URL does not point to an image", "status": "error"}), 400
+                
+                with open(filepath, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                        
+                # Validate downloaded file
+                if not validate_file_size(filepath):
+                    os.remove(filepath)
+                    return jsonify({"error": "Downloaded file too large", "status": "error"}), 400
+                    
+                result = detect_objects(filepath)
+                
+                # Clear filepath after successful processing (detect_objects handles cleanup)
+                filepath = None
+                
+                return jsonify(result)
+                
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Error downloading image from URL {url}: {e}")
+                return jsonify({"error": "Failed to download image", "status": "error"}), 400
+            except Exception as e:
+                logger.error(f"Error processing URL {url}: {e}")
+                return jsonify({"error": "Error processing image", "status": "error"}), 500
+            finally:
+                # Safe cleanup
+                if filepath and os.path.exists(filepath):
+                    try:
+                        os.remove(filepath)
+                        logger.debug(f"Cleaned up file: {filepath}")
+                    except Exception as e:
+                        logger.warning(f"Failed to cleanup file {filepath}: {e}")
+                
         elif path:
-            emojis = classify(path)
-            emo = emoji(emojis)
-            print(emojis)
-
-            return emo
-        else:
-            #default, basic HTML
+            # Handle local path (only if not in private mode)
+            if PRIVATE:
+                return jsonify({"error": "Path access disabled in private mode", "status": "error"}), 403
+                
+            if not os.path.exists(path):
+                return jsonify({"error": "File not found", "status": "error"}), 404
+                
+            if not is_allowed_file(path):
+                return jsonify({"error": "File type not allowed", "status": "error"}), 400
+                
+            result = detect_objects(path)
+            return jsonify(result)
             
-            html = ""
+        else:
+            # Return HTML form
             try:
                 with open('form.html', 'r') as file:
                     html = file.read()
-            except:
-                html = '''<form enctype="multipart/form-data" action="" method="POST">
-                    <input type="hidden" name="MAX_FILE_SIZE" value="8000000" />
-                    <input name="uploadedfile" type="file" /><br />
-                    <input type="submit" value="Upload File" />
-                </form>'''
-                    
+            except FileNotFoundError:
+                html = f'''<!DOCTYPE html>
+<html>
+<head><title>YOLOv8 Object Detection</title></head>
+<body>
+<h1>YOLOv8 Object Detection Service</h1>
+<form enctype="multipart/form-data" action="" method="POST">
+    <input type="hidden" name="MAX_FILE_SIZE" value="{MAX_FILE_SIZE}" />
+    <p>Upload an image file:</p>
+    <input name="uploadedfile" type="file" accept="image/*" required /><br /><br />
+    <input type="submit" value="Detect Objects" />
+</form>
+<p>Supported formats: {', '.join(ALLOWED_EXTENSIONS)}</p>
+<p>Max file size: {MAX_FILE_SIZE // (1024*1024)}MB</p>
+<p>Detects {len(COCO_CLASSES)} object classes</p>
+</body>
+</html>'''
             return html
-        
-    if request.method == 'POST':
-        emojis = []
-        for field, data in request.files.items():
-            fn = uuid.uuid4().hex + ".jpg"
-            print('field:', field)
-            print('filename:', data.filename)
-            print('UUID:', fn)
-            if data.filename:
-                data.save(os.path.join(FOLDER, fn)) #data.filename
-                emojis = classify(fn)
-                emo = emoji(emojis)
-                print(emojis)
-
-        #return "OK"
-        return emo
+            
+    elif request.method == 'POST':
+        filepath = None
+        try:
+            if 'uploadedfile' not in request.files:
+                return jsonify({"error": "No file uploaded", "status": "error"}), 400
+                
+            file = request.files['uploadedfile']
+            if file.filename == '':
+                return jsonify({"error": "No file selected", "status": "error"}), 400
+                
+            if not is_allowed_file(file.filename):
+                return jsonify({"error": "File type not allowed", "status": "error"}), 400
+                
+            # Save uploaded file
+            filename = uuid.uuid4().hex + '.' + file.filename.rsplit('.', 1)[1].lower()
+            filepath = os.path.join(UPLOAD_FOLDER, filename)
+            file.save(filepath)
+            
+            # Validate file size
+            if not validate_file_size(filepath):
+                os.remove(filepath)
+                return jsonify({"error": "File too large", "status": "error"}), 400
+                
+            result = detect_objects(filepath)
+            
+            # Clear filepath after successful processing (detect_objects handles cleanup)
+            filepath = None
+            
+            return jsonify(result)
+            
+        except Exception as e:
+            logger.error(f"Error processing upload: {e}")
+            return jsonify({"error": "Error processing upload", "status": "error"}), 500
+        finally:
+            # Safe cleanup
+            if filepath and os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                    logger.debug(f"Cleaned up file: {filepath}")
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup file {filepath}: {e}")
 
 if __name__ == '__main__':
-    # Debug/Development
-    IP = "0.0.0.0"
-    if PRIVATE:
-        IP = "127.0.0.1"
-
-    app.run(use_reloader=False,debug=True, host=IP, port=7776)
-
-
+    # Initialize model
+    logger.info("Starting YOLOv8 service...")
+    
+    model_loaded = initialize_yolo_model()
+    
+    
+    if not model_loaded:
+        logger.error("Failed to load YOLO model. Service will run but detection will fail.")
+        logger.error("Please ensure YOLOv8 models are available or install ultralytics: pip install ultralytics")
+    
+    # Determine host based on private mode
+    host = "127.0.0.1" if PRIVATE else "0.0.0.0"
+    
+    logger.info(f"Starting YOLOv8 service on {host}:{PORT}")
+    logger.info(f"Private mode: {PRIVATE}")
+    logger.info(f"Model loaded: {model_loaded}")
+    logger.info(f"Confidence threshold: {CONFIDENCE_THRESHOLD}")
+    logger.info(f"Supported classes: {len(COCO_CLASSES)}")
+    
+    app.run(
+        host=host,
+        port=PORT,
+        debug=False,
+        use_reloader=False,
+        threaded=True
+    )

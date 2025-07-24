@@ -1,11 +1,19 @@
 [Unit]
-Description=YOLOv8 REST API
+Description=YOLOv8 Object Detection REST API Service
+After=network.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
+Restart=always
+RestartSec=5
 User=ubuntu
-WorkingDirectory=/home/ubuntu/yolov8/
-ExecStart=/home/ubuntu/yolov8/yolo.sh
+Group=ubuntu
+WorkingDirectory=/home/sd/animal-farm/yolov8
+ExecStart=/home/sd/animal-farm/yolov8/yolo.sh
+EnvironmentFile=/home/sd/animal-farm/yolov8/.env
+StandardOutput=journal
+StandardError=journal
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target
