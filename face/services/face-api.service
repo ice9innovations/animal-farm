@@ -1,14 +1,19 @@
 [Unit]
-Description=Face REST API Service
+Description=Face Detection REST API Service
 After=network.target
 StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-Restart=0
+Restart=always
+RestartSec=5
 User=ubuntu
-WorkingDirectory=/home/ubuntu/face
-ExecStart=/home/ubuntu/face/face.sh
+Group=ubuntu
+WorkingDirectory=/home/sd/animal-farm/face
+ExecStart=/home/sd/animal-farm/face/face.sh
+EnvironmentFile=/home/sd/animal-farm/face/.env
+StandardOutput=journal
+StandardError=journal
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target
