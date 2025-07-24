@@ -12,23 +12,18 @@ Animal Farm consists of multiple specialized AI services that work together in a
 
 | Service | Port | Status | Description |
 |---------|------|--------|-------------|
+| **BLIP** | 7777 | ✅ Active | Image captioning (Bootstrapping Language-Image Pre-training) |
+| **CLIP** | 7778 | ✅ Active | Image-text similarity analysis |
 | **colors** | 7770 | ✅ Active | Color analysis and palette extraction |
 | **detectron2** | 7771 | ✅ Active | Object detection and instance segmentation (Facebook Detectron2) |
 | **face** | 7772 | ✅ Active | Face detection and analysis |
-| **yolov8** | 7773 | ✅ Active | Real-time object detection (Ultralytics YOLOv8) |
+| **inception_v3** | 7779 | ✅ Active | ImageNet classification (Google Inception v3) |
+| **metadata** | 7781 | ✅ Active | Image metadata extraction (EXIF, GPS, camera info) |
 | **nsfw** | 7774 | ✅ Active | Content safety detection (Bumble private-detector) |
 | **ocr** | 7775 | ✅ Active | Optical character recognition (PaddleOCR) |
-| **mirror-stage** | 7776 | ✅ Active | AI emoji prediction service |
-| **BLIP** | 7777 | ✅ Active | Image captioning (Bootstrapping Language-Image Pre-training) |
-| **CLIP** | 7778 | ✅ Active | Image-text similarity analysis |
-| **inception_v3** | 7779 | ✅ Active | ImageNet classification (Google Inception v3) |
-| **rtdetr** | 7780 | ✅ Active | Real-time object detection (RT-DETR transformer) |
-| **metadata** | 7781 | ✅ Active | Image metadata extraction (EXIF, GPS, camera info) |
 | **ollama-api** | 7782 | ✅ Active | Large language model analysis (Ollama/LLaMA integration) |
-| **semantic-analysis** | 7786 | ✅ Active | Semantic distance analysis and clustering |
-| **tokenizer** | 7787 | ✅ Active | Multi-word expression tokenization (sense2vec) |
-| **rtmdet** | 7788 | ✅ Active | RTMDet real-time object detection |
-| **inception_v4** | 7789 | ✅ Active | ImageNet classification (timm/PyTorch implementation) |
+| **rtdetr** | 7780 | ✅ Active | Real-time object detection (RT-DETR transformer) |
+| **yolov8** | 7773 | ✅ Active | Real-time object detection (Ultralytics YOLOv8) |
 
 ## Central API
 
@@ -77,7 +72,7 @@ Services are designed to work together through a centralized API architecture:
 
 ```bash
 # Object detection
-curl "http://localhost:7773/v2/analyze?image_url=https://example.com/image.jpg"
+curl "http://localhost:7771/v2/analyze?image_url=https://example.com/image.jpg"
 
 # Image captioning  
 curl "http://localhost:7777/v2/analyze?image_url=https://example.com/image.jpg"
@@ -150,7 +145,7 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines on:
 
 ## License
 
-This project is part of the Window to the World technology suite. See individual service directories for specific licensing information.
+This project is part of the Window to the World technology suite and as such is licensed under the GPL. Additional icensing terms are available upon request. See individual service directories for specific licensing information.
 
 ## Support
 
