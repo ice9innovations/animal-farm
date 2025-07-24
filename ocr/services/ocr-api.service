@@ -1,0 +1,19 @@
+[Unit]
+Description=PaddleOCR API Service (Modern OCR replacement)
+After=network.target
+Conflicts=tesseract-api.service
+
+[Service]
+Type=simple
+User=sd
+Group=sd
+WorkingDirectory=/home/sd/ocr
+Environment=PATH=/home/sd/anaconda3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/sd/ocr/venv/bin/python REST.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
