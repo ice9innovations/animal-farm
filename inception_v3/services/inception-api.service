@@ -1,12 +1,19 @@
 [Unit]
-Description=Inception v3 REST API Service
+Description=Inception v3 Image Classification REST API Service
+After=network.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
+Restart=always
+RestartSec=5
 User=ubuntu
-Environment="LD_PRELOAD=/usr/lib/aarch64-linux-gnu/libgomp.so.1"
-WorkingDirectory=/home/ubuntu/inception_v3
-ExecStart=/home/ubuntu/inception_v3/inception.sh
+Group=ubuntu
+WorkingDirectory=/home/sd/animal-farm/inception_v3
+ExecStart=/home/sd/animal-farm/inception_v3/inception.sh
+EnvironmentFile=/home/sd/animal-farm/inception_v3/.env
+StandardOutput=journal
+StandardError=journal
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target
