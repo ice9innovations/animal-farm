@@ -1,0 +1,15 @@
+[Unit]
+Description=NSFW REST API Service
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+User=sd
+WorkingDirectory=/home/sd/nsfw/
+#ExecStart=/home/sd/nsfw/nsfw.sh
+ExecStart=/home/sd/opennsfw2/nsfw.sh
+
+[Install]
+WantedBy=default.target
