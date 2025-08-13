@@ -14,17 +14,31 @@ from haishoku.haishoku import Haishoku
 
 from color_names import *
 
+# Load environment variables FIRST
 load_dotenv()
+
+# Step 1: Load as strings (no fallbacks)
+PRIVATE_STR = os.getenv('PRIVATE')
+PORT_STR = os.getenv('PORT')  
+COLOR_SYSTEM_STR = os.getenv('COLOR_SYSTEM')
+
+# Step 2: Validate critical environment variables
+if not PRIVATE_STR:
+    raise ValueError("PRIVATE environment variable is required")
+if not PORT_STR:
+    raise ValueError("PORT environment variable is required")
+if not COLOR_SYSTEM_STR:
+    raise ValueError("COLOR_SYSTEM environment variable is required")
+
+# Step 3: Convert to appropriate types after validation
+PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
+PORT = int(PORT_STR)
+COLOR_SYSTEM = COLOR_SYSTEM_STR.split(',')
+COLOR_SYSTEM = [system.strip().lower() for system in COLOR_SYSTEM]
 
 FOLDER = './'
 UPLOAD_FOLDER = os.path.join(FOLDER, 'uploads')
-PRIVATE = os.getenv('PRIVATE', 'False').lower() in ['true', '1', 'yes']
-PORT = os.getenv('PORT', '7770')
 MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
-
-# Color system configuration
-COLOR_SYSTEM = os.getenv('COLOR_SYSTEM', 'copic').split(',')
-COLOR_SYSTEM = [system.strip().lower() for system in COLOR_SYSTEM]
 
 # Ensure upload folder exists
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -95,6 +109,69 @@ def format_copic(name):
 def unique(sequence):
     seen = set()
     return [x for x in sequence if not (x in seen or seen.add(x))]
+
+def extract_copic_prefix(copic_name):
+    """Extract the color family prefix from a Copic color name like 'Slate (BV29)' -> 'BV'"""
+    if not copic_name:
+        return None
+    
+    # Extract code from parentheses: "Slate (BV29)" -> "BV29"
+    match = re.search(r'\(([^)]+)\)', copic_name)
+    if not match:
+        return None
+    
+    code = match.group(1)
+    
+    # Extract prefix letters: "BV29" -> "BV"
+    prefix_match = re.match(r'^([A-Z]+)', code)
+    if prefix_match:
+        return prefix_match.group(1)
+    
+    return None
+
+def get_color_temperature(copic_name):
+    """Determine color temperature based on Copic color family prefix"""
+    prefix = extract_copic_prefix(copic_name)
+    if not prefix:
+        return "neutral"
+    
+    # Temperature mapping based on Copic color families
+    cool_prefixes = ['BV', 'B', 'BG', 'G', 'YG', 'C']  # Cool colors + Cool Gray
+    warm_prefixes = ['RV', 'R', 'YR', 'Y', 'W']         # Warm colors + Warm Gray
+    # Everything else (N, T, E, F) is neutral
+    
+    if prefix in cool_prefixes:
+        return "cool"
+    elif prefix in warm_prefixes:
+        return "warm"
+    else:
+        return "neutral"
+
+def calculate_palette_temperature(palette_colors):
+    """Calculate overall palette temperature based on color distribution"""
+    if not palette_colors:
+        return "neutral"
+    
+    cool_count = warm_count = neutral_count = 0
+    
+    for color_info in palette_colors:
+        color_name = color_info.get('color', '')
+        temperature = get_color_temperature(color_name)
+        
+        if temperature == "cool":
+            cool_count += 1
+        elif temperature == "warm":
+            warm_count += 1
+        else:
+            neutral_count += 1
+    
+    # Determine overall temperature
+    if cool_count > warm_count:
+        return "cool"
+    elif warm_count > cool_count:
+        return "warm"
+    else:
+        return "neutral"
 
 def color_names(cnames, style):
     pal_json = '  {\n    "palette": [\n'
@@ -380,84 +457,166 @@ def health_check():
         },
         "endpoints": [
             "GET /health - Health check",
-            "GET /?url=<image_url> - Analyze colors from URL",
-            "GET /?path=<local_path> - Analyze colors from local file (if not private)",
-            "POST / - Upload and analyze colors in image"
+            "GET /v3/analyze?url=<image_url> - Analyze colors from URL", 
+            "GET /v3/analyze?file=<file_path> - Analyze colors from file",
+            "GET /v2/analyze?image_url=<image_url> - V2 compatibility (deprecated)",
+            "GET /v2/analyze_file?file_path=<file_path> - V2 compatibility (deprecated)"
         ]
     })
 
-@app.route('/v2/analyze_file', methods=['GET'])
-def analyze_file_v2():
-    """V2 API endpoint for direct file path analysis"""
+@app.route('/v3/analyze', methods=['GET'])
+def analyze_v3():
+    """Unified V3 API endpoint for both URL and file path analysis"""
     import time
     start_time = time.time()
     
     try:
-        # Get file path from query parameters
-        file_path = request.args.get('file_path')
-        if not file_path:
+        # Get parameters from query string
+        url = request.args.get('url')
+        file_path = request.args.get('file')
+        
+        # Validate input - exactly one parameter required
+        if not url and not file_path:
             return jsonify({
                 "service": "colors",
-                "status": "error",
+                "status": "error", 
                 "predictions": [],
-                "error": {"message": "Missing file_path parameter"},
+                "error": {"message": "Must provide either 'url' or 'file' parameter"},
                 "metadata": {"processing_time": round(time.time() - start_time, 3)}
             }), 400
         
-        # Validate file path
-        if not os.path.exists(file_path):
+        if url and file_path:
             return jsonify({
                 "service": "colors",
                 "status": "error",
                 "predictions": [],
-                "error": {"message": f"File not found: {file_path}"},
+                "error": {"message": "Cannot provide both 'url' and 'file' parameters - choose one"},
                 "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 404
+            }), 400
         
-        # Analyze directly from file (no cleanup needed - we don't own the file)
-        result = analyze_colors(file_path, cleanup=False)
+        # Handle URL input
+        if url:
+            try:
+                filename = uuid.uuid4().hex + ".jpg"
+                filepath = os.path.join(UPLOAD_FOLDER, filename)
+                response = requests.get(url, timeout=10)
+                response.raise_for_status()
+                
+                if len(response.content) > MAX_FILE_SIZE:
+                    raise ValueError("Downloaded file too large")
+                
+                with open(filepath, "wb") as file:
+                    file.write(response.content)
+                
+                # Analyze using existing function
+                result = analyze_colors(filepath)
+                
+                if result.get('status') == 'error':
+                    return jsonify({
+                        "service": "colors",
+                        "status": "error",
+                        "predictions": [],
+                        "error": {"message": result.get('error', 'Color analysis failed')},
+                        "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                    }), 500
+                
+            except requests.exceptions.RequestException as e:
+                return jsonify({
+                    "service": "colors",
+                    "status": "error", 
+                    "predictions": [],
+                    "error": {"message": f"Failed to download image: {str(e)}"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 400
+            except Exception as e:
+                return jsonify({
+                    "service": "colors",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": f"Failed to process image: {str(e)}"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 500
         
-        if result.get('status') == 'error':
-            return jsonify({
-                "service": "colors",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": result.get('error', 'Color analysis failed')},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 500
+        # Handle file path input
+        elif file_path:
+            # Validate file path
+            if not os.path.exists(file_path):
+                return jsonify({
+                    "service": "colors",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": f"File not found: {file_path}"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 404
+            
+            # Analyze directly from file (no cleanup needed - we don't own the file)
+            result = analyze_colors(file_path, cleanup=False)
+            
+            if result.get('status') == 'error':
+                return jsonify({
+                    "service": "colors",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": result.get('error', 'Color analysis failed')},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 500
         
-        # Convert to v2 format
+        # Convert to unified V3 response format
         colors_data = result.get('colors', {})
         dominant = colors_data.get('dominant', {})
         emoji_info = colors_data.get('emoji', {})
         palette = colors_data.get('palette', [])
         
-        # Create unified prediction format with separate predictions for each analysis type
+        # Create unified color prediction with temperature analysis
         predictions = []
         
-        # Primary color prediction (dominant hex color)
-        if dominant:
-            primary_prediction = {
-                "type": "primary_color",
-                "label": f"Primary Color",
-                "value": dominant.get('hex', ''),
-                "properties": {
-                    "rgb": dominant.get('rgb', [])
-                }
-            }
-            predictions.append(primary_prediction)
-        
-        # Copic color analysis prediction
         if dominant and palette:
-            copic_prediction = {
-                "type": "copic_analysis",
-                "label": dominant.get('copic', ''),
-                "value": dominant.get('hex', ''),
-                "properties": {
-                    "palette": palette[0].get('copic', []) if palette else []
+            # Get copic palette data
+            copic_palette_data = palette[0].get('copic', []) if palette else []
+            
+            # Build clean palette with temperature analysis and Prismacolor matches
+            clean_palette = []
+            for color_info in copic_palette_data:
+                # Get Prismacolor equivalent for this palette color
+                rgb_values = color_info.get('rgb', [])
+                prismacolor_match = ''
+                if rgb_values:
+                    prismacolor_match = get_color_name(rgb_values, "prismacolor") or ''
+                
+                clean_palette.append({
+                    "copic": color_info.get('color', ''),
+                    "hex": color_info.get('hex', ''),
+                    "prismacolor": prismacolor_match,
+                    "temperature": get_color_temperature(color_info.get('color', ''))
+                })
+            
+            # Calculate palette temperature
+            palette_temp = calculate_palette_temperature(copic_palette_data)
+            
+            # Get primary color temperature
+            primary_copic = dominant.get('copic', '')
+            primary_temp = get_color_temperature(primary_copic)
+            
+            # Get primary color Prismacolor match
+            primary_rgb = dominant.get('rgb', [])
+            primary_prismacolor = ''
+            if primary_rgb:
+                primary_prismacolor = get_color_name(primary_rgb, "prismacolor") or ''
+            
+            # Create unified prediction with clear semantic groupings
+            color_prediction = {
+                "primary": {
+                    "copic": primary_copic,
+                    "hex": dominant.get('hex', ''),
+                    "prismacolor": primary_prismacolor,
+                    "temperature": primary_temp
+                },
+                "palette": {
+                    "temperature": palette_temp,
+                    "colors": clean_palette
                 }
             }
-            predictions.append(copic_prediction)
+            predictions.append(color_prediction)
         
         return jsonify({
             "service": "colors",
@@ -480,240 +639,38 @@ def analyze_file_v2():
             "metadata": {"processing_time": round(time.time() - start_time, 3)}
         }), 500
 
+@app.route('/v2/analyze_file', methods=['GET'])
+def analyze_file_v2_compat():
+    """V2 file compatibility - translate parameters to V3 format"""
+    file_path = request.args.get('file_path')
+    
+    if file_path:
+        new_args = {'file': file_path}
+        with app.test_request_context('/v3/analyze', query_string=new_args):
+            return analyze_v3()
+    else:
+        with app.test_request_context('/v3/analyze'):
+            return analyze_v3()
+
 @app.route('/v2/analyze', methods=['GET'])
-def analyze_v2():
-    """V2 API endpoint with unified response format"""
-    import time
-    start_time = time.time()
+def analyze_v2_compat():
+    """V2 compatibility - translate parameters to V3 format"""
+    image_url = request.args.get('image_url')
     
-    try:
-        # Get image URL from query parameters
-        image_url = request.args.get('image_url')
-        if not image_url:
-            return jsonify({
-                "service": "colors",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": "Missing image_url parameter"},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 400
+    if image_url:
+        # Parameter translation
+        new_args = request.args.copy().to_dict()
+        new_args['url'] = image_url
+        del new_args['image_url']
         
-        # Download and process image
-        try:
-            filename = uuid.uuid4().hex + ".jpg"
-            filepath = os.path.join(UPLOAD_FOLDER, filename)
-            response = requests.get(image_url, timeout=10)
-            response.raise_for_status()
-            
-            if len(response.content) > MAX_FILE_SIZE:
-                raise ValueError("Downloaded file too large")
-            
-            with open(filepath, "wb") as file:
-                file.write(response.content)
-            
-            # Analyze using existing function
-            result = analyze_colors(filepath)
-            
-            if result.get('status') == 'error':
-                return jsonify({
-                    "service": "colors",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": result.get('error', 'Color analysis failed')},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 500
-            
-            # Convert to v2 format
-            colors_data = result.get('colors', {})
-            dominant = colors_data.get('dominant', {})
-            emoji_info = colors_data.get('emoji', {})
-            palette = colors_data.get('palette', [])
-            
-            # Create unified prediction format with separate predictions for each analysis type
-            predictions = []
-            
-            # Primary color prediction (dominant hex color)
-            if dominant:
-                primary_prediction = {
-                    "type": "primary_color",
-                    "label": f"Primary Color",
-                    "value": dominant.get('hex', ''),
-                    "properties": {
-                        "rgb": dominant.get('rgb', [])
-                    }
-                }
-                predictions.append(primary_prediction)
-            
-            # Copic color analysis prediction
-            if dominant and palette:
-                copic_prediction = {
-                    "type": "copic_analysis",
-                    "label": dominant.get('copic', ''),
-                    "value": dominant.get('hex', ''),
-                    "properties": {
-                        "palette": palette[0].get('copic', []) if palette else []
-                    }
-                }
-                predictions.append(copic_prediction)
-            
-            # Prismacolor analysis prediction  
-            #if dominant and len(palette) > 1:
-            #    prismacolor_prediction = {
-            #        "type": "prismacolor_analysis", 
-            #        "label": dominant.get('prismacolor', ''),
-            #        "value": dominant.get('hex', ''),
-            #        "properties": {
-            #            "palette": palette[1].get('prismacolor', []) if len(palette) > 1 else []
-            #        }
-            #    }
-            #    predictions.append(prismacolor_prediction)
-            
-            return jsonify({
-                "service": "colors",
-                "status": "success",
-                "predictions": predictions,
-                "metadata": {
-                    "processing_time": round(time.time() - start_time, 3),
-                    "model_info": {
-                        "framework": "Haishoku + PIL"
-                    }
-                }
-            })
-            
-        except Exception as e:
-            return jsonify({
-                "service": "colors",
-                "status": "error", 
-                "predictions": [],
-                "error": {"message": f"Failed to process image: {str(e)}"},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 500
-        
-    except Exception as e:
-        return jsonify({
-            "service": "colors",
-            "status": "error",
-            "predictions": [],
-            "error": {"message": f"Internal error: {str(e)}"},
-            "metadata": {"processing_time": round(time.time() - start_time, 3)}
-        }), 500
+        # Call V3 with translated parameters
+        with app.test_request_context('/v3/analyze', query_string=new_args):
+            return analyze_v3()
+    else:
+        # Let V3 handle validation errors
+        with app.test_request_context('/v3/analyze'):
+            return analyze_v3()
 
-@app.route('/', methods=['GET', 'POST'])
-def index():
-    if request.method == 'GET':
-        url = request.args.get('url') or request.args.get('img')
-        path = request.args.get('path')
-
-        if url:
-            try:
-                filename = uuid.uuid4().hex + ".jpg"
-                filepath = os.path.join(UPLOAD_FOLDER, filename)
-                response = requests.get(url, timeout=10)
-                response.raise_for_status()
-                
-                if len(response.content) > MAX_FILE_SIZE:
-                    return jsonify({
-                        "error": f"Image too large. Maximum size: {MAX_FILE_SIZE // 1024 // 1024}MB",
-                        "status": "error"
-                    }), 400
-                
-                with open(filepath, "wb") as file:
-                    file.write(response.content)
-                
-                result = jsonify(analyze_colors(filepath))
-                # analyze_colors already does cleanup
-                return result
-                
-            except requests.exceptions.RequestException as e:
-                # Cleanup on error
-                if 'filepath' in locals() and os.path.exists(filepath):
-                    cleanup_file(filepath)
-                return jsonify({
-                    "error": f"Failed to download image: {str(e)}",
-                    "status": "error"
-                }), 400
-            except Exception as e:
-                # Cleanup on error
-                if 'filepath' in locals() and os.path.exists(filepath):
-                    cleanup_file(filepath)
-                return jsonify({
-                    "error": f"Image processing failed: {str(e)}",
-                    "status": "error"
-                }), 500
-                
-        elif path:
-            if PRIVATE:
-                return jsonify({
-                    "error": "Local file access disabled in private mode",
-                    "status": "error"
-                }), 403
-            
-            if not os.path.exists(os.path.join(FOLDER, path)):
-                return jsonify({
-                    "error": "File not found",
-                    "status": "error"
-                }), 404
-                
-            return jsonify(analyze_colors(path))
-            
-        else:
-            try:
-                with open('form.html', 'r') as file:
-                    return file.read()
-            except FileNotFoundError:
-                return '''<!DOCTYPE html>
-<html>
-<head><title>Color Analysis API</title></head>
-<body>
-<h2>Color Analysis Service</h2>
-<form enctype="multipart/form-data" method="POST">
-    <input type="file" name="uploadedfile" accept="image/*" required><br><br>
-    <input type="submit" value="Analyze Colors">
-</form>
-<p><strong>API Usage:</strong></p>
-<ul>
-    <li>GET /?url=&lt;image_url&gt; - Analyze colors from URL</li>
-    <li>POST with file upload - Analyze colors in uploaded image</li>
-    <li>GET /health - Service health check</li>
-</ul>
-</body>
-</html>'''
-    
-    elif request.method == 'POST':
-        if not request.files:
-            return jsonify({
-                "error": "No file uploaded",
-                "status": "error"
-            }), 400
-        
-        for field_name, file_data in request.files.items():
-            if not file_data.filename:
-                continue
-                
-            try:
-                filename = uuid.uuid4().hex + ".jpg"
-                file_data.save(os.path.join(FOLDER, filename))
-                
-                file_size = os.path.getsize(os.path.join(FOLDER, filename))
-                if file_size > MAX_FILE_SIZE:
-                    cleanup_file(os.path.join(FOLDER, filename))
-                    return jsonify({
-                        "error": f"File too large. Maximum size: {MAX_FILE_SIZE // 1024 // 1024}MB",
-                        "status": "error"
-                    }), 400
-                
-                return jsonify(analyze_colors(filename))
-                
-            except Exception as e:
-                return jsonify({
-                    "error": f"File processing failed: {str(e)}",
-                    "status": "error"
-                }), 500
-        
-        return jsonify({
-            "error": "No valid file found in upload",
-            "status": "error"
-        }), 400
 
 if __name__ == '__main__':
     host = "0.0.0.0" if not PRIVATE else "127.0.0.1"

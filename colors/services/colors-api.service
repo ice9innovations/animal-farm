@@ -1,7 +1,8 @@
 [Unit]
 Description=Colors REST API Service - Color Analysis for Images
 After=network.target
-StartLimitIntervalSec=0
+StartLimitBurst=3
+StartLimitIntervalSec=300
 
 [Service]
 Type=simple
