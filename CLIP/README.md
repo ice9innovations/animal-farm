@@ -1,21 +1,39 @@
 # CLIP Image Classification Service
 
-This service provides AI-powered image classification using OpenAI's CLIP (Contrastive Language-Image Pre-training) model with custom label sets and emoji mapping.
+**Port**: 7778  
+**Framework**: OpenAI CLIP (Contrastive Language-Image Pre-training)  
+**Purpose**: AI-powered image classification with emoji mapping  
+**Status**: ✅ Active
+
+## Overview
+
+CLIP provides state-of-the-art image classification using OpenAI's CLIP model. The service analyzes images against a comprehensive set of labels and returns the most relevant classifications with confidence scores, automatically mapping labels to relevant emojis for enhanced user experience.
 
 ## Features
 
-- REST API for image classification with v1 and v2 endpoints
-- Custom label categories (animals, objects, foods, people, etc.)
-- Confidence threshold filtering
-- Emoji extraction from classifications
-- CORS support for direct browser access
-- Configurable prediction limits
+- **Modern V3 API**: Clean, unified endpoint with intuitive parameters
+- **Unified Input Handling**: Single endpoint for both URL and file path analysis
+- **Emoji Integration**: Automatic label-to-emoji mapping using local dictionary
+- **Comprehensive Labels**: Classification across multiple categories (animals, objects, people, etc.)
+- **Confidence Filtering**: Configurable thresholds for prediction quality
+- **Security**: File validation, size limits, secure cleanup
+- **Performance**: GPU acceleration with CUDA/MPS support and FP16 optimization
 
-## Setup
+## Installation
 
-### 1. Create Python Virtual Environment
+### Prerequisites
+
+- Python 3.8+
+- CUDA 11.2+ (for GPU acceleration)
+- 4GB+ VRAM (8GB+ recommended for ViT-L models)
+- 8GB+ RAM (16GB+ recommended)
+
+### 1. Environment Setup
 
 ```bash
+# Navigate to CLIP directory
+cd /home/sd/animal-farm/CLIP
+
 # Create virtual environment
 python3 -m venv clip_venv
 
@@ -23,143 +41,377 @@ python3 -m venv clip_venv
 source clip_venv/bin/activate
 
 # Install dependencies
-pip install torch torchvision clip-by-openai flask flask-cors pillow requests python-dotenv numpy
+pip install -r requirements.txt
 ```
 
-### 2. Configure Environment
+### 2. Model Installation
 
-Create a `.env` file with your configuration:
+Install OpenAI CLIP:
 
 ```bash
-# Service Settings
-PORT=7778
-PRIVATE=False
+# Install CLIP from official repository
+pip install clip-by-openai
 
-# CLIP Model Configuration
-CLIP_MODEL=ViT-B/32
-CLIP_CONFIDENCE_THRESHOLD=0.01
-CLIP_MAX_PREDICTIONS=10
-
-# API Configuration (required for emoji lookup)
-API_HOST=localhost
-API_PORT=8080
-API_TIMEOUT=2.0
+# Or install from source for latest features
+pip install git+https://github.com/openai/CLIP.git
 ```
 
-**PRIVATE mode explanation:**
-- `PRIVATE=False`: Service binds to all network interfaces (0.0.0.0) and allows local file path access via `/?path=` parameter
-- `PRIVATE=True`: Service binds to localhost only (127.0.0.1) and disables local file path access for security
+### 3. Label Configuration
 
-### 3. Run Services
+The service automatically loads classification labels from `.txt` files in the `labels/` directory:
 
-**REST API:**
 ```bash
-./CLIP.sh
+# Labels are loaded from all .txt files in labels/ folder
+ls labels/
+# animals.txt  objects.txt  people.txt  transport.txt  etc.
 ```
 
-## API Usage
+## Configuration
 
-### REST API Endpoints
+### Environment Variables (.env)
 
-**V1 Endpoints:**
-- `GET /health` - Health check
-- `GET /?url=<image_url>` - Classify image from URL
-- `GET /?path=<local_path>` - Classify local image (if not in private mode)
-- `POST /` - Upload and classify image file
+Create a `.env` file in the CLIP directory:
 
-**V2 Endpoints (Unified Response Format):**
-- `GET /v2/analyze?image_url=<image_url>` - Classify image from URL with v2 format
-- `GET /v2/analyze_file?file_path=<file_path>` - Classify image from file path with v2 format
-
-### Example Usage
-
-**Classify from URL:**
 ```bash
-curl "http://localhost:7778/?url=https://example.com/image.jpg"
+# Service Configuration
+PORT=7778                       # Service port
+PRIVATE=False                   # Access mode (False=public, True=localhost-only)
+
+# CLIP Model Configuration  
+CLIP_MODEL=ViT-B/32            # Model size (ViT-B/32, ViT-L/14, ViT-L/14@336px)
+CLIP_CONFIDENCE_THRESHOLD=0.01  # Minimum confidence for predictions
+CLIP_MAX_PREDICTIONS=10         # Maximum number of predictions to return
+
+# API Configuration (Required for emoji mapping)
+API_HOST=localhost              # Host for emoji API
+API_PORT=8080                   # Port for emoji API
+API_TIMEOUT=2.0                 # Timeout for emoji API requests
 ```
 
-**Upload file:**
+### Configuration Details
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `PORT` | Yes | Service listening port |
+| `PRIVATE` | Yes | Access control (False=public, True=localhost-only) |
+| `CLIP_MODEL` | Yes | CLIP model variant to use |
+| `CLIP_CONFIDENCE_THRESHOLD` | Yes | Minimum confidence score for predictions |
+| `CLIP_MAX_PREDICTIONS` | Yes | Maximum number of predictions to return |
+| `API_HOST` | Yes | Host for emoji mapping API |
+| `API_PORT` | Yes | Port for emoji mapping API |
+| `API_TIMEOUT` | Yes | Timeout for emoji API requests |
+
+### Model Options
+
+| Model | Size | VRAM | Speed | Accuracy | Description |
+|-------|------|------|--------|----------|-------------|
+| `ViT-B/32` | 151MB | ~2GB | Fastest | Good | Recommended for development |
+| `ViT-B/16` | 338MB | ~4GB | Fast | Better | Higher resolution processing |
+| `ViT-L/14` | 428MB | ~6GB | Slower | Best | Production quality |
+| `ViT-L/14@336px` | 428MB | ~8GB | Slowest | Highest | Maximum accuracy |
+
+## API Endpoints
+
+### Health Check
+
 ```bash
-curl -X POST -F "uploadedfile=@image.jpg" http://localhost:7778/
+GET /health
 ```
 
-**V1 Response format:**
+**Response:**
 ```json
 {
-  "CLIP": {
-    "predictions": [
-      {"label": "dog", "confidence": 0.85},
-      {"label": "animal", "confidence": 0.72}
-    ],
-    "emojis": ["🐕", "🐾"],
-    "status": "success"
-  }
+  "status": "healthy",
+  "model_status": "loaded",
+  "device": "cuda:0",
+  "num_labels": 1250
 }
 ```
 
-**V2 Response format:**
+### Analyze Image (Unified Endpoint)
+
+The unified `/v3/analyze` endpoint accepts either URL or file path input:
+
+#### Analyze Image from URL
+```bash
+GET /v3/analyze?url=<image_url>
+```
+
+**Example:**
+```bash
+curl "http://localhost:7778/v3/analyze?url=https://example.com/image.jpg"
+```
+
+#### Analyze Image from File Path
+```bash
+GET /v3/analyze?file=<file_path>
+```
+
+**Example:**
+```bash
+curl "http://localhost:7778/v3/analyze?file=/path/to/image.jpg"
+```
+
+**Input Validation:**
+- Exactly one parameter must be provided (`url` OR `file`)
+- Cannot provide both parameters simultaneously
+- Returns error if neither parameter is provided
+
+**Response Format:**
 ```json
 {
   "service": "clip",
   "status": "success",
   "predictions": [
     {
-      "type": "classification",
-      "label": "dog",
-      "confidence": 0.85,
-      "properties": {
-        "category": "animals"
-      }
+      "label": "man",
+      "confidence": 0.401,
+      "emoji": "🧑"
+    },
+    {
+      "label": "uniform",
+      "confidence": 0.211,
+      "emoji": "👔"
+    },
+    {
+      "label": "child",
+      "confidence": 0.132,
+      "emoji": "🧑"
     }
   ],
   "metadata": {
-    "processing_time": 0.234,
+    "processing_time": 0.16,
     "model_info": {
-      "name": "ViT-B/32",
-      "framework": "CLIP"
+      "framework": "OpenAI"
     }
   }
 }
 ```
 
-## Label Categories
+## Service Management
 
-The service uses curated label files from the `labels/` directory:
+### Manual Startup
 
-- `labels_animals.txt` - Animals and pets
-- `labels_coco.txt` - COCO dataset objects (default)
-- `labels_foods.txt` - Food items and dishes
-- `labels_objects.txt` - Common objects and items
-- `labels_people.txt` - People, professions, roles
-- `labels_plants.txt` - Plants and vegetation
-- `labels_sports.txt` - Sports and activities
-- `labels_transport.txt` - Vehicles and transportation
-- `labels_weather.txt` - Weather conditions
+```bash
+# Start service
+cd /home/sd/animal-farm/CLIP
+./CLIP.sh
+```
 
-See `LABELS_README.md` for detailed information about managing labels.
+### Systemd Service
 
-## Configuration Options
+```bash
+# Install service
+sudo cp services/CLIP-api.service /etc/systemd/system/
+sudo systemctl daemon-reload
 
-- `CLIP_MODEL`: CLIP model variant (ViT-B/32, ViT-B/16, ViT-L/14, etc.)
-- `CLIP_CONFIDENCE_THRESHOLD`: Minimum confidence for predictions (0.0-1.0)
-- `CLIP_MAX_PREDICTIONS`: Maximum number of predictions to return
+# Start/stop service
+sudo systemctl start CLIP-api
+sudo systemctl stop CLIP-api
 
-## Security Features
+# Enable auto-start
+sudo systemctl enable CLIP-api
 
-- File type validation
-- File size limits (8MB default)
-- Input sanitization
-- Private mode for API access control
-- Secure file cleanup
-- Database credential protection
+# Check status
+sudo systemctl status CLIP-api
+
+# View logs
+sudo journalctl -u CLIP-api -f
+```
+
+## Supported Formats
+
+### Input Formats
+- **Images**: PNG, JPG, JPEG, GIF, BMP, WebP
+- **Max Size**: 8MB
+- **Input Methods**: URL, file upload, local path
+
+### Output Features
+- **Multi-label Classification**: Returns multiple relevant labels per image
+- **Confidence Scores**: Probability scores for each prediction
+- **Emoji Mapping**: Automatic label-to-emoji conversion
+- **Configurable Filtering**: Adjustable confidence thresholds
+- **Performance Metadata**: Processing time and model information
+
+## Performance Optimization
+
+### Hardware Requirements
+
+| Component | Minimum | Recommended | Notes |
+|-----------|---------|-------------|--------|
+| GPU | GTX 1060 6GB | RTX 3080+ | CUDA 11.2+ required |
+| RAM | 8GB | 16GB+ | Depends on model and label count |
+| Storage | 1GB | 2GB+ | Models + labels + temp files |
+
+### Optimization Settings
+
+```python
+# Model configuration (in REST.py)
+CLIP_MODEL = 'ViT-B/32'  # Faster inference
+CLIP_CONFIDENCE_THRESHOLD = 0.05  # Filter low-confidence predictions
+CLIP_MAX_PREDICTIONS = 5  # Limit output size
+
+# GPU optimization
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model = model.half()  # FP16 for 50% VRAM reduction
+```
+
+## Error Handling
+
+### Common Errors
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| "Model not loaded" | CLIP not installed | Install clip-by-openai package |
+| "File too large" | File > 8MB | Resize or compress image |
+| "Invalid URL" | Malformed URL | Check URL format |
+| "No labels loaded" | Missing label files | Ensure .txt files exist in labels/ |
+| "CUDA out of memory" | Insufficient VRAM | Use smaller model or CPU mode |
+
+### Error Response Format
+
+```json
+{
+  "service": "clip",
+  "status": "error",
+  "predictions": [],
+  "error": {"message": "File not found: /path/to/image.jpg"},
+  "metadata": {"processing_time": 0.001}
+}
+```
+
+## Integration Examples
+
+### Python Integration
+
+```python
+import requests
+
+# URL input
+response = requests.get(
+    "http://localhost:7778/v3/analyze",
+    params={"url": "https://example.com/image.jpg"}
+)
+
+# File input
+response = requests.get(
+    "http://localhost:7778/v3/analyze",
+    params={"file": "/path/to/image.jpg"}
+)
+
+result = response.json()
+if result["status"] == "success":
+    predictions = result["predictions"]
+    for pred in predictions:
+        label = pred["label"]
+        confidence = pred["confidence"]
+        emoji = pred.get("emoji", "")
+        print(f"{label} ({confidence:.3f}) {emoji}")
+```
+
+### JavaScript Integration
+
+```javascript
+// URL input
+const response = await fetch(
+  'http://localhost:7778/v3/analyze?url=https://example.com/image.jpg'
+);
+
+// File input
+const response = await fetch(
+  'http://localhost:7778/v3/analyze?file=/path/to/image.jpg'
+);
+
+const result = await response.json();
+if (result.status === 'success') {
+  result.predictions.forEach(pred => {
+    console.log(`${pred.label} (${pred.confidence.toFixed(3)}) ${pred.emoji || ''}`);
+  });
+}
+```
 
 ## Troubleshooting
 
-1. **Model loading errors**: Ensure CLIP is installed: `pip install clip-by-openai`
-2. **Import errors**: Install dependencies: `pip install torch torchvision`
-3. **Low confidence predictions**: Adjust `CLIP_CONFIDENCE_THRESHOLD` in .env
-4. **API connection issues**: Verify API_HOST and API_PORT settings
+### Installation Issues
 
-## Systemd Service
+**Problem**: Import errors for CLIP
+```bash
+# Solution: Install CLIP package
+pip install clip-by-openai
 
-Service files are available in the `services/` directory for production deployment.
+# Verify installation
+python -c "import clip; print('CLIP installed successfully')"
+```
+
+**Problem**: CUDA not available
+```bash
+# Check CUDA installation
+python -c "import torch; print(torch.cuda.is_available())"
+
+# Check CUDA version
+nvidia-smi
+```
+
+### Runtime Issues
+
+**Problem**: Service fails to start
+```bash
+# Check port availability
+netstat -tlnp | grep 7778
+
+# Check environment variables
+grep -v '^#' .env
+
+# Check logs
+tail -f /var/log/syslog | grep CLIP
+```
+
+**Problem**: No predictions returned
+```bash
+# Check confidence threshold (may be too high)
+# Lower CLIP_CONFIDENCE_THRESHOLD in .env
+
+# Verify label files exist
+ls -la labels/*.txt
+```
+
+**Problem**: Emoji mapping failures
+```bash
+# Verify emoji API is running
+curl http://localhost:8080/emoji_mappings.json
+
+# Check API configuration in .env
+grep API_ .env
+```
+
+### Performance Issues
+
+**Problem**: Slow inference
+- Use smaller model (`ViT-B/32` instead of `ViT-L/14`)
+- Enable FP16 precision for supported GPUs
+- Reduce `CLIP_MAX_PREDICTIONS` to limit output processing
+
+**Problem**: Memory errors
+- Reduce image size before processing
+- Use CPU instead of GPU for small workloads
+- Ensure sufficient system RAM and VRAM
+
+## Security Considerations
+
+### Access Control
+- Set `PRIVATE=True` for localhost-only access
+- Use reverse proxy with authentication for public access
+- Validate all input URLs and file paths
+
+### File Security
+- Automatic cleanup of temporary files
+- File type validation prevents executable uploads
+- Size limits prevent DoS attacks
+- Path traversal protection
+
+---
+
+**Documentation Version**: 1.0  
+**Last Updated**: 2025-08-13  
+**Service Version**: Production  
+**Maintainer**: Animal Farm ML Team

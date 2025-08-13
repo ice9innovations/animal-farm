@@ -1,17 +1,18 @@
 [Unit]
 Description=CLIP REST API Service
 After=network.target
-StartLimitIntervalSec=0
+StartLimitBurst=3
+StartLimitIntervalSec=300
 
 [Service]
 Type=simple
 Restart=always
 RestartSec=5
-User=ubuntu
-Group=ubuntu
-WorkingDirectory=/home/sd/animal-farm/CLIP
-ExecStart=/home/sd/animal-farm/CLIP/CLIP.sh
-EnvironmentFile=/home/sd/animal-farm/CLIP/.env
+User=sd
+Group=sd
+WorkingDirectory=/home/sd/CLIP
+ExecStart=/home/sd/CLIP/CLIP.sh
+EnvironmentFile=/home/sd/CLIP/.env
 StandardOutput=journal
 StandardError=journal
 
