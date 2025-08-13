@@ -1,21 +1,37 @@
 # BLIP Image Captioning Service
 
-This service provides AI-powered image captioning using the BLIP (Bootstrapping Language-Image Pre-training) model.
+**Port**: 7777  
+**Framework**: Salesforce BLIP (Bootstrapping Language-Image Pre-training)  
+**Purpose**: AI-powered image captioning with emoji mapping  
+**Status**: ✅ Active
+
+## Overview
+
+BLIP provides state-of-the-art image captioning using Salesforce's BLIP model. The service analyzes images and generates natural language descriptions, automatically mapping words to relevant emojis for enhanced user experience.
 
 ## Features
 
-- REST API for image captioning with v1 and v2 endpoints
-- Multiple model sizes for different performance needs
-- Secure file handling with validation
-- Comprehensive error handling and logging
-- Emoji extraction from captions
-- CORS support for direct browser access
+- **Modern V3 API**: Clean, unified endpoint with intuitive parameters
+- **Unified Input Handling**: Single endpoint for both URL and file path analysis
+- **Emoji Integration**: Automatic word-to-emoji mapping using local dictionary
+- **Model Flexibility**: Support for multiple BLIP model sizes
+- **Security**: File validation, size limits, secure cleanup
+- **Performance**: GPU acceleration with CUDA/MPS support
 
-## Setup
+## Installation
 
-### 1. Create Python Virtual Environment
+### Prerequisites
+
+- Python 3.8+
+- CUDA 11.2+ (for GPU acceleration)
+- 8GB+ RAM (16GB+ recommended for large models)
+
+### 1. Environment Setup
 
 ```bash
+# Navigate to BLIP directory
+cd /home/sd/animal-farm/BLIP
+
 # Create virtual environment
 python3 -m venv blip_venv
 
@@ -23,112 +39,360 @@ python3 -m venv blip_venv
 source blip_venv/bin/activate
 
 # Install dependencies
-pip install torch torchvision transformers flask flask-cors pillow requests python-dotenv nltk
+pip install -r requirements.txt
 ```
 
-### 2. Download BLIP Models
+### 2. Model Download
 
-First, you need to install the BLIP model implementation:
-
-```bash
-# Clone BLIP repository
-git clone https://github.com/salesforce/BLIP.git
-cp -r BLIP/models ./
-```
-
-Then download the required model:
+Download the BLIP model files:
 
 ```bash
+# Download base model (recommended, 113MB)
+wget https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base.pth
+
+# Download large filtered model (highest quality, 447MB)
 wget https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base_capfilt_large.pth
 ```
 
-### 3. Configure Environment
+### 3. BLIP Repository Setup
 
-Create a `.env` file with your configuration:
+Install the BLIP model implementation:
 
 ```bash
-# Service Settings
-PORT=7777
-PRIVATE=False
+# Clone BLIP repository (temporary)
+git clone https://github.com/salesforce/BLIP.git temp_blip
 
-# API Configuration (required for emoji lookup)
-API_HOST=localhost
-API_PORT=8080
-API_TIMEOUT=2.0
+# Copy model files
+cp -r temp_blip/models ./
+
+# Clean up
+rm -rf temp_blip
 ```
 
-**PRIVATE mode explanation:**
-- `PRIVATE=False`: Service binds to all network interfaces (0.0.0.0) and allows local file path access via `/?path=` parameter
-- `PRIVATE=True`: Service binds to localhost only (127.0.0.1) and disables local file path access for security
+## Configuration
 
-### 4. Run Services
+### Environment Variables (.env)
 
-**REST API:**
+Create a `.env` file in the BLIP directory:
+
 ```bash
-./BLIP.sh
+# Service Configuration
+PORT=7777                    # Service port (default: 7777)
+PRIVATE=False               # Access mode (False=public, True=localhost-only)
+
+# API Configuration (Required for emoji mapping)
+API_HOST=localhost          # Host for emoji API
+API_PORT=8080              # Port for emoji API  
+API_TIMEOUT=2.0            # Timeout for emoji API requests
+
+
 ```
-## API Usage
 
-### REST API Endpoints
+### Configuration Details
 
-**V1 Endpoints:**
-- `GET /health` - Health check
-- `GET /?url=<image_url>` - Caption image from URL
-- `GET /?path=<local_path>` - Caption local image (if not in private mode)
-- `POST /` - Upload and caption image file
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PORT` | Yes | - | Service listening port |
+| `PRIVATE` | Yes | - | Access control (False=public, True=localhost-only) |
+| `API_HOST` | Yes | - | Host for emoji mapping API |
+| `API_PORT` | Yes | - | Port for emoji mapping API |
+| `API_TIMEOUT` | Yes | - | Timeout for emoji API requests |
 
-**V2 Endpoints (Unified Response Format):**
-- `GET /v2/analyze?image_url=<image_url>` - Caption image from URL with v2 format
-- `GET /v2/analyze_file?file_path=<file_path>` - Caption image from file path with v2 format
+### Model Selection
 
-### Example Usage
+The service uses `model_base_capfilt_large.pth` by default. Available models:
 
-**Caption from URL:**
+| Model | Size | Quality | Speed | Description |
+|-------|------|---------|-------|-------------|
+| `model_base_14M.pth` | 14MB | Low | Fastest | Quick captions |
+| `model_base.pth` | 113MB | Good | Fast | Balanced performance |
+| `model_large.pth` | 447MB | High | Slower | Better quality |
+| `model_base_capfilt_large.pth` | 447MB | Highest | Slowest | Production quality |
+
+## API Endpoints
+
+### Health Check
+
 ```bash
-curl "http://localhost:7777/?url=https://example.com/image.jpg"
+GET /health
 ```
 
-**Upload file:**
-```bash
-curl -X POST -F "uploadedfile=@image.jpg" http://localhost:7777/
-```
-
-**Response format:**
+**Response:**
 ```json
 {
-  "BLIP": {
-    "caption": "a dog sitting on a chair",
-    "emojis": ["🐕", "🪑"],
-    "status": "success"
-  }
+  "status": "healthy",
+  "model_status": "loaded",
+  "device": "cuda:0"
 }
 ```
 
-## Security Features
+### Analyze Image (Unified Endpoint)
 
-- File type validation
-- File size limits (8MB default)
-- Input sanitization
-- Private mode for API access control
-- Secure file cleanup
-- Database credential protection
+The unified `/v3/analyze` endpoint accepts either URL or file path input:
+
+#### Analyze Image from URL
+```bash
+GET /v3/analyze?url=<image_url>
+```
+
+**Example:**
+```bash
+curl "http://localhost:7777/v3/analyze?url=https://example.com/image.jpg"
+```
+
+#### Analyze Image from File Path
+```bash
+GET /v3/analyze?file=<file_path>
+```
+
+**Example:**
+```bash
+curl "http://localhost:7777/v3/analyze?file=/path/to/image.jpg"
+```
+
+**Input Validation:**
+- Exactly one parameter must be provided (`url` OR `file`)
+- Cannot provide both parameters simultaneously
+- Returns error if neither parameter is provided
+
+**Response Format:**
+```json
+{
+  "metadata": {
+    "model_info": {
+      "framework": "Salesforce"
+    },
+    "processing_time": 0.641
+  },
+  "predictions": [
+    {
+      "emoji_mappings": [
+        {
+          "emoji": "🧑",
+          "word": "soldier"
+        },
+        {
+          "emoji": "👩",
+          "word": "girl"
+        },
+        {
+          "emoji": "🌼",
+          "word": "bouquet"
+        }
+      ],
+      "text": "a soldier giving a little girl a bouquet"
+    }
+  ],
+  "service": "blip",
+  "status": "success"
+}
+```
+
+## Service Management
+
+### Manual Startup
+
+```bash
+# Start service
+cd /home/sd/animal-farm/BLIP
+./BLIP.sh
+```
+
+### Systemd Service
+
+```bash
+# Install service
+sudo cp services/BLIP-api.service /etc/systemd/system/
+sudo systemctl daemon-reload
+
+# Start/stop service
+sudo systemctl start BLIP-api
+sudo systemctl stop BLIP-api
+
+# Enable auto-start
+sudo systemctl enable BLIP-api
+
+# Check status
+sudo systemctl status BLIP-api
+
+# View logs
+sudo journalctl -u BLIP-api -f
+```
+
+## Supported Formats
+
+### Input Formats
+- **Images**: PNG, JPG, JPEG, GIF, BMP, WebP
+- **Max Size**: 8MB
+- **Input Methods**: URL, file upload, local path
+
+### Output Features
+- **Caption Generation**: Natural language descriptions
+- **Emoji Mapping**: Automatic word-to-emoji conversion
+- **Multi-word Expressions**: Support for compound terms
+- **Confidence Scores**: Processing time metadata
+
+## Performance Optimization
+
+### Hardware Requirements
+
+| Component | Minimum | Recommended | Notes |
+|-----------|---------|-------------|--------|
+| GPU | GTX 1060 6GB | RTX 3080+ | CUDA 11.2+ required |
+| RAM | 8GB | 16GB+ | Depends on model size |
+| Storage | 2GB | 5GB+ | Models + temp files |
+
+### Optimization Settings
+
+```python
+# Model precision (in REST.py)
+use_fp16 = False  # Set to True for RTX cards with sufficient VRAM
+
+# Batch processing
+num_beams = 1     # Faster inference
+max_length = 20   # Shorter captions for speed
+```
+
+## Error Handling
+
+### Common Errors
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| "Model not loaded" | Missing model file | Download required model |
+| "File too large" | File > 8MB | Resize or compress image |
+| "Invalid URL" | Malformed URL | Check URL format |
+| "Connection timeout" | Network issues | Check internet connection |
+| "CUDA out of memory" | Insufficient VRAM | Use smaller model or reduce batch size |
+
+### Error Response Format
+
+```json
+{
+  "service": "blip",
+  "status": "error",
+  "predictions": [],
+  "error": {"message": "File not found: /path/to/image.jpg"},
+  "metadata": {"processing_time": 0.001}
+}
+```
+
+## Integration Examples
+
+### Python Integration
+
+```python
+import requests
+
+# URL input
+response = requests.get(
+    "http://localhost:7777/v3/analyze",
+    params={"url": "https://example.com/image.jpg"}
+)
+
+# File input
+response = requests.get(
+    "http://localhost:7777/v3/analyze",
+    params={"file": "/path/to/image.jpg"}
+)
+
+result = response.json()
+if result["status"] == "success":
+    caption = result["predictions"][0]["text"]
+    emojis = [m["emoji"] for m in result["predictions"][0]["emoji_mappings"]]
+    print(f"Caption: {caption}")
+    print(f"Emojis: {' '.join(emojis)}")
+```
+
+### JavaScript Integration
+
+```javascript
+// URL input
+const response = await fetch(
+  'http://localhost:7777/v3/analyze?url=https://example.com/image.jpg'
+);
+
+// File input
+const response = await fetch(
+  'http://localhost:7777/v3/analyze?file=/path/to/image.jpg'
+);
+
+const result = await response.json();
+if (result.status === 'success') {
+  const prediction = result.predictions[0];
+  console.log('Caption:', prediction.text);
+  console.log('Emojis:', prediction.emoji_mappings.map(m => m.emoji).join(' '));
+}
+```
 
 ## Troubleshooting
 
-1. **Model loading errors**: Ensure BLIP models are downloaded and the `models/` directory exists
-2. **Import errors**: Install BLIP dependencies: `pip install transformers torch torchvision`
-3. **Discord bot not responding**: Check token and channel configuration
-4. **API connection issues**: Verify API_URL and API_PORT settings
+### Installation Issues
 
-## Model Information
+**Problem**: Import errors for BLIP models
+```bash
+# Solution: Ensure models directory exists
+ls -la models/
+# Should contain: blip.py, vit.py, etc.
+```
 
-| Model | Size | Description |
-|-------|------|-------------|
-| model_base_14M.pth | 14M | Fastest, lowest quality |
-| model_base.pth | 113M | Good balance (recommended) |
-| model_large.pth | 447M | Better quality, slower |
-| model_base_capfilt_large.pth | 447M | Highest quality |
+**Problem**: CUDA not available
+```bash
+# Check CUDA installation
+python -c "import torch; print(torch.cuda.is_available())"
 
-## Systemd Service
+# Check CUDA version
+nvidia-smi
+```
 
-Service files are available in the `services/` directory for production deployment.
+### Runtime Issues
+
+**Problem**: Service fails to start
+```bash
+# Check port availability
+netstat -tlnp | grep 7777
+
+# Check logs
+tail -f /var/log/syslog | grep BLIP
+```
+
+**Problem**: Emoji mapping failures
+```bash
+# Verify emoji API is running
+curl http://localhost:8080/emoji_mappings.json
+
+# Check API configuration in .env
+grep API_ .env
+```
+
+### Performance Issues
+
+**Problem**: Slow inference
+- Use smaller model (`model_base.pth` instead of `model_base_capfilt_large.pth`)
+- Enable FP16 precision for RTX cards
+- Reduce `max_length` and use `num_beams=1`
+
+**Problem**: Memory errors
+- Reduce image size before processing
+- Use CPU instead of GPU for small workloads
+- Ensure sufficient swap space
+
+## Security Considerations
+
+### Access Control
+- Set `PRIVATE=True` for localhost-only access
+- Use reverse proxy with authentication for public access
+- Validate all input URLs and file paths
+
+### File Security
+- Automatic cleanup of temporary files
+- File type validation prevents executable uploads
+- Size limits prevent DoS attacks
+- Path traversal protection
+
+---
+
+**Documentation Version**: 1.0  
+**Last Updated**: 2025-08-13  
+**Service Version**: Production  
+**Maintainer**: Animal Farm ML Team

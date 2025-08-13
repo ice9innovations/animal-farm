@@ -1,17 +1,18 @@
 [Unit]
 Description=BLIP REST API Service
 After=network.target
-StartLimitIntervalSec=0
+StartLimitBurst=3
+StartLimitIntervalSec=300
 
 [Service]
 Type=simple
-Restart=always
+Restart=on-failure
 RestartSec=5
-User=ubuntu
-Group=ubuntu
-WorkingDirectory=/home/sd/animal-farm/BLIP
-ExecStart=/home/sd/animal-farm/BLIP/BLIP.sh
-EnvironmentFile=/home/sd/animal-farm/BLIP/.env
+User=sd
+Group=sd
+WorkingDirectory=/home/sd/BLIP
+ExecStart=/home/sd/BLIP/BLIP.sh
+EnvironmentFile=/home/sd/BLIP/.env
 StandardOutput=journal
 StandardError=journal
 
