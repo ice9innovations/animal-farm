@@ -1,12 +1,13 @@
 [Unit]
 Description=RT-DETR Object Detection REST API Service
 After=network.target
-StartLimitIntervalSec=0
+StartLimitBurst=3
+StartLimitIntervalSec=300
 
 [Service]
 Type=simple
 Restart=always
-RestartSec=
+RestartSec=10
 User=sd
 WorkingDirectory=/home/sd/animal-farm/rtdetr
 ExecStart=/home/sd/animal-farm/rtdetr/rtdetr.sh

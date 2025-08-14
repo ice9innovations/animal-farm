@@ -1,138 +1,348 @@
-English | [简体中文](README_cn.md)
+# RT-DETR Object Detection Service
 
+**Port**: 7780  
+**Framework**: RT-DETR (Real-Time Detection Transformer)  
+**Purpose**: Real-time object detection with transformer architecture and emoji mapping  
+**Status**: ✅ Active
 
-<h2 align="center">RT-DETR: DETRs Beat YOLOs on Real-time Object Detection</h2>
-<p align="center">
-    <!-- <a href="https://github.com/lyuwenyu/RT-DETR/blob/main/LICENSE">
-        <img alt="license" src="https://img.shields.io/badge/LICENSE-Apache%202.0-blue">
-    </a> -->
-    <a href="https://github.com/lyuwenyu/RT-DETR/blob/main/LICENSE">
-        <img alt="license" src="https://img.shields.io/github/license/lyuwenyu/RT-DETR">
-    </a>
-    <a href="https://github.com/lyuwenyu/RT-DETR/pulls">
-        <img alt="prs" src="https://img.shields.io/github/issues-pr/lyuwenyu/RT-DETR">
-    </a>
-    <a href="https://github.com/lyuwenyu/RT-DETR/issues">
-        <img alt="issues" src="https://img.shields.io/github/issues/lyuwenyu/RT-DETR?color=pink">
-    </a>
-    <a href="https://github.com/lyuwenyu/RT-DETR">
-        <img alt="issues" src="https://img.shields.io/github/stars/lyuwenyu/RT-DETR">
-    </a>
-    <a href="https://arxiv.org/abs/2304.08069">
-        <img alt="arXiv" src="https://img.shields.io/badge/arXiv-2304.08069-red">
-    </a>
-    <a href="mailto: lyuwenyu@foxmail.com">
-        <img alt="emal" src="https://img.shields.io/badge/contact_me-email-yellow">
-    </a>
-</p>
+## Overview
+
+RT-DETR provides state-of-the-art real-time object detection using the RT-DETR (Real-Time Detection Transformer) model. The service detects 80 COCO object classes in images with confidence scores, bounding boxes, and automatic emoji mapping for enhanced user experience.
+
+## Features
+
+- **Modern V3 API**: Clean, unified endpoint with intuitive parameters
+- **Unified Input Handling**: Single endpoint for both URL and file path analysis
+- **COCO Object Detection**: Detects 80 common object classes
+- **Advanced IoU Filtering**: Removes overlapping detections for cleaner results
+- **Emoji Integration**: Automatic word-to-emoji mapping using local dictionary
+- **GPU Acceleration**: CUDA support for fast inference with fallback to CPU
+- **Confidence Filtering**: Configurable detection thresholds
+- **Security**: File validation, size limits, secure cleanup
+
+## Installation
+
+### Prerequisites
+
+- Python 3.8+
+- CUDA-compatible GPU (recommended) or CPU
+- 8GB+ RAM (16GB+ recommended for GPU)
+- 15GB+ disk space for models
+
+### 1. Environment Setup
+
+```bash
+# Navigate to RT-DETR directory
+cd /home/sd/animal-farm/rtdetr
+
+# Create virtual environment
+python3 -m venv venv
+
+# Activate virtual environment
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### 2. Model Installation
+
+```bash
+# RT-DETR model will be loaded automatically from rtdetr_pytorch/
+# The default model rtdetr_r50vd_6x_coco_from_paddle.pth should be present
+# If not, download it from the RT-DETR repository
+
+# Verify model file exists
+ls rtdetr_pytorch/rtdetr_r50vd_6x_coco_from_paddle.pth
+```
+
+### 3. Hardware Configuration
+
+```bash
+# Verify CUDA availability (optional)
+python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
+
+# Check GPU memory
+nvidia-smi  # If CUDA GPU available
+```
+
+## Configuration
+
+### Environment Variables (.env)
+
+Create a `.env` file in the rtdetr directory:
+
+```bash
+# Service Configuration
+PORT=7780                           # Service port
+PRIVATE=False                       # Access mode (False=public, True=localhost-only)
+
+# API Configuration (Required for emoji mapping)
+API_HOST=localhost                  # Host for emoji API
+API_PORT=8080                      # Port for emoji API
+API_TIMEOUT=2.0                    # Timeout for emoji API requests
+```
+
+### Configuration Details
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PORT` | Yes | - | Service listening port |
+| `PRIVATE` | Yes | - | Access control (False=public, True=localhost-only) |
+| `API_HOST` | Yes | - | Host for emoji mapping API |
+| `API_PORT` | Yes | - | Port for emoji mapping API |
+| `API_TIMEOUT` | Yes | - | Timeout for emoji API requests |
+
+## API Endpoints
+
+### Health Check
+```bash
+GET /health
+```
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "model": "RT-DETR R50",
+  "device": "cuda:0",
+  "model_loaded": true,
+  "emoji_service": "local_file"
+}
+```
+
+### V3 Unified Analysis (Recommended)
+```bash
+GET /v3/analyze?url=<image_url>
+GET /v3/analyze?file=<file_path>
+```
+
+**Parameters:**
+- `url` (string): Image URL to analyze
+- `file` (string): Local file path to analyze
+
+**Note:** Exactly one parameter (`url` or `file`) must be provided.
+
+**Response:**
+```json
+{
+  "service": "rtdetr",
+  "status": "success",
+  "predictions": [
+    {
+      "label": "person",
+      "confidence": 0.971,
+      "bbox": {
+        "x": 247,
+        "y": 6,
+        "width": 391,
+        "height": 446
+      },
+      "emoji": "🧑"
+    },
+    {
+      "label": "teddy bear",
+      "confidence": 0.942,
+      "bbox": {
+        "x": 260,
+        "y": 158,
+        "width": 115,
+        "height": 119
+      },
+      "emoji": "🧸"
+    },
+    {
+      "label": "person",
+      "confidence": 0.892,
+      "bbox": {
+        "x": 13,
+        "y": 24,
+        "width": 211,
+        "height": 428
+      },
+      "emoji": "🧑"
+    }
+  ],
+  "metadata": {
+    "processing_time": 0.127,
+    "model_info": {
+      "framework": "PyTorch"
+    }
+  }
+}
+```
+
+### V2 Compatibility Routes
+```bash
+GET /v2/analyze?image_url=<url>       # Translates to V3 url parameter
+GET /v2/analyze_file?file_path=<path>  # Translates to V3 file parameter
+```
+
+## Service Management
+
+### Manual Startup
+```bash
+# Ensure emoji API is running (required dependency)
+# Start RT-DETR service
+
+# Activate virtual environment
+source venv/bin/activate
+
+# Start service
+python REST.py
+```
+
+### Systemd Service
+```bash
+# Install service file
+sudo cp services/rtdetr-api.service /etc/systemd/system/
+
+# Enable and start service
+sudo systemctl daemon-reload
+sudo systemctl enable rtdetr-api.service
+sudo systemctl start rtdetr-api.service
+
+# Check status
+sudo systemctl status rtdetr-api.service
+```
+
+## Performance Optimization
+
+### Hardware Requirements
+
+**Minimum:**
+- 8GB RAM
+- 4-core CPU
+- 15GB disk space
+
+**Recommended:**
+- 16GB+ RAM
+- 8-core CPU
+- RTX 3080 or better GPU
+- NVMe SSD storage
+
+### Model Performance
+
+| Configuration | Speed | mAP | RAM Usage | Use Case |
+|--------------|-------|-----|-----------|----------|
+| CPU Mode | Medium | 53.1 | 4GB | Development/Testing |
+| GPU Mode | Fast | 53.1 | 8GB | Production |
+
+### Optimization Settings
+
+- **Confidence Threshold**: 0.25 (filters low-confidence detections)
+- **IoU Threshold**: 0.3 (removes overlapping detections)
+- **GPU Acceleration**: Automatically detected and enabled
+- **Batch Processing**: Single image optimized for API responses
+
+## Error Handling
+
+### Common Errors
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `Model not loaded` | RT-DETR model failed to load | Check model files and GPU drivers |
+| `File not found` | Invalid file path | Verify file exists and path is correct |
+| `File too large` | Image exceeds 8MB limit | Resize image or increase MAX_FILE_SIZE |
+| `Invalid URL format` | Malformed image URL | Check URL syntax and accessibility |
+| `URL does not point to an image` | Non-image content type | Ensure URL serves image content |
+
+### Error Response Format
+```json
+{
+  "service": "rtdetr",
+  "status": "error",
+  "predictions": [],
+  "error": {"message": "Detailed error description"},
+  "metadata": {"processing_time": 0.001}
+}
+```
+
+## Integration Examples
+
+### Python
+```python
+import requests
+
+# Object detection from URL
+response = requests.get('http://localhost:7780/v3/analyze', 
+                       params={'url': 'https://example.com/image.jpg'})
+data = response.json()
+
+# Object detection from file
+response = requests.get('http://localhost:7780/v3/analyze',
+                       params={'file': '/path/to/image.jpg'})
+result = response.json()
+
+# Process results
+for prediction in result['predictions']:
+    label = prediction['label']
+    confidence = prediction['confidence']
+    bbox = prediction['bbox']
+    emoji = prediction.get('emoji', '')
+    print(f"{emoji} {label}: {confidence:.2f} at ({bbox['x']}, {bbox['y']})")
+```
+
+### JavaScript
+```javascript
+// Object detection from URL
+const response = await fetch('http://localhost:7780/v3/analyze?' + 
+    new URLSearchParams({url: 'https://example.com/image.jpg'}));
+const data = await response.json();
+
+// Process detections
+data.predictions.forEach(prediction => {
+    console.log(`${prediction.emoji || ''} ${prediction.label}: ${prediction.confidence}`);
+    console.log(`Location: (${prediction.bbox.x}, ${prediction.bbox.y})`);
+    console.log(`Size: ${prediction.bbox.width}x${prediction.bbox.height}`);
+});
+```
+
+## Troubleshooting
+
+### Installation Issues
+- **CUDA not detected**: Install NVIDIA drivers and CUDA toolkit
+- **Model loading fails**: Ensure model file is present and accessible
+- **Dependencies missing**: Use requirements.txt in virtual environment
+
+### Runtime Issues
+- **Slow inference**: Ensure GPU is detected, check GPU memory
+- **Memory errors**: Use CPU mode or increase system RAM
+- **Connection refused**: Verify service is running on correct port
+
+### Performance Issues
+- **Low detection accuracy**: Check confidence threshold settings
+- **Too many false positives**: Increase confidence threshold
+- **Missing objects**: Decrease confidence threshold or check IoU settings
+
+## Security Considerations
+
+### Access Control
+- Set `PRIVATE=True` for localhost-only access
+- Use reverse proxy (nginx) for production deployment
+- Implement rate limiting for public endpoints
+
+### File Security
+- File uploads validated and cleaned up automatically
+- Size limits prevent resource exhaustion
+- Only allowed image formats accepted
+
+## Supported Formats
+
+### Input Formats
+- **Images**: PNG, JPG, JPEG, GIF, BMP, WebP
+- **Max Size**: 8MB
+- **Input Methods**: URL, file upload, local path
+
+### Output Features
+- **Object Detection**: 80 COCO object classes with bounding boxes
+- **Confidence Scores**: Detection confidence values (0.0-1.0)
+- **Emoji Mapping**: Automatic object-to-emoji conversion
+- **IoU Filtering**: Advanced overlapping detection removal
 
 ---
 
-
-This is the official implementation of papers 
-- [DETRs Beat YOLOs on Real-time Object Detection](https://arxiv.org/abs/2304.08069)
-- [RT-DETRv2: Improved Baseline with Bag-of-Freebies for Real-Time Detection Transformer](https://arxiv.org/abs/2407.17140)
-
-
-<details>
-<summary>Fig</summary>
-
-<table><tr>
-<td><img src=https://github.com/lyuwenyu/RT-DETR/assets/77494834/0ede1dc1-a854-43b6-9986-cf9090f11a61 border=0 width=500></td>
-<td><img src=https://github.com/user-attachments/assets/437877e9-1d4f-4d30-85e8-aafacfa0ec56 border=0 width=500></td>
-</tr></table>
-</details>
-
-
-## 🚀 Updates
-- \[2024.11.28\] Add torch tool for parameters and flops statistics. see [run_profile.py](./rtdetrv2_pytorch/tools/run_profile.py)
-- \[2024.10.10\] Add sliced inference support for small object detecion. [#468](https://github.com/lyuwenyu/RT-DETR/pull/468)
-- \[2024.09.23\] Add ✅[Regnet and DLA34](https://github.com/lyuwenyu/RT-DETR/tree/main/rtdetr_pytorch) for RTDETR.
-- \[2024.08.27\] Add hubconf.py file to support torch hub.
-- \[2024.08.22\] Improve the performance of ✅ [RT-DETRv2-S](./rtdetrv2_pytorch/) to 48.1 mAP (<font color=green>+1.6</font> compared to RT-DETR-R18).
-- \[2024.07.24\] Release ✅ [RT-DETRv2](./rtdetrv2_pytorch/)!
-- \[2024.02.27\] Our work has been accepted to CVPR 2024!
-- \[2024.01.23\] Fix difference on data augmentation with paper in rtdetr_pytorch [#84](https://github.com/lyuwenyu/RT-DETR/commit/5dc64138e439247b4e707dd6cebfe19d8d77f5b1).
-- \[2023.11.07\] Add pytorch ✅ *rtdetr_r34vd* for requests [#107](https://github.com/lyuwenyu/RT-DETR/issues/107), [#114](https://github.com/lyuwenyu/RT-DETR/issues/114).
-- \[2023.11.05\] Upgrade the logic of `remap_mscoco_category` to facilitate training of custom datasets, see detils in [*Train custom data*](./rtdetr_pytorch/) part. [#81](https://github.com/lyuwenyu/RT-DETR/commit/95fc522fd7cf26c64ffd2ad0c622c392d29a9ebf).
-- \[2023.10.23\] Add [*discussion for deployments*](https://github.com/lyuwenyu/RT-DETR/issues/95), supported onnxruntime, TensorRT, openVINO.
-- \[2023.10.12\] Add tuning code for pytorch version, now you can tuning rtdetr based on pretrained weights.
-- \[2023.09.19\] Upload ✅ [*pytorch weights*](https://github.com/lyuwenyu/RT-DETR/issues/42) convert from paddle version.
-- \[2023.08.24] Release RT-DETR-R18 pretrained models on objects365. *49.2 mAP* and *217 FPS*.
-- \[2023.08.22\] Upload ✅ [*rtdetr_pytorch*](./rtdetr_pytorch/) source code. Please enjoy it!
-- \[2023.08.15\] Release RT-DETR-R101 pretrained models on objects365. *56.2 mAP* and *74 FPS*.
-- \[2023.07.30\] Release RT-DETR-R50 pretrained models on objects365. *55.3 mAP* and *108 FPS*.
-- \[2023.07.28\] Fix some bugs, and add some comments. [1](https://github.com/lyuwenyu/RT-DETR/pull/14), [2](https://github.com/lyuwenyu/RT-DETR/commit/3b5cbcf8ae3b907e6b8bb65498a6be7c6736eabc).
-- \[2023.07.13\] Upload ✅ [*training logs on coco*](https://github.com/lyuwenyu/RT-DETR/issues/8).
-- \[2023.05.17\] Release RT-DETR-R18, RT-DETR-R34, RT-DETR-R50-m（example for scaled).
-- \[2023.04.17\] Release RT-DETR-R50, RT-DETR-R101, RT-DETR-L, RT-DETR-X.
-
-## 📣 News
-- RTDETR and RTDETRv2 are now available in Hugging Face Transformers. [#413](https://github.com/lyuwenyu/RT-DETR/issues/413), [#549](https://github.com/lyuwenyu/RT-DETR/issues/549)
-- RTDETR is now available in [ultralytics/ultralytics](https://docs.ultralytics.com/zh/models/rtdetr/).
-
-## 📍 Implementations
-- 🔥 RT-DETRv2
-  - paddle: [code&weight](./rtdetrv2_paddle/)
-  - pytorch: [code&weight](./rtdetrv2_pytorch/)
-- 🔥 RT-DETR 
-  - paddle: [code&weight](./rtdetr_paddle)
-  - pytorch: [code&weight](./rtdetr_pytorch)
-
-
-| Model | Input shape | Dataset | $AP^{val}$ | $AP^{val}_{50}$| Params(M) | FLOPs(G) | T4 TensorRT FP16(FPS)
-|:---:|:---:| :---:|:---:|:---:|:---:|:---:|:---:|
-| RT-DETR-R18 | 640 | COCO | 46.5 | 63.8 | 20 | 60 | 217 |
-| RT-DETR-R34 | 640 | COCO | 48.9 | 66.8 | 31 | 92 | 161 |
-| RT-DETR-R50-m | 640 | COCO | 51.3 | 69.6 | 36 | 100 | 145 |
-| RT-DETR-R50 |  640 | COCO | 53.1 | 71.3 | 42 | 136 | 108 |
-| RT-DETR-R101 | 640 | COCO | 54.3 | 72.7 | 76 | 259 | 74 |
-| RT-DETR-HGNetv2-L | 640 | COCO | 53.0 | 71.6 | 32 | 110 | 114 |
-| RT-DETR-HGNetv2-X | 640 | COCO | 54.8 | 73.1 | 67 | 234 | 74 |
-| RT-DETR-R18 | 640 | COCO + Objects365 | **49.2** | **66.6** | 20 | 60 | **217** |
-| RT-DETR-R50 | 640 | COCO + Objects365 | **55.3** | **73.4** | 42 | 136 | **108** |
-| RT-DETR-R101 | 640 | COCO + Objects365 | **56.2** | **74.6** | 76 | 259 | **74** |
-**RT-DETRv2-S** | 640 | COCO  | **48.1** <font color=green>(+1.6)</font> | **65.1** | 20 | 60 | 217 |
-**RT-DETRv2-M**<sup>*<sup> | 640 | COCO  | **49.9** <font color=green>(+1.0)</font> | **67.5** | 31 | 92 | 161 |
-**RT-DETRv2-M** | 640 | COCO | **51.9** <font color=green>(+0.6)</font> | **69.9** | 36 | 100 | 145 |
-**RT-DETRv2-L** | 640 | COCO | **53.4** <font color=green>(+0.3)</font> | **71.6** | 42 | 136 | 108 |
-**RT-DETRv2-X** | 640 | COCO | 54.3 | **72.8** <font color=green>(+0.1)</font>  | 76 | 259| 74 |
-
-**Notes:**
-- `COCO + Objects365` in the table means finetuned model on COCO using pretrained weights trained on Objects365.
-
-
-## 🦄 Performance
-
-### 🏕️ Complex Scenarios
-<div align="center">
-  <img src="https://github.com/lyuwenyu/RT-DETR/assets/77494834/52743892-68c8-4e53-b782-9f89221739e4" width=500 >
-</div>
-
-### 🌋 Difficult Conditions
-<div align="center">
-  <img src="https://github.com/lyuwenyu/RT-DETR/assets/77494834/213cf795-6da6-4261-8549-11947292d3cb" width=500 >
-</div>
-
-## Citation
-If you use `RT-DETR` or `RTDETRv2` in your work, please use the following BibTeX entries:
-```
-@misc{lv2023detrs,
-      title={DETRs Beat YOLOs on Real-time Object Detection},
-      author={Yian Zhao and Wenyu Lv and Shangliang Xu and Jinman Wei and Guanzhong Wang and Qingqing Dang and Yi Liu and Jie Chen},
-      year={2023},
-      eprint={2304.08069},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV}
-}
-
-@misc{lv2024rtdetrv2improvedbaselinebagoffreebies,
-      title={RT-DETRv2: Improved Baseline with Bag-of-Freebies for Real-Time Detection Transformer}, 
-      author={Wenyu Lv and Yian Zhao and Qinyao Chang and Kui Huang and Guanzhong Wang and Yi Liu},
-      year={2024},
-      eprint={2407.17140},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2407.17140}, 
-}
-```
+**Documentation Version**: 1.0  
+**Last Updated**: 2025-08-13  
+**Service Version**: Production  
+**Maintainer**: Animal Farm ML Team

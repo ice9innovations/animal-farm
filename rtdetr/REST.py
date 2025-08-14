@@ -30,10 +30,30 @@ from dotenv import load_dotenv
 # Load environment variables first
 load_dotenv()
 
-# API Configuration for emoji downloads (required)
-API_HOST = os.getenv('API_HOST')  # Must be set in .env
-API_PORT = int(os.getenv('API_PORT'))  # Must be set in .env
-API_TIMEOUT = float(os.getenv('API_TIMEOUT', '2.0'))
+# Load environment variables as strings first
+API_HOST = os.getenv('API_HOST')
+API_PORT_STR = os.getenv('API_PORT')
+API_TIMEOUT_STR = os.getenv('API_TIMEOUT')
+PORT_STR = os.getenv('PORT')
+PRIVATE_STR = os.getenv('PRIVATE')
+
+# Validate critical environment variables
+if not API_HOST:
+    raise ValueError("API_HOST environment variable is required")
+if not API_PORT_STR:
+    raise ValueError("API_PORT environment variable is required")
+if not API_TIMEOUT_STR:
+    raise ValueError("API_TIMEOUT environment variable is required")
+if not PORT_STR:
+    raise ValueError("PORT environment variable is required")
+if not PRIVATE_STR:
+    raise ValueError("PRIVATE environment variable is required")
+
+# Convert to appropriate types after validation
+API_PORT = int(API_PORT_STR)
+API_TIMEOUT = float(API_TIMEOUT_STR)
+PORT = int(PORT_STR)
+PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
 
 # Configure logging first
 logging.basicConfig(level=logging.INFO)
@@ -49,22 +69,13 @@ from src.core import YAMLConfig
 UPLOAD_FOLDER = './uploads'
 MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
-PRIVATE = os.getenv('PRIVATE', 'False').lower() == 'true'
-PORT = int(os.getenv('PORT', '7780'))  # Reusing the old object service port
+# Configuration constants
 CONFIDENCE_THRESHOLD = 0.25  # Minimum confidence for detections
 MAX_DETECTIONS = 100  # Maximum number of detections per image
 
 # Ensure upload directory exists
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Environment variables validation
-for var in ['DISCORD_TOKEN', 'DISCORD_GUILD', 'DISCORD_CHANNEL']:
-    if not os.getenv(var):
-        logger.warning(f"Environment variable {var} not set")
-
-TOKEN = os.getenv('DISCORD_TOKEN')
-GUILD = os.getenv('DISCORD_GUILD')
-CHANNELS = os.getenv('DISCORD_CHANNEL', '').split(',') if os.getenv('DISCORD_CHANNEL') else []
 
 # COCO class names (same as your other services)
 COCO_CLASSES = [
@@ -91,6 +102,91 @@ CORS(app)
 # Global model variable
 model = None
 device = None
+
+# IoU threshold for filtering overlapping detections  
+IOU_THRESHOLD = 0.3  # Lowered from 0.45 for better duplicate detection
+
+def calculate_iou_rtdetr(box1, box2) -> float:
+    """Calculate IoU for RT-DETR format boxes [x1, y1, x2, y2]"""
+    x1_1, y1_1, x2_1, y2_1 = box1
+    x1_2, y1_2, x2_2, y2_2 = box2
+    
+    # Calculate intersection
+    x1_inter = max(x1_1, x1_2)
+    y1_inter = max(y1_1, y1_2)
+    x2_inter = min(x2_1, x2_2)
+    y2_inter = min(y2_1, y2_2)
+    
+    # Check if there's an intersection
+    if x1_inter >= x2_inter or y1_inter >= y2_inter:
+        return 0.0
+    
+    # Calculate intersection area
+    intersection = (x2_inter - x1_inter) * (y2_inter - y1_inter)
+    
+    # Calculate areas
+    area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
+    area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
+    union = area1 + area2 - intersection
+    
+    return intersection / union if union > 0 else 0.0
+
+def apply_iou_filtering_rtdetr(labels, boxes, scores, class_names, iou_threshold=IOU_THRESHOLD):
+    """Apply IoU filtering for RT-DETR numpy arrays"""
+    if len(labels) == 0:
+        return labels, boxes, scores
+    
+    # Group detections by class
+    class_groups = {}
+    for i in range(len(labels)):
+        label_id = int(labels[i])
+        if 0 <= label_id < len(class_names):
+            class_name = class_names[label_id]
+            if class_name not in class_groups:
+                class_groups[class_name] = []
+            class_groups[class_name].append(i)
+    
+    keep_indices = []
+    
+    # Process each class separately
+    for class_name, indices in class_groups.items():
+        if len(indices) == 1:
+            # Only one detection for this class, keep it
+            keep_indices.extend(indices)
+            continue
+        
+        # For multiple detections, apply IoU filtering
+        class_keep = []
+        
+        # Sort by confidence (highest first)
+        indices.sort(key=lambda x: scores[x], reverse=True)
+        
+        for i in indices:
+            should_keep = True
+            
+            for j in class_keep:
+                iou = calculate_iou_rtdetr(boxes[i], boxes[j])
+                
+                if iou > iou_threshold:
+                    # High overlap - don't keep the lower confidence one
+                    should_keep = False
+                    logger.debug(f"RT-DETR IoU filter: Removing {class_name} "
+                               f"conf={scores[i]:.3f} (IoU={iou:.3f} with "
+                               f"conf={scores[j]:.3f})")
+                    break
+            
+            if should_keep:
+                class_keep.append(i)
+        
+        keep_indices.extend(class_keep)
+        logger.debug(f"RT-DETR IoU filter: {class_name} {len(indices)} → {len(class_keep)} detections")
+    
+    # Return filtered arrays
+    if keep_indices:
+        keep_indices = sorted(keep_indices)
+        return labels[keep_indices], boxes[keep_indices], scores[keep_indices]
+    else:
+        return np.array([]), np.array([]), np.array([])
 
 # Initialize local emoji service (replaces HTTP requests to centralized service)
 # Load emoji mappings from central API
@@ -353,27 +449,8 @@ def detect_objects(image_path: str, cleanup: bool = True) -> Dict[str, Any]:
             boxes = boxes[valid_indices]
             scores = scores[valid_indices]
             
-            # Keep only highest confidence detection per object class
-            best_detections = {}
-            for i in range(len(labels)):
-                label_id = int(labels[i])
-                if 0 <= label_id < len(COCO_CLASSES):
-                    object_name = COCO_CLASSES[label_id]
-                    confidence = float(scores[i])
-                    
-                    # Keep only if this is the highest confidence for this class
-                    if object_name not in best_detections or confidence > best_detections[object_name]['confidence']:
-                        best_detections[object_name] = {
-                            'confidence': confidence,
-                            'bbox': boxes[i].tolist(),
-                            'index': i
-                        }
-            
-            # Rebuild arrays with only best detections
-            if best_detections:
-                labels = np.array([list(COCO_CLASSES).index(obj) for obj in best_detections.keys()])
-                boxes = np.array([det['bbox'] for det in best_detections.values()])
-                scores = np.array([det['confidence'] for det in best_detections.values()])
+            # Apply IoU-based filtering instead of naive class-based deduplication
+            labels, boxes, scores = apply_iou_filtering_rtdetr(labels, boxes, scores, COCO_CLASSES)
         
         # Format results with Mirror Stage emoji enrichment
         objects = []
@@ -471,51 +548,180 @@ def health_check():
     
     return jsonify(health_data)
 
+# V2 Compatibility Routes - Translate parameters and call V3
+@app.route('/v2/analyze', methods=['GET'])
+def analyze_v2_compat():
+    """V2 compatibility - translate parameters to V3 format"""
+    import time
+    from flask import request
+    
+    # Get V2 parameter
+    image_url = request.args.get('image_url')
+    
+    if image_url:
+        # Create new request args with V3 parameter name
+        new_args = request.args.copy()
+        new_args = new_args.to_dict()
+        new_args['url'] = image_url
+        del new_args['image_url']
+        
+        # Create a mock request object for V3
+        with app.test_request_context('/v3/analyze', query_string=new_args):
+            return analyze_v3()
+    else:
+        # No parameters - let V3 handle the error
+        with app.test_request_context('/v3/analyze'):
+            return analyze_v3()
+
 @app.route('/v2/analyze_file', methods=['GET'])
-def analyze_file_v2():
-    """V2 API endpoint for direct file path analysis"""
+def analyze_file_v2_compat():
+    """V2 file compatibility - translate parameters to V3 format"""
+    import time
+    from flask import request
+    
+    # Get V2 parameter
+    file_path = request.args.get('file_path')
+    
+    if file_path:
+        # Create new request args with V3 parameter name
+        new_args = request.args.copy().to_dict()
+        new_args['file'] = file_path
+        del new_args['file_path']
+        
+        # Create a mock request object for V3
+        with app.test_request_context('/v3/analyze', query_string=new_args):
+            return analyze_v3()
+    else:
+        # No parameters - let V3 handle the error
+        with app.test_request_context('/v3/analyze'):
+            return analyze_v3()
+
+@app.route('/v3/analyze', methods=['GET'])
+def analyze_v3():
+    """Unified V3 API endpoint for both URL and file path analysis"""
     import time
     start_time = time.time()
     
     try:
-        # Get file path from query parameters
-        file_path = request.args.get('file_path')
-        if not file_path:
+        # Get input parameters - support both url and file
+        url = request.args.get('url')
+        file = request.args.get('file')
+        
+        # Validate input - exactly one parameter must be provided
+        if not url and not file:
             return jsonify({
                 "service": "rtdetr",
                 "status": "error",
                 "predictions": [],
-                "error": {"message": "Missing file_path parameter"},
+                "error": {"message": "Must provide either url or file parameter"},
                 "metadata": {"processing_time": round(time.time() - start_time, 3)}
             }), 400
         
-        # Validate file path
-        if not os.path.exists(file_path):
+        if url and file:
             return jsonify({
                 "service": "rtdetr",
                 "status": "error",
                 "predictions": [],
-                "error": {"message": f"File not found: {file_path}"},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 404
-        
-        if not allowed_file(file_path):
-            return jsonify({
-                "service": "rtdetr",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": "File type not allowed"},
+                "error": {"message": "Cannot provide both url and file parameters"},
                 "metadata": {"processing_time": round(time.time() - start_time, 3)}
             }), 400
         
-        # Get image dimensions before processing
-        from PIL import Image as PILImage
-        with PILImage.open(file_path) as img:
-            image_width, image_height = img.size
+        # Handle URL input
+        if url:
+            filepath = None
+            try:
+                # Validate URL
+                parsed_url = urlparse(url)
+                if not parsed_url.scheme or not parsed_url.netloc:
+                    return jsonify({
+                        "service": "rtdetr",
+                        "status": "error",
+                        "predictions": [],
+                        "error": {"message": "Invalid URL format"},
+                        "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                    }), 400
+                
+                # Download image
+                filename = uuid.uuid4().hex + ".jpg"
+                filepath = os.path.join(UPLOAD_FOLDER, filename)
+                
+                response = requests.get(url, timeout=10, stream=True)
+                response.raise_for_status()
+                
+                content_type = response.headers.get('content-type', '')
+                if not content_type.startswith('image/'):
+                    return jsonify({
+                        "service": "rtdetr",
+                        "status": "error",
+                        "predictions": [],
+                        "error": {"message": "URL does not point to an image"},
+                        "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                    }), 400
+                
+                with open(filepath, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                
+                if os.path.getsize(filepath) > MAX_FILE_SIZE:
+                    os.remove(filepath)
+                    return jsonify({
+                        "service": "rtdetr",
+                        "status": "error",
+                        "predictions": [],
+                        "error": {"message": "Downloaded file too large"},
+                        "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                    }), 400
+                
+                # Detect objects using existing function
+                result = detect_objects(filepath)
+                filepath = None  # detect_objects handles cleanup
+                
+            except requests.exceptions.RequestException as e:
+                if filepath and os.path.exists(filepath):
+                    os.remove(filepath)
+                return jsonify({
+                    "service": "rtdetr",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": "Failed to download image"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 400
+            except Exception as e:
+                if filepath and os.path.exists(filepath):
+                    os.remove(filepath)
+                return jsonify({
+                    "service": "rtdetr",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": "Error processing image"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 500
         
-        # Detect objects directly from file (no cleanup needed - we don't own the file)
-        result = detect_objects(file_path, cleanup=False)
+        # Handle file input
+        if file:
+            # Validate file path
+            if not os.path.exists(file):
+                return jsonify({
+                    "service": "rtdetr",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": f"File not found: {file}"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 404
+            
+            if not allowed_file(file):
+                return jsonify({
+                    "service": "rtdetr",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": "File type not allowed"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 400
+            
+            # Detect objects directly from file (no cleanup needed - we don't own the file)
+            result = detect_objects(file, cleanup=False)
         
+        # Process results (common for both URL and file)
         if not result.get('success', False):
             return jsonify({
                 "service": "rtdetr",
@@ -525,7 +731,7 @@ def analyze_file_v2():
                 "metadata": {"processing_time": round(time.time() - start_time, 3)}
             }), 500
         
-        # Convert to v2 format
+        # Convert to v3 format - extract objects and create predictions
         objects = result.get('objects', [])
         
         # Create unified prediction format
@@ -533,9 +739,8 @@ def analyze_file_v2():
         for obj in objects:
             bbox = obj.get('bbox', [])
             prediction = {
-                "type": "object_detection",
                 "label": obj.get('object', ''),
-                "confidence": round(float(obj.get('confidence', 0)), 3)  # Normalize to 0-1
+                "confidence": float(obj.get('confidence', 0))
             }
             
             # Add bbox if present
@@ -553,6 +758,7 @@ def analyze_file_v2():
             
             predictions.append(prediction)
         
+        # Return unified v3 format
         return jsonify({
             "service": "rtdetr",
             "status": "success",
@@ -560,21 +766,13 @@ def analyze_file_v2():
             "metadata": {
                 "processing_time": round(time.time() - start_time, 3),
                 "model_info": {
-                    "name": "RT-DETR",
-                    "framework": "PyTorch"
-                },
-                "image_dimensions": {
-                    "width": image_width,
-                    "height": image_height
-                },
-                "parameters": {
-                    "confidence_threshold": CONFIDENCE_THRESHOLD
+                    "framework": "RT-DETR PyTorch"
                 }
             }
         })
         
     except Exception as e:
-        logger.error(f"V2 file analysis error: {e}")
+        logger.error(f"V3 API error: {e}")
         return jsonify({
             "service": "rtdetr",
             "status": "error",
@@ -583,204 +781,6 @@ def analyze_file_v2():
             "metadata": {"processing_time": round(time.time() - start_time, 3)}
         }), 500
 
-@app.route('/v2/analyze', methods=['GET'])
-def analyze_v2():
-    """V2 API endpoint with unified response format"""
-    import time
-    start_time = time.time()
-    
-    try:
-        # Get image URL from query parameters
-        image_url = request.args.get('image_url')
-        if not image_url:
-            return jsonify({
-                "service": "rtdetr",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": "Missing image_url parameter"},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 400
-        
-        # Download and process image
-        filepath = None
-        
-        try:
-            parsed_url = urlparse(image_url)
-            if not parsed_url.scheme or not parsed_url.netloc:
-                raise ValueError("Invalid URL format")
-            
-            # Download image
-            filename = uuid.uuid4().hex + ".jpg"
-            filepath = os.path.join(UPLOAD_FOLDER, filename)
-            
-            response = requests.get(image_url, timeout=10, stream=True)
-            response.raise_for_status()
-            
-            content_type = response.headers.get('content-type', '')
-            if not content_type.startswith('image/'):
-                raise ValueError("URL does not point to an image")
-            
-            with open(filepath, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            
-            # Validate file size
-            if os.path.getsize(filepath) > MAX_FILE_SIZE:
-                raise ValueError("Downloaded file too large")
-            
-            # Get image dimensions before processing
-            from PIL import Image as PILImage
-            with PILImage.open(filepath) as img:
-                image_width, image_height = img.size
-            
-            # Detect objects using existing function
-            result = detect_objects(filepath)
-            
-            if not result.get('success', False):
-                return jsonify({
-                    "service": "rtdetr",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": result.get('error', 'Detection failed')},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 500
-            
-            # Convert to v2 format
-            objects = result.get('objects', [])
-            
-            # Create unified prediction format
-            predictions = []
-            for obj in objects:
-                bbox = obj.get('bbox', [])
-                prediction = {
-                    "type": "object_detection",
-                    "label": obj.get('object', ''),
-                    "confidence": round(float(obj.get('confidence', 0)), 3)  # Normalize to 0-1
-                }
-                
-                # Add bbox if present
-                if len(bbox) >= 4:
-                    prediction["bbox"] = {
-                        "x": int(bbox[0]),
-                        "y": int(bbox[1]),
-                        "width": int(bbox[2] - bbox[0]),
-                        "height": int(bbox[3] - bbox[1])
-                    }
-                
-                # Add emoji if present
-                if obj.get('emoji'):
-                    prediction["emoji"] = obj['emoji']
-                
-                predictions.append(prediction)
-            
-            return jsonify({
-                "service": "rtdetr",
-                "status": "success",
-                "predictions": predictions,
-                "metadata": {
-                    "processing_time": round(time.time() - start_time, 3),
-                    "model_info": {
-                        "name": "RT-DETR",
-                        "framework": "PyTorch"
-                    },
-                    "image_dimensions": {
-                        "width": image_width,
-                        "height": image_height
-                    },
-                    "parameters": {
-                        "confidence_threshold": CONFIDENCE_THRESHOLD
-                    }
-                }
-            })
-            
-        except Exception as e:
-            logger.error(f"Error processing image URL {image_url}: {e}")
-            return jsonify({
-                "service": "rtdetr",
-                "status": "error", 
-                "predictions": [],
-                "error": {"message": f"Failed to process image: {str(e)}"},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 500
-        finally:
-            # Always cleanup downloaded file
-            if filepath and os.path.exists(filepath):
-                try:
-                    os.remove(filepath)
-                except:
-                    pass
-        
-    except Exception as e:
-        logger.error(f"V2 API error: {e}")
-        return jsonify({
-            "service": "rtdetr",
-            "status": "error",
-            "predictions": [],
-            "error": {"message": f"Internal error: {str(e)}"},
-            "metadata": {"processing_time": round(time.time() - start_time, 3)}
-        }), 500
-
-@app.route('/detect', methods=['POST'])
-def detect():
-    """Object detection endpoint"""
-    image_path = None
-    
-    try:
-        # Handle file upload
-        if 'file' in request.files:
-            file = request.files['file']
-            if file.filename == '':
-                return jsonify({'error': 'No file selected'}), 400
-            
-            if not allowed_file(file.filename):
-                return jsonify({'error': 'Invalid file type'}), 400
-            
-            filename = f"{uuid.uuid4().hex}_{file.filename}"
-            image_path = os.path.join(UPLOAD_FOLDER, filename)
-            file.save(image_path)
-        
-        # Handle URL
-        elif 'url' in request.form or 'url' in request.json if request.json else False:
-            url = request.form.get('url') or (request.json.get('url') if request.json else None)
-            if not url:
-                return jsonify({'error': 'No URL provided'}), 400
-            
-            image_path = download_image(url)
-            if not image_path:
-                return jsonify({'error': 'Failed to download image from URL'}), 400
-        
-        else:
-            return jsonify({'error': 'No image file or URL provided'}), 400
-        
-        # Perform detection
-        result = detect_objects(image_path)
-        
-        return jsonify(result)
-        
-    except Exception as e:
-        logger.error(f"Error in detect endpoint: {e}")
-        return jsonify({'error': str(e)}), 500
-    finally:
-        # Always cleanup uploaded/downloaded file
-        if image_path and os.path.exists(image_path):
-            try:
-                os.remove(image_path)
-            except:
-                pass
-
-@app.route('/', methods=['GET'])
-def index():
-    """Root endpoint with service info"""
-    return jsonify({
-        'service': 'RT-DETR Object Detection API',
-        'version': '1.0.0',
-        'model': 'RT-DETR R50',
-        'endpoints': [
-            {'path': '/detect', 'method': 'POST', 'description': 'Object detection'},
-            {'path': '/health', 'method': 'GET', 'description': 'Health check'}
-        ],
-        'status': 'ready' if model else 'loading'
-    })
 
 if __name__ == '__main__':
     logger.info("Starting RT-DETR Object Detection Service...")
