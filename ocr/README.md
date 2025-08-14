@@ -1,4 +1,4 @@
-# Text Extraction Service
+# OCR Text Extraction Service
 
 **Port**: 7775  
 **Framework**: PaddleOCR  
