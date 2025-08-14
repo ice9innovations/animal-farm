@@ -1,160 +1,355 @@
 # YOLOv8 Object Detection Service
 
-This service provides real-time object detection using Ultralytics YOLOv8, capable of detecting 80 different object classes with bounding boxes and confidence scores.
+**Port**: 7773  
+**Framework**: Ultralytics YOLOv8  
+**Purpose**: Real-time object detection with bounding boxes and emoji mapping  
+**Status**: ✅ Active
+
+## Overview
+
+YOLOv8 provides fast, accurate object detection using Ultralytics' state-of-the-art YOLO models. The service detects 80 COCO object classes in images with confidence scores, bounding boxes, and automatic emoji mapping for enhanced user experience.
 
 ## Features
 
-- REST API for object detection
-- Discord bot integration with emoji reactions
-- Real-time bounding box detection
-- Confidence scoring and filtering
-- IoU (Intersection over Union) threshold filtering
-- Automatic model fallback (nano → small → medium → large → extra large)
-- Comprehensive error handling and logging
+- **Modern V3 API**: Clean, unified endpoint with intuitive parameters
+- **Unified Input Handling**: Single endpoint for both URL and file path analysis
+- **COCO Object Detection**: Detects 80 common object classes
+- **Advanced IoU Filtering**: Removes overlapping detections for cleaner results
+- **Emoji Integration**: Automatic word-to-emoji mapping using local dictionary
+- **GPU Acceleration**: CUDA and MPS support for fast inference
+- **Confidence Filtering**: Configurable detection thresholds
+- **Security**: File validation, size limits, secure cleanup
 
-## Setup
+## Installation
 
-### 1. Install Dependencies
+### Prerequisites
 
-```bash
-pip install -r ../requirements.txt
-pip install ultralytics
-```
+- Python 3.8+
+- CUDA-compatible GPU (recommended) or CPU
+- 4GB+ RAM (8GB+ recommended)
+- 10GB+ disk space for models
 
-### 2. Model Download
-
-YOLOv8 models will be downloaded automatically on first use. The service tries models in this order:
-- `yolov8n.pt` (Nano - fastest, smallest)
-- `yolov8s.pt` (Small)
-- `yolov8m.pt` (Medium)
-- `yolov8l.pt` (Large)
-- `yolov8x.pt` (Extra Large - slowest, most accurate)
-
-### 3. Configure Environment
-
-Create a `.env` file with your configuration:
+### 1. Environment Setup
 
 ```bash
-# Discord Configuration (for bot)
-DISCORD_TOKEN=your_discord_bot_token
-DISCORD_GUILD=your_guild_name
-DISCORD_CHANNEL=channel1,channel2
+# Navigate to YOLOv8 directory
+cd /home/sd/animal-farm/yolov8
 
-# Service Settings
-PORT=7773
-PRIVATE=false
+# Create virtual environment
+python3 -m venv yolo_venv
 
-# API Configuration (required for emoji lookup)
-API_HOST=localhost
-API_PORT=8080
-API_TIMEOUT=2.0
+# Activate virtual environment
+source yolo_venv/bin/activate
 
-# Database Configuration (optional)
-MYSQL_HOST=localhost
-MYSQL_USERNAME=your_username
-MYSQL_PASSWORD=your_password
-MYSQL_DB=your_database
+# Install dependencies
+pip install -r requirements.txt
 ```
 
-### 4. Run Services
+### 2. Model Installation
 
-**REST API:**
 ```bash
-python REST.py
-# or
-./yolo.sh
+# YOLOv8 models are downloaded automatically on first use
+# Available models (in order of accuracy vs speed):
+# - yolov8n.pt (Nano - fastest)
+# - yolov8s.pt (Small)
+# - yolov8m.pt (Medium)
+# - yolov8l.pt (Large)  
+# - yolov8x.pt (Extra Large - most accurate)
+
+# Pre-download models (optional)
+python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
 ```
 
-**Discord Bot:**
+### 3. Hardware Configuration
+
 ```bash
-python YOLO-discord-rest.py
-# or
-./discord.sh
+# Verify CUDA availability (optional)
+python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
+
+# Check GPU memory
+nvidia-smi  # If CUDA GPU available
 ```
 
-## API Usage
+## Configuration
 
-### REST API Endpoints
+### Environment Variables (.env)
 
-- `GET /health` - Health check and model status
-- `GET /classes` - List all 80 detectable object classes
-- `GET /?url=<image_url>` - Detect objects in image from URL
-- `GET /?path=<local_path>` - Detect objects in local image (if not in private mode)
-- `POST /` - Upload and detect objects in image file
+Create a `.env` file in the yolov8 directory:
 
-### Example Usage
-
-**Detect objects from URL:**
 ```bash
-curl "http://localhost:7776/?url=https://example.com/image.jpg"
+# Service Configuration
+PORT=7773                           # Service port
+PRIVATE=False                       # Access mode (False=public, True=localhost-only)
+
+# API Configuration (Required for emoji mapping)
+API_HOST=localhost                  # Host for emoji API
+API_PORT=8080                      # Port for emoji API
+API_TIMEOUT=2.0                    # Timeout for emoji API requests
 ```
 
-**Upload file:**
+### Configuration Details
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PORT` | Yes | - | Service listening port |
+| `PRIVATE` | Yes | - | Access control (False=public, True=localhost-only) |
+| `API_HOST` | Yes | - | Host for emoji mapping API |
+| `API_PORT` | Yes | - | Port for emoji mapping API |
+| `API_TIMEOUT` | Yes | - | Timeout for emoji API requests |
+
+## API Endpoints
+
+### Health Check
 ```bash
-curl -X POST -F "uploadedfile=@image.jpg" http://localhost:7776/
+GET /health
 ```
 
-**Response format:**
+**Response:**
 ```json
 {
-  "YOLO": {
-    "detections": [
-      {
-        "class_id": 16,
-        "class_name": "dog",
-        "confidence": 0.892,
-        "bbox": {
-          "x1": 150,
-          "y1": 200,
-          "x2": 450,
-          "y2": 600,
-          "width": 300,
-          "height": 400
-        },
-        "emoji": "🐕"
+  "status": "healthy",
+  "model_status": "loaded",
+  "confidence_threshold": 0.25,
+  "iou_threshold": 0.3,
+  "supported_classes": 80
+}
+```
+
+### Supported Classes
+```bash
+GET /classes
+```
+
+**Response:**
+```json
+{
+  "classes": ["person", "bicycle", "car", "motorcycle", ...],
+  "total_classes": 80
+}
+```
+
+### V3 Unified Analysis (Recommended)
+```bash
+GET /v3/analyze?url=<image_url>
+GET /v3/analyze?file=<file_path>
+```
+
+**Parameters:**
+- `url` (string): Image URL to analyze
+- `file` (string): Local file path to analyze
+
+**Note:** Exactly one parameter (`url` or `file`) must be provided.
+
+**Response:**
+```json
+{
+  "service": "yolo",
+  "status": "success",
+  "predictions": [
+    {
+      "label": "person",
+      "confidence": 0.96,
+      "bbox": {
+        "x": 249,
+        "y": 16,
+        "width": 391,
+        "height": 434
       },
-      {
-        "class_id": 0,
-        "class_name": "person",
-        "confidence": 0.756,
-        "bbox": {
-          "x1": 100,
-          "y1": 50,
-          "x2": 300,
-          "y2": 500,
-          "width": 200,
-          "height": 450
-        },
-        "emoji": "👤"
-      }
-    ],
-    "total_detections": 2,
-    "image_dimensions": {
-      "width": 640,
-      "height": 480
+      "emoji": "🧑"
     },
+    {
+      "label": "person",
+      "confidence": 0.855,
+      "bbox": {
+        "x": 444,
+        "y": 7,
+        "width": 196,
+        "height": 191
+      },
+      "emoji": "🧑"
+    },
+    {
+      "label": "teddy bear",
+      "confidence": 0.952,
+      "bbox": {
+        "x": 259,
+        "y": 159,
+        "width": 116,
+        "height": 120
+      },
+      "emoji": "🧸"
+    }
+  ],
+  "metadata": {
+    "processing_time": 0.303,
     "model_info": {
-      "confidence_threshold": 0.25,
-      "iou_threshold": 0.45,
-      "device": "cuda"
-    },
-    "status": "success"
+      "framework": "Ultralytics YOLOv8"
+    }
   }
 }
 ```
 
-## Discord Bot
+### V2 Compatibility Routes
+```bash
+GET /v2/analyze?image_url=<url>       # Translates to V3 url parameter
+GET /v2/analyze_file?file_path=<path>  # Translates to V3 file parameter
+```
 
-The Discord bot automatically:
-- Processes image attachments in configured channels
-- Detects objects using the YOLO API
-- Adds emoji reactions for detected objects (up to 3 unique emojis)
-- Logs detections to database (if configured)
-- Ignores duplicate emojis and low-confidence detections
+## Service Management
 
-## Detectable Object Classes (80 COCO Classes)
+### Manual Startup
+```bash
+# Ensure emoji API is running (required dependency)
+# Start YOLOv8 service
 
-The service can detect these object categories:
+# Activate virtual environment
+source yolo_venv/bin/activate
+
+# Start service
+python REST.py
+```
+
+### Systemd Service
+```bash
+# Install service file
+sudo cp services/yolo-api.service /etc/systemd/system/
+
+# Enable and start service
+sudo systemctl daemon-reload
+sudo systemctl enable yolo-api.service
+sudo systemctl start yolo-api.service
+
+# Check status
+sudo systemctl status yolo-api.service
+```
+
+## Performance Optimization
+
+### Hardware Requirements
+
+**Minimum:**
+- 4GB RAM
+- 2-core CPU
+- 10GB disk space
+
+**Recommended:**
+- 8GB+ RAM
+- 4-core CPU
+- RTX 3060 or better GPU
+- NVMe SSD storage
+
+### Model Performance
+
+| Model | Size | Speed | mAP | RAM Usage | Use Case |
+|-------|------|-------|-----|-----------|----------|
+| YOLOv8n | 6MB | Very Fast | 37.3 | 1GB | Real-time apps |
+| YOLOv8s | 22MB | Fast | 44.9 | 2GB | General purpose |
+| YOLOv8m | 52MB | Medium | 50.2 | 4GB | Balanced accuracy |
+| YOLOv8l | 87MB | Slow | 52.9 | 6GB | High accuracy |
+| YOLOv8x | 136MB | Very Slow | 53.9 | 8GB | Maximum accuracy |
+
+### Optimization Settings
+
+- **Confidence Threshold**: 0.25 (filters low-confidence detections)
+- **IoU Threshold**: 0.3 (removes overlapping detections)
+- **GPU Acceleration**: Automatically detected and enabled
+- **Batch Processing**: Single image optimized for API responses
+
+## Error Handling
+
+### Common Errors
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `Model not loaded` | YOLOv8 model failed to load | Check model files and GPU drivers |
+| `File not found` | Invalid file path | Verify file exists and path is correct |
+| `File too large` | Image exceeds 8MB limit | Resize image or increase MAX_FILE_SIZE |
+| `Invalid URL format` | Malformed image URL | Check URL syntax and accessibility |
+| `URL does not point to an image` | Non-image content type | Ensure URL serves image content |
+
+### Error Response Format
+```json
+{
+  "service": "yolo",
+  "status": "error",
+  "predictions": [],
+  "error": {"message": "Detailed error description"},
+  "metadata": {"processing_time": 0.001}
+}
+```
+
+## Integration Examples
+
+### Python
+```python
+import requests
+
+# Object detection from URL
+response = requests.get('http://localhost:7773/v3/analyze', 
+                       params={'url': 'https://example.com/image.jpg'})
+data = response.json()
+
+# Object detection from file
+response = requests.get('http://localhost:7773/v3/analyze',
+                       params={'file': '/path/to/image.jpg'})
+result = response.json()
+
+# Process results
+for prediction in result['predictions']:
+    label = prediction['label']
+    confidence = prediction['confidence']
+    bbox = prediction['bbox']
+    emoji = prediction.get('emoji', '')
+    print(f"{emoji} {label}: {confidence:.2f} at ({bbox['x']}, {bbox['y']})")
+```
+
+### JavaScript
+```javascript
+// Object detection from URL
+const response = await fetch('http://localhost:7773/v3/analyze?' + 
+    new URLSearchParams({url: 'https://example.com/image.jpg'}));
+const data = await response.json();
+
+// Process detections
+data.predictions.forEach(prediction => {
+    console.log(`${prediction.emoji || ''} ${prediction.label}: ${prediction.confidence}`);
+    console.log(`Location: (${prediction.bbox.x}, ${prediction.bbox.y})`);
+    console.log(`Size: ${prediction.bbox.width}x${prediction.bbox.height}`);
+});
+```
+
+## Troubleshooting
+
+### Installation Issues
+- **CUDA not detected**: Install NVIDIA drivers and CUDA toolkit
+- **Model download fails**: Check internet connection and disk space
+- **Dependencies missing**: Use requirements.txt in virtual environment
+
+### Runtime Issues
+- **Slow inference**: Ensure GPU is detected, use smaller model for speed
+- **Memory errors**: Use smaller model or increase system RAM
+- **Connection refused**: Verify service is running on correct port
+
+### Performance Issues
+- **Low detection accuracy**: Use larger model (yolov8l or yolov8x)
+- **Too many false positives**: Increase confidence threshold
+- **Missing objects**: Decrease confidence threshold or use larger model
+
+## Security Considerations
+
+### Access Control
+- Set `PRIVATE=True` for localhost-only access
+- Use reverse proxy (nginx) for production deployment
+- Implement rate limiting for public endpoints
+
+### File Security
+- File uploads validated and cleaned up automatically
+- Size limits prevent resource exhaustion
+- Only allowed image formats accepted
+
+## Supported Object Classes
+
+YOLOv8 detects 80 COCO dataset classes:
 
 **People & Animals:**
 person, bird, cat, dog, horse, sheep, cow, elephant, bear, zebra, giraffe
@@ -162,64 +357,18 @@ person, bird, cat, dog, horse, sheep, cow, elephant, bear, zebra, giraffe
 **Vehicles:**
 bicycle, car, motorcycle, airplane, bus, train, truck, boat
 
-**Outdoor Objects:**
-traffic light, fire hydrant, stop sign, parking meter, bench
-
 **Sports & Recreation:**
 frisbee, skis, snowboard, sports ball, kite, baseball bat, baseball glove, skateboard, surfboard, tennis racket
 
-**Kitchen & Dining:**
+**Food & Dining:**
 bottle, wine glass, cup, fork, knife, spoon, bowl, banana, apple, sandwich, orange, broccoli, carrot, hot dog, pizza, donut, cake
 
-**Furniture & Household:**
-chair, couch, potted plant, bed, dining table, toilet
+**Household Items:**
+chair, couch, potted plant, bed, dining table, toilet, tv, laptop, mouse, remote, keyboard, cell phone, microwave, oven, toaster, sink, refrigerator, book, clock, vase, scissors, teddy bear, hair drier, toothbrush
 
-**Electronics:**
-tv, laptop, mouse, remote, keyboard, cell phone, microwave, oven, toaster, sink, refrigerator
+**Outdoor Objects:**
+traffic light, fire hydrant, stop sign, parking meter, bench, backpack, umbrella, handbag, tie, suitcase
 
-**Personal Items:**
-backpack, umbrella, handbag, tie, suitcase, book, clock, vase, scissors, teddy bear, hair drier, toothbrush
+---
 
-## Configuration Options
-
-- **Confidence Threshold**: 0.25 (adjustable, minimum confidence for detections)
-- **IoU Threshold**: 0.45 (adjustable, for non-maximum suppression)
-- **Max Detections**: 100 per image
-- **Max Emoji Reactions**: 3 unique emojis per Discord message
-
-## Performance & Model Information
-
-- **Model**: Ultralytics YOLOv8 (multiple sizes available)
-- **Input**: Images up to 8MB
-- **Output**: Bounding boxes with confidence scores
-- **Classes**: 80 COCO object categories
-- **Performance**: Real-time detection on GPU, fast on CPU
-
-## Troubleshooting
-
-1. **Model loading errors**: Install ultralytics: `pip install ultralytics`
-2. **CUDA errors**: Ensure PyTorch CUDA support: `pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118`
-3. **Discord bot not responding**: Check token and channel configuration
-4. **API connection issues**: Verify API_HOST and API_PORT settings
-5. **No detections**: Check confidence threshold (default 0.25) and image quality
-
-## Technical Details
-
-- **Framework**: Flask (REST API), Discord.py (bot), Ultralytics YOLOv8 (detection)
-- **Database**: MySQL (optional)
-- **Deployment**: Systemd services available
-- **Hardware**: GPU recommended for best performance, CPU supported
-
-## Systemd Service
-
-Service files are available in the `services/` directory for production deployment.
-
-## Model Comparison
-
-| Model | Size | Speed | Accuracy | Use Case |
-|-------|------|-------|----------|----------|
-| YOLOv8n | ~6MB | Fastest | Good | Real-time, edge devices |
-| YOLOv8s | ~22MB | Fast | Better | Balanced performance |
-| YOLOv8m | ~52MB | Medium | High | Production systems |
-| YOLOv8l | ~87MB | Slow | Higher | High accuracy needs |
-| YOLOv8x | ~136MB | Slowest | Highest | Maximum accuracy |
+*Generated with Animal Farm ML Platform v3.0 - YOLOv8 Object Detection*
