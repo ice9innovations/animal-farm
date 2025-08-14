@@ -453,7 +453,7 @@ def analyze_v3():
         
         text_prediction = {
             "text": text,
-            "emoji": get_emoji("ocr") or "📝",
+            "emoji": (get_emoji("ocr") or "💬") if has_text else "",
             "confidence": round(confidence, 3),
             "has_text": has_text,
             "text_regions": text_regions,
