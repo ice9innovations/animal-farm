@@ -21,9 +21,21 @@ import exiftool
 
 load_dotenv()
 
+# Step 1: Load as strings (no fallbacks)
+PRIVATE_STR = os.getenv('PRIVATE')
+PORT_STR = os.getenv('PORT')
+
+# Step 2: Validate critical environment variables
+if not PRIVATE_STR:
+    raise ValueError("PRIVATE environment variable is required")
+if not PORT_STR:
+    raise ValueError("PORT environment variable is required")
+
+# Step 3: Convert to appropriate types after validation
+PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
+PORT = int(PORT_STR)
+
 FOLDER = './uploads'
-PRIVATE = os.getenv('PRIVATE', 'False').lower() in ['true', '1', 'yes']
-PORT = os.getenv('PORT', '7781')
 MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
 
 # Ensure upload directory exists
@@ -311,14 +323,10 @@ def extract_comprehensive_metadata(image_file: str, cleanup: bool = True) -> Dic
         # Categorize metadata
         categorized = categorize_metadata(all_metadata) if all_metadata else {}
         
-        # 🎯 NEW: Advanced Analysis (all the low-hanging fruit!)
+        # 🎯 STREAMLINED: Advanced Analysis (remove ALT text generation)
         quality_analysis = analyze_image_quality(full_path)
         color_analysis = analyze_color_properties(full_path) 
         composition_analysis = analyze_composition(full_path)
-        
-        # Build basic metadata dict for alt-text generation
-        basic_metadata = {"categorized": categorized}
-        alt_text_analysis = generate_alt_text_suggestions(full_path, basic_metadata)
         
         # Calculate summary statistics
         total_tags = len(all_metadata)
@@ -352,20 +360,22 @@ def extract_comprehensive_metadata(image_file: str, cleanup: bool = True) -> Dic
                     "exiftool_result": "success" if "error" not in exiftool_metadata else exiftool_metadata.get("error"),
                     "total_extraction_time": processing_time
                 },
-                # 🎯 NEW: All the low-hanging fruit analysis!
+                # 🎯 STREAMLINED: Essential analysis only (ALT text removed)
                 "advanced_analysis": {
                     "image_quality": quality_analysis,
                     "color_properties": color_analysis,
-                    "composition": composition_analysis,
-                    "alt_text": alt_text_analysis
+                    "composition": composition_analysis
                 },
                 "analysis_summary": {
                     "aesthetic_score": quality_analysis.get("aesthetic_score", {}).get("score", 0) if not quality_analysis.get("error") else 0,
-                    "is_blurry": quality_analysis.get("blur_analysis", {}).get("is_blurry", False) if not quality_analysis.get("error") else False,
-                    "lighting_quality": quality_analysis.get("lighting_analysis", {}).get("lighting_quality", "unknown") if not quality_analysis.get("error") else "unknown",
-                    "dominant_color": color_analysis.get("dominant_colors", [{}])[0].get("hex", "#000000") if not color_analysis.get("error") and color_analysis.get("dominant_colors") else "#000000",
-                    "composition_complexity": composition_analysis.get("complexity_analysis", {}).get("complexity_level", "unknown") if not composition_analysis.get("error") else "unknown",
-                    "estimated_content_type": alt_text_analysis.get("accessibility_notes", {}).get("estimated_content_type", "unknown") if not alt_text_analysis.get("error") else "unknown"
+                    "lighting_quality": quality_analysis.get("lighting_analysis", {}).get("lighting_quality", 0) if not quality_analysis.get("error") else 0,
+                    "exposure_quality": quality_analysis.get("exposure_analysis", {}).get("exposure_quality", 0) if not quality_analysis.get("error") else 0,
+                    "contrast_quality": quality_analysis.get("contrast_analysis", {}).get("contrast_quality", 0) if not quality_analysis.get("error") else 0,
+                    "histogram_balance": quality_analysis.get("exposure_analysis", {}).get("histogram_balance", 0) if not quality_analysis.get("error") else 0,
+                    "dynamic_range": quality_analysis.get("contrast_analysis", {}).get("dynamic_range", 0) if not quality_analysis.get("error") else 0,
+                    "saturation_level": color_analysis.get("saturation_analysis", {}).get("saturation_level", 0) if not color_analysis.get("error") else 0,
+                    "complexity_level": composition_analysis.get("complexity_analysis", {}).get("complexity_level", 0) if not composition_analysis.get("error") else 0,
+                    "symmetry_level": composition_analysis.get("symmetry_analysis", {}).get("symmetry_level", 0) if not composition_analysis.get("error") else 0
                 },
                 "status": "success"
             }
@@ -402,22 +412,10 @@ def analyze_image_quality(filepath: str) -> Dict[str, Any]:
         
         # 1. BLUR DETECTION using Laplacian variance
         laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-        blur_threshold = 100  # Empirically determined
-        is_blurry = laplacian_var < blur_threshold
         
         # 2. LIGHTING ANALYSIS
         mean_brightness = np.mean(gray)
         brightness_std = np.std(gray)
-        
-        # Determine lighting quality
-        if mean_brightness < 50:
-            lighting_quality = "too_dark"
-        elif mean_brightness > 200:
-            lighting_quality = "too_bright"  
-        elif brightness_std < 30:
-            lighting_quality = "low_contrast"
-        else:
-            lighting_quality = "good"
         
         # 3. EXPOSURE ANALYSIS
         hist = cv2.calcHist([gray], [0], None, [256], [0, 256])
@@ -427,41 +425,28 @@ def analyze_image_quality(filepath: str) -> Dict[str, Any]:
         dark_pixels = np.sum(hist[:25]) / total_pixels  # Very dark pixels
         bright_pixels = np.sum(hist[230:]) / total_pixels  # Very bright pixels
         
-        if dark_pixels > 0.4:
-            exposure = "underexposed"
-        elif bright_pixels > 0.4:
-            exposure = "overexposed"
-        else:
-            exposure = "well_exposed"
-        
         # 4. CONTRAST ANALYSIS
         contrast_score = brightness_std / 64.0  # Normalize to 0-4 range
-        if contrast_score < 0.5:
-            contrast = "low"
-        elif contrast_score > 2.0:
-            contrast = "high"
-        else:
-            contrast = "good"
         
-        # 5. AESTHETIC SCORING (simple rule-based)
+        # 5. AESTHETIC SCORING (rule-based on raw values)
         aesthetic_score = 50  # Base score
         
-        # Bonus for good technical quality
-        if not is_blurry:
+        # Bonus for good technical quality (using raw thresholds)
+        if laplacian_var >= 100:  # Good sharpness
             aesthetic_score += 15
-        if lighting_quality == "good":
+        if 50 <= mean_brightness <= 200 and brightness_std >= 30:  # Good lighting
             aesthetic_score += 15
-        if exposure == "well_exposed":
+        if dark_pixels <= 0.4 and bright_pixels <= 0.4:  # Well exposed
             aesthetic_score += 10
-        if contrast == "good":
+        if 0.5 <= contrast_score <= 2.0:  # Good contrast
             aesthetic_score += 10
         
         # Penalty for poor quality
-        if is_blurry:
+        if laplacian_var < 100:  # Low sharpness
             aesthetic_score -= 20
-        if lighting_quality in ["too_dark", "too_bright"]:
+        if mean_brightness < 50 or mean_brightness > 200:  # Poor lighting
             aesthetic_score -= 15
-        if exposure in ["underexposed", "overexposed"]:
+        if dark_pixels > 0.4 or bright_pixels > 0.4:  # Poor exposure
             aesthetic_score -= 10
         
         aesthetic_score = max(0, min(100, aesthetic_score))  # Clamp 0-100
@@ -469,30 +454,26 @@ def analyze_image_quality(filepath: str) -> Dict[str, Any]:
         return {
             "blur_analysis": {
                 "laplacian_variance": round(laplacian_var, 2),
-                "is_blurry": is_blurry,
-                "blur_threshold": blur_threshold,
-                "sharpness_score": min(100, laplacian_var / 5)  # Rough 0-100 scale
+                "sharpness_score": round(min(1.0, laplacian_var / 500), 3)  # 0.0-1.0 scale
             },
             "lighting_analysis": {
                 "mean_brightness": round(mean_brightness, 2),
-                "brightness_std": round(brightness_std, 2),
-                "lighting_quality": lighting_quality,
-                "brightness_scale": "0=black, 255=white"
+                "lighting_quality": round(mean_brightness, 2)  # Raw brightness value instead of categorical
             },
             "exposure_analysis": {
-                "exposure_quality": exposure,
                 "dark_pixel_ratio": round(dark_pixels, 3),
                 "bright_pixel_ratio": round(bright_pixels, 3),
-                "histogram_balance": "good" if 0.1 < dark_pixels < 0.3 and bright_pixels < 0.1 else "poor"
+                "exposure_quality": round((1.0 - dark_pixels - bright_pixels) * 100, 1),  # 0-100 exposure quality score
+                "histogram_balance": round(brightness_std, 2)  # Raw std dev instead of good/poor
             },
             "contrast_analysis": {
                 "contrast_score": round(contrast_score, 2),
-                "contrast_quality": contrast,
-                "dynamic_range": "high" if brightness_std > 50 else "low"
+                "brightness_std": round(brightness_std, 2),
+                "contrast_quality": round(contrast_score * 25, 1),  # Scale 0-4 range to 0-100
+                "dynamic_range": round(brightness_std, 2)  # Raw std dev instead of high/low
             },
             "aesthetic_score": {
                 "score": aesthetic_score,
-                "scale": "0-100 (higher is better)",
                 "factors": "Based on sharpness, lighting, exposure, contrast"
             }
         }
@@ -515,73 +496,16 @@ def analyze_color_properties(filepath: str) -> Dict[str, Any]:
         # Get image statistics
         stat = ImageStat.Stat(img_pil)
         
-        # 1. COLOR STATISTICS
-        mean_colors = stat.mean  # R, G, B averages
-        std_colors = stat.stddev  # R, G, B standard deviations
-        
-        # 2. DOMINANT COLORS (simple quantization)
-        img_array = np.array(img_pil)
-        pixels = img_array.reshape(-1, 3)
-        
-        # Sample pixels for speed (every 10th pixel)
-        sampled_pixels = pixels[::10]
-        
-        # Find most common colors
-        unique_colors, counts = np.unique(sampled_pixels, axis=0, return_counts=True)
-        
-        # Get top 5 colors
-        top_indices = np.argsort(counts)[-5:][::-1]
-        dominant_colors = []
-        
-        for i in top_indices:
-            color = unique_colors[i]
-            count = counts[i]
-            percentage = (count / len(sampled_pixels)) * 100
-            
-            dominant_colors.append({
-                "rgb": [int(color[0]), int(color[1]), int(color[2])],
-                "hex": f"#{color[0]:02x}{color[1]:02x}{color[2]:02x}",
-                "percentage": round(percentage, 1)
-            })
-        
-        # 3. COLOR TEMPERATURE (simple estimation)
-        avg_r, avg_g, avg_b = mean_colors
-        
-        if avg_b > avg_r:
-            temp_description = "cool" 
-        elif avg_r > avg_b * 1.2:
-            temp_description = "warm"
-        else:
-            temp_description = "neutral"
-        
-        # 4. SATURATION ANALYSIS
+        # SATURATION ANALYSIS
         # Convert to HSV to analyze saturation
         img_hsv = img_pil.convert('HSV')
         hsv_stat = ImageStat.Stat(img_hsv)
         avg_saturation = hsv_stat.mean[1]  # S channel
         
-        if avg_saturation < 50:
-            saturation_level = "low"
-        elif avg_saturation > 150:
-            saturation_level = "high" 
-        else:
-            saturation_level = "moderate"
-        
         return {
-            "color_statistics": {
-                "mean_rgb": [round(c, 1) for c in mean_colors],
-                "std_rgb": [round(c, 1) for c in std_colors],
-                "color_variance": round(sum(std_colors) / 3, 1)
-            },
-            "dominant_colors": dominant_colors,
-            "color_temperature": {
-                "description": temp_description,
-                "red_blue_ratio": round(avg_r / max(avg_b, 1), 2)
-            },
             "saturation_analysis": {
                 "average_saturation": round(avg_saturation, 1),
-                "saturation_level": saturation_level,
-                "scale": "0=grayscale, 255=fully_saturated"
+                "saturation_level": round(avg_saturation, 1)  # Raw saturation value instead of low/moderate/high
             }
         }
         
@@ -608,12 +532,12 @@ def analyze_composition(filepath: str) -> Dict[str, Any]:
         
         if abs(aspect_ratio - 1.0) < 0.1:
             aspect_category = "square"
-        elif aspect_ratio > 1.5:
+        elif aspect_ratio > 1.2:
             aspect_category = "landscape"
-        elif aspect_ratio < 0.75:
+        elif aspect_ratio < 0.8:
             aspect_category = "portrait"
         else:
-            aspect_category = "standard"
+            aspect_category = "square"
         
         # 2. RULE OF THIRDS ANALYSIS
         # Divide image into 9 sections and analyze content distribution
@@ -635,13 +559,6 @@ def analyze_composition(filepath: str) -> Dict[str, Any]:
         edges = cv2.Canny(gray, 50, 150)
         edge_density = np.sum(edges > 0) / (width * height)
         
-        if edge_density < 0.05:
-            complexity = "simple"
-        elif edge_density > 0.15:
-            complexity = "complex"
-        else:
-            complexity = "moderate"
-        
         # 4. SYMMETRY ANALYSIS (simple)
         left_half = gray[:, :width//2]
         right_half = cv2.flip(gray[:, width//2:], 1)
@@ -661,98 +578,147 @@ def analyze_composition(filepath: str) -> Dict[str, Any]:
             },
             "rule_of_thirds": {
                 "section_brightness": [round(s, 1) for s in sections],
-                "most_interesting_section": most_interesting_section,
-                "section_layout": "0-8: top-left to bottom-right"
+                "most_interesting_section": most_interesting_section
             },
             "complexity_analysis": {
-                "edge_density": round(edge_density, 4),
-                "complexity_level": complexity,
-                "detail_description": f"{'Minimalist' if complexity == 'simple' else 'Busy' if complexity == 'complex' else 'Balanced'} composition"
+                "edge_density": round(edge_density, 3),
+                "complexity_level": round(edge_density * 100, 1)  # Scale edge density to 0-100 score
             },
             "symmetry_analysis": {
                 "horizontal_symmetry_score": round(symmetry_score, 3),
-                "symmetry_level": "high" if symmetry_score > 0.8 else "low" if symmetry_score < 0.5 else "moderate"
+                "symmetry_level": round(symmetry_score * 100, 1)  # Scale to 0-100 score
             }
         }
         
     except Exception as e:
         return {"error": f"Composition analysis failed: {str(e)}"}
 
-def generate_alt_text_suggestions(filepath: str, basic_metadata: Dict) -> Dict[str, Any]:
+def format_metadata_response(metadata_result: Dict[str, Any]) -> Dict[str, Any]:
     """
-    🎯 LOW-HANGING FRUIT: Alt-text generation based on image analysis
+    Format metadata extraction results into clean API response.
+    Uses pre-calculated values without duplication.
     """
     try:
-        # Extract basic image properties
-        img_pil = Image.open(filepath)
-        width, height = img_pil.size
-        format_name = img_pil.format or "Unknown"
+        metadata_data = metadata_result.get('metadata', {})
+        file_info = metadata_data.get('file_info', {})
+        advanced_analysis = metadata_data.get('advanced_analysis', {})
+        analysis_summary = metadata_data.get('analysis_summary', {})
+        categorized = metadata_data.get('categorized', {})
         
-        # Build descriptive alt-text
-        alt_components = []
+        # Extract pre-calculated analysis values
+        image_quality = advanced_analysis.get('image_quality', {})
+        composition = advanced_analysis.get('composition', {})
+        blur_analysis = image_quality.get('blur_analysis', {})
+        contrast_analysis = image_quality.get('contrast_analysis', {})
+        exposure_analysis = image_quality.get('exposure_analysis', {})
+        lighting_analysis = image_quality.get('lighting_analysis', {})
         
-        # 1. Format and orientation
-        if width > height * 1.3:
-            orientation = "landscape"
-        elif height > width * 1.3:
-            orientation = "portrait" 
-        else:
-            orientation = "square"
+        # Extract composition analysis
+        complexity_analysis = composition.get('complexity_analysis', {})
+        rule_of_thirds = composition.get('rule_of_thirds', {})
+        symmetry_analysis = composition.get('symmetry_analysis', {})
+        aspect_ratio = composition.get('aspect_ratio', {})
         
-        alt_components.append(f"{orientation} {format_name.lower()} image")
+        # Extract image dimensions and format
+        image_meta = categorized.get('image', {})
+        width = image_meta.get('File:ImageWidth') or aspect_ratio.get('dimensions', [0, 0])[0]
+        height = image_meta.get('File:ImageHeight') or aspect_ratio.get('dimensions', [0, 0])[1]
         
-        # 2. Size description
-        if width * height > 2000000:  # > 2MP
-            size_desc = "high resolution"
-        elif width * height < 100000:  # < 0.1MP
-            size_desc = "low resolution"
-        else:
-            size_desc = "medium resolution"
+        # Get file format from ExifTool metadata
+        file_format_raw = (
+            metadata_data.get('raw_metadata', {}).get('File:FileType') or
+            image_meta.get('File:FileType') or
+            'unknown'
+        )
+        file_format = file_format_raw.lower() if file_format_raw != 'unknown' else 'unknown'
         
-        alt_components.append(size_desc)
+        # Extract GPS data if available
+        gps_data = categorized.get('gps', {})
+        has_gps = bool(gps_data)
         
-        # 3. Check for common indicators in metadata
-        camera_info = basic_metadata.get("categorized", {}).get("camera", {})
-        datetime_info = basic_metadata.get("categorized", {}).get("datetime", {})
+        # Extract core EXIF data if available
+        camera_data = categorized.get('camera', {})
+        datetime_data = categorized.get('datetime', {})
+        exif_data = {}
         
-        if camera_info:
-            alt_components.append("photographed with camera")
+        # Combine useful EXIF fields from different categories
+        if camera_data:
+            exif_data.update({k: v for k, v in camera_data.items() if v is not None})
+        if datetime_data:
+            exif_data.update({k: v for k, v in datetime_data.items() if v is not None})
         
-        # 4. Technical quality indicators
-        quality_analysis = analyze_image_quality(filepath)
-        if not quality_analysis.get("error"):
-            blur_info = quality_analysis.get("blur_analysis", {})
-            if blur_info.get("is_blurry"):
-                alt_components.append("slightly blurred")
-            
-            lighting = quality_analysis.get("lighting_analysis", {}).get("lighting_quality")
-            if lighting == "too_dark":
-                alt_components.append("with low lighting")
-            elif lighting == "too_bright":
-                alt_components.append("with bright lighting")
+        has_exif = bool(exif_data)
         
-        # Generate different alt-text options
-        basic_alt = f"A {' '.join(alt_components)}"
-        technical_alt = f"{format_name} image ({width}x{height} pixels)"
-        descriptive_alt = f"{basic_alt} suitable for web display"
-        
-        return {
-            "alt_text_suggestions": {
-                "basic": basic_alt,
-                "technical": technical_alt, 
-                "descriptive": descriptive_alt,
-                "components_detected": alt_components
+        # Build clean prediction response using pre-extracted values
+        prediction = {
+            "dimensions": {
+                "height": height,
+                "width": width
             },
-            "accessibility_notes": {
-                "orientation": orientation,
-                "size_category": size_desc,
-                "has_camera_info": bool(camera_info),
-                "estimated_content_type": "photograph" if camera_info else "digital_image"
+            "aspect_ratio": {
+                "category": aspect_ratio.get('category', 'unknown'),
+                "ratio": round(aspect_ratio.get('ratio', 0), 1)
+            },
+            "file": {
+                "file_size": file_info.get('file_size'),
+                "file_type": file_format
+            },
+            "color_properties": {
+                "saturation_analysis": {
+                    "average_saturation": round(analysis_summary.get('saturation_level', 0), 1),
+                    "saturation_level": round(analysis_summary.get('saturation_level', 0), 1)
+                }
+            },
+            "composition": {
+                "complexity_analysis": {
+                    "complexity_level": round(analysis_summary.get('complexity_level', 0), 1),
+                    "edge_density": round(complexity_analysis.get('edge_density', 0), 3)
+                },
+                "rule_of_thirds": {
+                    "most_interesting_section": rule_of_thirds.get('most_interesting_section', 0),
+                    "section_brightness": [round(x, 1) for x in rule_of_thirds.get('section_brightness', [])]
+                },
+                "symmetry_analysis": {
+                    "horizontal_symmetry_score": round(symmetry_analysis.get('horizontal_symmetry_score', 0), 3),
+                    "symmetry_level": round(analysis_summary.get('symmetry_level', 0), 1)
+                }
+            },
+            "image_quality": {
+                "blur_analysis": {
+                    "laplacian_variance": round(blur_analysis.get('laplacian_variance', 0), 2),
+                    "sharpness_score": round(blur_analysis.get('sharpness_score', 0), 3)
+                },
+                "contrast_analysis": {
+                    "brightness_variation": round(contrast_analysis.get('brightness_std', 0), 2),
+                    "contrast_quality": round(analysis_summary.get('contrast_quality', 0), 1),
+                    "contrast_score": round(contrast_analysis.get('contrast_score', 0), 2),
+                    "dynamic_range": round(analysis_summary.get('dynamic_range', 0), 2)
+                },
+                "exposure_analysis": {
+                    "bright_pixel_ratio": round(exposure_analysis.get('bright_pixel_ratio', 0), 3),
+                    "dark_pixel_ratio": round(exposure_analysis.get('dark_pixel_ratio', 0), 3),
+                    "exposure_quality": round(analysis_summary.get('exposure_quality', 0), 3),
+                    "histogram_balance": round(analysis_summary.get('histogram_balance', 0), 3)
+                },
+                "lighting_analysis": {
+                    "lighting_quality": round(analysis_summary.get('lighting_quality', 0), 3),
+                    "mean_brightness": round(lighting_analysis.get('mean_brightness', 0), 3)
+                }
             }
         }
         
+        # Include GPS data if available
+        if has_gps and gps_data:
+            prediction["gps_data"] = {k: v for k, v in gps_data.items() if v is not None}
+        
+        # Include EXIF data if available
+        if has_exif and exif_data:
+            prediction["exif_data"] = exif_data
+        
+        return prediction
+        
     except Exception as e:
-        return {"error": f"Alt-text generation failed: {str(e)}"}
+        raise ValueError(f"Failed to format metadata response: {str(e)}")
 
 app = Flask(__name__)
 
@@ -800,308 +766,44 @@ def health_check():
         },
         "endpoints": [
             "GET /health - Health check",
-            "GET /?url=<image_url> - Extract metadata from URL",
-            "GET /?path=<local_path> - Extract metadata from local file (if not private)",
-            "POST / - Upload and extract metadata from image"
+            "GET /v3/analyze?url=<url> - Extract metadata from URL (V3 unified)",
+            "GET /v3/analyze?file=<path> - Extract metadata from local file (V3 unified)",
+            "GET /v2/analyze?image_url=<url> - Extract metadata from URL (V2 compatibility)",
+            "GET /v2/analyze_file?file_path=<path> - Extract metadata from local file (V2 compatibility)"
         ]
     })
 
-@app.route('/v2/analyze_file', methods=['GET'])
-def analyze_file_v2():
-    """V2 API endpoint for direct file path analysis"""
+@app.route('/v3/analyze', methods=['GET'])
+def analyze_v3():
+    """Unified V3 API endpoint for both URL and file path analysis"""
     import time
     start_time = time.time()
     
     try:
-        # Get file path from query parameters
-        file_path = request.args.get('file_path')
-        if not file_path:
+        # Get input parameters - support both url and file
+        url = request.args.get('url')
+        file = request.args.get('file')
+        
+        # Validate input - exactly one parameter must be provided
+        if not url and not file:
             return jsonify({
                 "service": "metadata",
                 "status": "error",
                 "predictions": [],
-                "error": {"message": "Missing file_path parameter"},
+                "error": {"message": "Must provide either url or file parameter"},
                 "metadata": {"processing_time": round(time.time() - start_time, 3)}
             }), 400
         
-        # Validate file path
-        if not os.path.exists(file_path):
+        if url and file:
             return jsonify({
                 "service": "metadata",
                 "status": "error",
                 "predictions": [],
-                "error": {"message": f"File not found: {file_path}"},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 404
-        
-        # For metadata service, we need to copy file to FOLDER since extract_comprehensive_metadata expects it there
-        temp_filename = uuid.uuid4().hex + ".jpg"
-        temp_filepath = os.path.join(FOLDER, temp_filename)
-        
-        try:
-            # Copy the file to temp location
-            import shutil
-            shutil.copy2(file_path, temp_filepath)
-            
-            # Extract metadata using existing function (no cleanup - we handle temp file)
-            result = extract_comprehensive_metadata(temp_filename, cleanup=False)
-            
-            # Clean up temporary file
-            cleanup_file(temp_filepath)
-            
-            if result.get('status') == 'error':
-                return jsonify({
-                    "service": "metadata",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": result.get('error', 'Metadata extraction failed')},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 500
-            
-            # Convert to v2 unified format with all advanced analysis
-            metadata_data = result.get('metadata', {})
-            file_info = metadata_data.get('file_info', {})
-            advanced_analysis = metadata_data.get('advanced_analysis', {})
-            analysis_summary = metadata_data.get('analysis_summary', {})
-            categorized = metadata_data.get('categorized', {})
-            
-            # Extract image dimensions from categorized metadata
-            image_meta = categorized.get('image', {})
-            width = image_meta.get('File:ImageWidth') or advanced_analysis.get('composition', {}).get('aspect_ratio', {}).get('dimensions', [0, 0])[0]
-            height = image_meta.get('File:ImageHeight') or advanced_analysis.get('composition', {}).get('aspect_ratio', {}).get('dimensions', [0, 0])[1]
-            
-            # Create unified prediction format
-            predictions = []
-            
-            # Main metadata extraction prediction
-            prediction = {
-                "type": "metadata_extraction",
-                "label": "image_metadata",
-                "confidence": 1.0,
-                "properties": {
-                    # Basic file info
-                    "file_size": file_info.get('file_size'),
-                    "file_type": file_info.get('format', 'unknown'),
-                    "dimensions": {
-                        "width": width,
-                        "height": height
-                    },
-                    "has_exif": metadata_data.get('summary', {}).get('has_exif_data', False),
-                    "has_gps": metadata_data.get('summary', {}).get('has_gps_data', False),
-                    "categories": list(metadata_data.get('categorized', {}).keys()),
-                    
-                    # Advanced analysis
-                    "quality_analysis": {
-                        "aesthetic_score": analysis_summary.get('aesthetic_score', 0),
-                        "is_blurry": analysis_summary.get('is_blurry', False),
-                        "lighting_quality": analysis_summary.get('lighting_quality', 'unknown'),
-                        "sharpness_score": advanced_analysis.get('image_quality', {}).get('blur_analysis', {}).get('sharpness_score', 0)
-                    },
-                    "color_analysis": {
-                        "dominant_color": analysis_summary.get('dominant_color', '#000000'),
-                        "color_temperature": advanced_analysis.get('color_properties', {}).get('color_temperature', {}).get('description', 'unknown'),
-                        "dominant_colors": advanced_analysis.get('color_properties', {}).get('dominant_colors', [])[:3]  # Top 3
-                    },
-                    "composition_analysis": {
-                        "complexity": analysis_summary.get('composition_complexity', 'unknown'),
-                        "aspect_ratio": advanced_analysis.get('composition', {}).get('aspect_ratio', {}).get('category', 'unknown'),
-                        "symmetry_level": advanced_analysis.get('composition', {}).get('symmetry_analysis', {}).get('symmetry_level', 'unknown')
-                    },
-                    "accessibility": {
-                        "alt_text_basic": advanced_analysis.get('alt_text', {}).get('alt_text_suggestions', {}).get('basic', ''),
-                        "alt_text_technical": advanced_analysis.get('alt_text', {}).get('alt_text_suggestions', {}).get('technical', ''),
-                        "content_type": analysis_summary.get('estimated_content_type', 'unknown')
-                    },
-                    
-                    # Full analysis for power users
-                    "full_analysis": advanced_analysis
-                }
-            }
-            
-            predictions.append(prediction)
-            
-            return jsonify({
-                "service": "metadata",
-                "status": "success",
-                "predictions": predictions,
-                "metadata": {
-                    "processing_time": round(time.time() - start_time, 3),
-                    "model_info": {
-                        "name": "Advanced Metadata Extractor",
-                        "framework": "ExifTool + PIL + OpenCV + NumPy",
-                        "version": "2.0",
-                        "features": ["metadata_extraction", "quality_analysis", "color_analysis", "composition_analysis", "accessibility"]
-                    },
-                    "image_dimensions": {
-                        "width": width,
-                        "height": height
-                    }
-                }
-            })
-            
-        except Exception as copy_error:
-            # Clean up temp file on error
-            if os.path.exists(temp_filepath):
-                cleanup_file(temp_filepath)
-            raise copy_error
-        
-    except Exception as e:
-        return jsonify({
-            "service": "metadata",
-            "status": "error",
-            "predictions": [],
-            "error": {"message": f"Internal error: {str(e)}"},
-            "metadata": {"processing_time": round(time.time() - start_time, 3)}
-        }), 500
-
-@app.route('/v2/analyze', methods=['GET'])
-def analyze_v2():
-    """V2 API endpoint with unified response format"""
-    import time
-    start_time = time.time()
-    
-    try:
-        # Get image URL from query parameters
-        image_url = request.args.get('image_url')
-        if not image_url:
-            return jsonify({
-                "service": "metadata",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": "Missing image_url parameter"},
+                "error": {"message": "Cannot provide both url and file parameters"},
                 "metadata": {"processing_time": round(time.time() - start_time, 3)}
             }), 400
         
-        # Download and process image
-        try:
-            filename = uuid.uuid4().hex + ".jpg"
-            filepath = os.path.join(FOLDER, filename)
-            response = requests.get(image_url, timeout=10)
-            response.raise_for_status()
-            
-            if len(response.content) > MAX_FILE_SIZE:
-                raise ValueError("Downloaded file too large")
-            
-            with open(filepath, "wb") as file:
-                file.write(response.content)
-            
-            # Analyze using existing function
-            result = extract_comprehensive_metadata(filename)
-            
-            if result.get('status') == 'error':
-                return jsonify({
-                    "service": "metadata",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": result.get('error', 'Metadata extraction failed')},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 500
-            
-            # Convert to v2 unified format with all our new analysis!
-            metadata_data = result.get('metadata', {})
-            file_info = metadata_data.get('file_info', {})
-            advanced_analysis = metadata_data.get('advanced_analysis', {})
-            analysis_summary = metadata_data.get('analysis_summary', {})
-            categorized = metadata_data.get('categorized', {})
-            
-            # Extract image dimensions from categorized metadata
-            image_meta = categorized.get('image', {})
-            width = image_meta.get('File:ImageWidth') or advanced_analysis.get('composition', {}).get('aspect_ratio', {}).get('dimensions', [0, 0])[0]
-            height = image_meta.get('File:ImageHeight') or advanced_analysis.get('composition', {}).get('aspect_ratio', {}).get('dimensions', [0, 0])[1]
-            
-            # Create unified prediction format with ALL our new analysis!
-            predictions = []
-            
-            # Main metadata extraction prediction
-            prediction = {
-                "type": "metadata_extraction",
-                "label": "image_metadata",
-                "confidence": 1.0,
-                "properties": {
-                    # Basic file info
-                    "file_size": file_info.get('file_size'),
-                    "file_type": file_info.get('format', 'unknown'),
-                    "dimensions": {
-                        "width": width,
-                        "height": height
-                    },
-                    "has_exif": metadata_data.get('summary', {}).get('has_exif_data', False),
-                    "has_gps": metadata_data.get('summary', {}).get('has_gps_data', False),
-                    "categories": list(metadata_data.get('categorized', {}).keys()),
-                    
-                    # 🎯 NEW: All the advanced analysis!
-                    "quality_analysis": {
-                        "aesthetic_score": analysis_summary.get('aesthetic_score', 0),
-                        "is_blurry": analysis_summary.get('is_blurry', False),
-                        "lighting_quality": analysis_summary.get('lighting_quality', 'unknown'),
-                        "sharpness_score": advanced_analysis.get('image_quality', {}).get('blur_analysis', {}).get('sharpness_score', 0)
-                    },
-                    "color_analysis": {
-                        "dominant_color": analysis_summary.get('dominant_color', '#000000'),
-                        "color_temperature": advanced_analysis.get('color_properties', {}).get('color_temperature', {}).get('description', 'unknown'),
-                        "dominant_colors": advanced_analysis.get('color_properties', {}).get('dominant_colors', [])[:3]  # Top 3
-                    },
-                    "composition_analysis": {
-                        "complexity": analysis_summary.get('composition_complexity', 'unknown'),
-                        "aspect_ratio": advanced_analysis.get('composition', {}).get('aspect_ratio', {}).get('category', 'unknown'),
-                        "symmetry_level": advanced_analysis.get('composition', {}).get('symmetry_analysis', {}).get('symmetry_level', 'unknown')
-                    },
-                    "accessibility": {
-                        "alt_text_basic": advanced_analysis.get('alt_text', {}).get('alt_text_suggestions', {}).get('basic', ''),
-                        "alt_text_technical": advanced_analysis.get('alt_text', {}).get('alt_text_suggestions', {}).get('technical', ''),
-                        "content_type": analysis_summary.get('estimated_content_type', 'unknown')
-                    },
-                    
-                    # Full analysis for power users
-                    "full_analysis": advanced_analysis
-                }
-            }
-            
-            predictions.append(prediction)
-            
-            return jsonify({
-                "service": "metadata",
-                "status": "success",
-                "predictions": predictions,
-                "metadata": {
-                    "processing_time": round(time.time() - start_time, 3),
-                    "model_info": {
-                        "name": "Advanced Metadata Extractor",
-                        "framework": "ExifTool + PIL + OpenCV + NumPy",
-                        "version": "2.0",
-                        "features": ["metadata_extraction", "quality_analysis", "color_analysis", "composition_analysis", "accessibility"]
-                    },
-                    "image_dimensions": {
-                        "width": width,
-                        "height": height
-                    }
-                }
-            })
-            
-        except Exception as e:
-            return jsonify({
-                "service": "metadata",
-                "status": "error", 
-                "predictions": [],
-                "error": {"message": f"Failed to process image: {str(e)}"},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 500
-        
-    except Exception as e:
-        return jsonify({
-            "service": "metadata",
-            "status": "error",
-            "predictions": [],
-            "error": {"message": f"Internal error: {str(e)}"},
-            "metadata": {"processing_time": round(time.time() - start_time, 3)}
-        }), 500
-
-@app.route('/', methods=['GET', 'POST'])
-def index():
-    if request.method == 'GET':
-        url = request.args.get('url') or request.args.get('img')  # Accept both 'url' and 'img' parameters
-        path = request.args.get('path')
-
+        # Process URL input
         if url:
             try:
                 filename = uuid.uuid4().hex + ".jpg"
@@ -1110,117 +812,130 @@ def index():
                 response.raise_for_status()
                 
                 if len(response.content) > MAX_FILE_SIZE:
-                    return jsonify({
-                        "error": f"Image too large. Maximum size: {MAX_FILE_SIZE // 1024 // 1024}MB",
-                        "status": "error"
-                    }), 400
+                    raise ValueError("Downloaded file too large")
                 
-                with open(filepath, "wb") as file:
-                    file.write(response.content)
+                with open(filepath, "wb") as file_handle:
+                    file_handle.write(response.content)
                 
-                result = jsonify(extract_comprehensive_metadata(filename))
-                # extract_comprehensive_metadata already does cleanup
-                return result
+                # Analyze using existing function
+                result = extract_comprehensive_metadata(filename)
                 
-            except requests.exceptions.RequestException as e:
-                # Cleanup on error
-                if 'filepath' in locals() and os.path.exists(filepath):
-                    cleanup_file(filepath)
-                return jsonify({
-                    "error": f"Failed to download image: {str(e)}",
-                    "status": "error"
-                }), 400
             except Exception as e:
-                # Cleanup on error
-                if 'filepath' in locals() and os.path.exists(filepath):
-                    cleanup_file(filepath)
                 return jsonify({
-                    "error": f"Image processing failed: {str(e)}",
-                    "status": "error"
+                    "service": "metadata",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": f"Failed to process image from URL: {str(e)}"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
                 }), 500
-                
-        elif path:
-            if PRIVATE:
-                return jsonify({
-                    "error": "Local file access disabled in private mode",
-                    "status": "error"
-                }), 403
-            
-            if not os.path.exists(os.path.join(FOLDER, path)):
-                return jsonify({
-                    "error": "File not found",
-                    "status": "error"
-                }), 404
-                
-            return jsonify(extract_comprehensive_metadata(path))
-            
-        else:
-            try:
-                with open('form.html', 'r') as file:
-                    return file.read()
-            except FileNotFoundError:
-                return '''<!DOCTYPE html>
-<html>
-<head><title>Metadata Extraction API</title></head>
-<body>
-<h2>Image Metadata Extraction Service</h2>
-<form enctype="multipart/form-data" method="POST">
-    <input type="file" name="uploadedfile" accept="image/*" required><br><br>
-    <input type="submit" value="Extract Metadata">
-</form>
-<p><strong>API Usage:</strong></p>
-<ul>
-    <li>GET /?url=&lt;image_url&gt; - Extract metadata from URL</li>
-    <li>POST with file upload - Extract metadata from uploaded image</li>
-    <li>GET /health - Service health check</li>
-</ul>
-<p><strong>Extracted Information:</strong></p>
-<ul>
-    <li>Camera settings (ISO, aperture, shutter speed, etc.)</li>
-    <li>GPS location data</li>
-    <li>Image properties (dimensions, color profile, etc.)</li>
-    <li>Creation and modification dates</li>
-    <li>Software and processing information</li>
-    <li>Technical specifications</li>
-</ul>
-</body>
-</html>'''
-    
-    elif request.method == 'POST':
-        if not request.files:
-            return jsonify({
-                "error": "No file uploaded",
-                "status": "error"
-            }), 400
         
-        for field_name, file_data in request.files.items():
-            if not file_data.filename:
-                continue
-                
-            try:
-                filename = uuid.uuid4().hex + ".jpg"
-                file_data.save(os.path.join(FOLDER, filename))
-                
-                file_size = os.path.getsize(os.path.join(FOLDER, filename))
-                if file_size > MAX_FILE_SIZE:
-                    cleanup_file(os.path.join(FOLDER, filename))
-                    return jsonify({
-                        "error": f"File too large. Maximum size: {MAX_FILE_SIZE // 1024 // 1024}MB",
-                        "status": "error"
-                    }), 400
-                
-                return jsonify(extract_comprehensive_metadata(filename))
-                
-            except Exception as e:
+        # Process file input
+        elif file:
+            # Validate file path
+            if not os.path.exists(file):
                 return jsonify({
-                    "error": f"File processing failed: {str(e)}",
-                    "status": "error"
-                }), 500
+                    "service": "metadata",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": f"File not found: {file}"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 404
+            
+            # Copy file to temp location for processing
+            temp_filename = uuid.uuid4().hex + ".jpg"
+            temp_filepath = os.path.join(FOLDER, temp_filename)
+            
+            try:
+                import shutil
+                shutil.copy2(file, temp_filepath)
+                
+                # Extract metadata using existing function (no cleanup - we handle temp file)
+                result = extract_comprehensive_metadata(temp_filename, cleanup=False)
+                
+                # Clean up temporary file
+                cleanup_file(temp_filepath)
+                
+            except Exception as copy_error:
+                # Clean up temp file on error
+                if os.path.exists(temp_filepath):
+                    cleanup_file(temp_filepath)
+                raise copy_error
+        
+        # Handle extraction errors
+        if result.get('status') == 'error':
+            return jsonify({
+                "service": "metadata",
+                "status": "error",
+                "predictions": [],
+                "error": {"message": result.get('error', 'Metadata extraction failed')},
+                "metadata": {"processing_time": round(time.time() - start_time, 3)}
+            }), 500
+        
+        # Use formatting function to convert raw analysis to clean API response
+        try:
+            prediction = format_metadata_response(result)
+        except ValueError as e:
+            return jsonify({
+                "service": "metadata",
+                "status": "error",
+                "predictions": [],
+                "error": {"message": str(e)},
+                "metadata": {"processing_time": round(time.time() - start_time, 3)}
+            }), 500
+        
+        predictions = [prediction]
         
         return jsonify({
-            "error": "No valid file found in upload",
-            "status": "error"
-        }), 400
+            "service": "metadata",
+            "status": "success",
+            "predictions": predictions,
+            "metadata": {
+                "processing_time": round(time.time() - start_time, 3),
+                "model_info": {
+                    "framework": "ExifTool + PIL + OpenCV + NumPy"
+                }
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "service": "metadata",
+            "status": "error",
+            "predictions": [],
+            "error": {"message": f"Internal error: {str(e)}"},
+            "metadata": {"processing_time": round(time.time() - start_time, 3)}
+        }), 500
+
+@app.route('/v2/analyze_file', methods=['GET'])
+def analyze_file_v2_compat():
+    """V2 file compatibility - translate parameters to V3 format"""
+    file_path = request.args.get('file_path')
+    
+    if file_path:
+        # Parameter translation: file_path -> file
+        new_args = {'file': file_path}
+        with app.test_request_context('/v3/analyze', query_string=new_args):
+            return analyze_v3()
+    else:
+        # Let V3 handle validation errors
+        with app.test_request_context('/v3/analyze'):
+            return analyze_v3()
+
+@app.route('/v2/analyze', methods=['GET'])
+def analyze_v2_compat():
+    """V2 compatibility - translate parameters to V3 format"""
+    image_url = request.args.get('image_url')
+    
+    if image_url:
+        # Parameter translation: image_url -> url
+        new_args = {'url': image_url}
+        with app.test_request_context('/v3/analyze', query_string=new_args):
+            return analyze_v3()
+    else:
+        # Let V3 handle validation errors
+        with app.test_request_context('/v3/analyze'):
+            return analyze_v3()
+
 
 if __name__ == '__main__':
     # Test ExifTool availability

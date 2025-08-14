@@ -1,24 +1,38 @@
-# Metadata Extraction Service - Comprehensive Image Metadata Analysis
+# Metadata Extraction Service
 
-Advanced metadata extraction service that extracts the maximum possible metadata from images using multiple extraction engines. Designed for consistent, comprehensive results across all image formats.
+**Port**: 7781  
+**Framework**: ExifTool + PIL + OpenCV + NumPy  
+**Purpose**: Comprehensive image metadata extraction with advanced analysis  
+**Status**: ✅ Active
+
+## Overview
+
+The Metadata Extraction Service provides comprehensive image metadata analysis using multiple extraction engines. It combines traditional EXIF data extraction with advanced computer vision analysis including quality assessment, composition analysis, and accessibility features.
 
 ## Features
 
-- **Dual Extraction Engines**: ExifTool + PIL/Pillow for maximum coverage
-- **Comprehensive Analysis**: Camera settings, GPS data, technical specs, software info
-- **Categorized Output**: Automatically organizes metadata into logical categories
-- **Multiple Formats**: Supports JPEG, PNG, TIFF, RAW, GIF, BMP, WEBP, and more
-- **File System Info**: File size, timestamps, and hash generation
-- **Consistent Results**: Robust error handling and fallback mechanisms
-- **RESTful API**: Structured JSON responses with detailed metadata
+- **Modern V3 API**: Clean, unified endpoint with intuitive parameters
+- **Unified Input Handling**: Single endpoint for both URL and file path analysis
+- **Multiple Extraction Engines**: ExifTool, PIL/Pillow, and OpenCV integration
+- **Advanced Analysis**: Image quality, color properties, composition, and accessibility
+- **Comprehensive Metadata**: Camera settings, GPS data, technical specifications
+- **Security**: File validation, size limits, secure cleanup
+- **Performance**: Efficient processing with automated categorization
 
-## Quick Start
+## Installation
 
 ### Prerequisites
 
+- Python 3.8+
+- ExifTool system package
+- OpenCV and NumPy for advanced analysis
+- 4GB+ RAM (8GB+ recommended for large images)
+
+### 1. Environment Setup
+
 ```bash
-# Install ExifTool (critical for maximum metadata extraction)
-sudo apt-get install exiftool
+# Navigate to metadata directory
+cd /home/sd/animal-farm/metadata
 
 # Create virtual environment
 python3 -m venv metadata_venv
@@ -26,347 +40,451 @@ python3 -m venv metadata_venv
 # Activate virtual environment
 source metadata_venv/bin/activate
 
-# Install Python dependencies
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### Configuration
+### 2. System Dependencies
 
-1. Copy environment template:
-```bash
-cp .env.sample .env
-```
-
-2. Edit `.env` file:
-```bash
-# API Settings
-PORT=7781
-PRIVATE=false  # true for localhost only, false for all interfaces
-```
-
-### Running the Service
+Install ExifTool system package:
 
 ```bash
-# Direct execution
-python3 REST.py
+# Ubuntu/Debian
+sudo apt-get update
+sudo apt-get install exiftool
 
-# Using startup script
-./metadata.sh
+# macOS
+brew install exiftool
 
-# As systemd service
-sudo systemctl start metadata-api
-sudo systemctl enable metadata-api
+# CentOS/RHEL
+sudo yum install perl-Image-ExifTool
 ```
+
+### 3. Verify Installation
+
+```bash
+# Test ExifTool availability
+exiftool -ver
+
+# Test Python imports
+python -c "import cv2, numpy, PIL; print('Dependencies OK')"
+```
+
+## Configuration
+
+### Environment Variables (.env)
+
+Create a `.env` file in the metadata directory:
+
+```bash
+# Service Configuration
+PORT=7781                    # Service port (default: 7781)
+PRIVATE=false               # Access mode (false=public, true=localhost-only)
+```
+
+### Configuration Details
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PORT` | Yes | - | Service listening port |
+| `PRIVATE` | Yes | - | Access control (false=public, true=localhost-only) |
+
+### Advanced Analysis Features
+
+The service provides comprehensive analysis across multiple categories:
+
+| Category | Features | Description |
+|----------|----------|-------------|
+| **Quality Analysis** | Blur detection, lighting, exposure, contrast, aesthetic scoring | Technical image quality assessment |
+| **Color Properties** | Saturation analysis, color statistics | Color composition analysis |
+| **Composition** | Aspect ratio, rule of thirds, complexity, symmetry | Artistic composition evaluation |
+| **GPS Data** | GPS coordinates, location metadata | Geographic information when available |
 
 ## API Endpoints
 
 ### Health Check
+
 ```bash
 GET /health
 ```
 
-Returns service status and extraction engine availability.
-
-### Extract Metadata from URL
-```bash
-GET /?url=https://example.com/image.jpg
-```
-
-### Extract Metadata from File Upload
-```bash
-POST /
-Content-Type: multipart/form-data
-
-# Include image file in form data
-```
-
-### Local File Analysis (if not in private mode)
-```bash
-GET /?path=local_image.jpg
-```
-
-## Response Format
-
+**Response:**
 ```json
 {
-  "metadata": {
-    "file_info": {
-      "filename": "IMG_1234.jpg",
-      "file_size": 2048576,
-      "file_size_human": "2.0 MB",
-      "created_time": "2023-12-01T14:30:00",
-      "modified_time": "2023-12-01T14:30:00"
+  "status": "healthy",
+  "service": "Metadata Extraction",
+  "extraction_engines": {
+    "exiftool": {
+      "available": true,
+      "status": "Available"
     },
-    "file_hash": "a1b2c3d4e5f6...",
-    "summary": {
-      "total_metadata_tags": 156,
-      "categories_found": 6,
-      "has_exif_data": true,
-      "has_gps_data": true,
-      "has_camera_info": true,
-      "extraction_methods": ["ExifTool", "PIL/Pillow"],
-      "processing_time": 0.234
-    },
-    "categorized": {
-      "camera": {
-        "EXIF:Make": "Canon",
-        "EXIF:Model": "EOS R5",
-        "EXIF:LensModel": "RF24-70mm F2.8 L IS USM",
-        "EXIF:FocalLength": "35.0 mm",
-        "EXIF:FNumber": 2.8,
-        "EXIF:ISO": 400,
-        "EXIF:ShutterSpeedValue": "1/250",
-        "EXIF:Flash": "No Flash"
-      },
-      "gps": {
-        "GPS:GPSLatitude": "37.7749 N",
-        "GPS:GPSLongitude": "122.4194 W",
-        "GPS:GPSAltitude": "16.0 m Above Sea Level",
-        "GPS:GPSDateTime": "2023:12:01 14:30:00Z"
-      },
-      "datetime": {
-        "EXIF:DateTime": "2023:12:01 14:30:00",
-        "EXIF:DateTimeOriginal": "2023:12:01 14:30:00",
-        "EXIF:CreateDate": "2023:12:01 14:30:00"
-      },
-      "image": {
-        "EXIF:ImageWidth": 6000,
-        "EXIF:ImageHeight": 4000,
-        "EXIF:Orientation": "Horizontal (normal)",
-        "EXIF:ColorSpace": "sRGB",
-        "EXIF:Resolution": "72 dpi"
-      },
-      "software": {
-        "EXIF:Software": "Adobe Lightroom 6.0",
-        "EXIF:ProcessingSoftware": "Lightroom",
-        "XMP:CreatorTool": "Adobe Lightroom"
-      },
-      "technical": {
-        "File:FileType": "JPEG",
-        "EXIF:Compression": "JPEG",
-        "EXIF:BitsPerSample": "8 8 8",
-        "EXIF:ColorComponents": 3
-      }
-    },
-    "raw_metadata": {
-      "...": "Complete unfiltered metadata from all sources"
-    },
-    "extraction_info": {
-      "pil_result": "success",
-      "exiftool_result": "success",
-      "total_extraction_time": 0.234
-    },
-    "status": "success"
+    "pil_pillow": {
+      "available": true,
+      "status": "Available"
+    }
+  },
+  "features": {
+    "metadata_categories": ["camera", "image", "gps", "datetime", "software", "technical"],
+    "extraction_methods": ["comprehensive_exif", "image_properties", "file_system_info"],
+    "advanced_analysis": {
+      "image_quality": ["blur_detection", "lighting_analysis", "exposure_analysis", "contrast_analysis", "aesthetic_scoring"],
+      "color_properties": ["dominant_colors", "color_statistics", "color_temperature", "saturation_analysis"],
+      "composition": ["aspect_ratio", "rule_of_thirds", "complexity_analysis", "symmetry_analysis"],
+      "gps_data": ["coordinate_extraction", "location_metadata", "geographic_information"]
+    }
   }
 }
 ```
 
-## Extraction Engines
+### Analyze Image (Unified Endpoint)
 
-### 1. ExifTool (Primary Engine)
-- **Coverage**: Most comprehensive metadata extraction available
-- **Supports**: 600+ file formats, proprietary RAW formats, video files
-- **Extracts**: EXIF, IPTC, XMP, GPS, maker notes, and vendor-specific data
-- **Advantages**: Industry standard, regularly updated, handles edge cases
+The unified `/v3/analyze` endpoint accepts either URL or file path input:
 
-### 2. PIL/Pillow (Secondary Engine)  
-- **Coverage**: Standard image formats and basic EXIF
-- **Supports**: JPEG, PNG, TIFF, GIF, BMP, WEBP
-- **Extracts**: Basic EXIF, image properties, format-specific info
-- **Advantages**: Python native, fast processing, good for validation
-
-## Metadata Categories
-
-The service automatically categorizes extracted metadata:
-
-### Camera Information
-- Camera make and model
-- Lens information and focal length
-- Exposure settings (ISO, aperture, shutter speed)
-- Flash and focus information
-- Shooting modes and scene settings
-
-### GPS Location Data
-- Latitude and longitude coordinates
-- Altitude and direction information
-- GPS timestamp and datum
-- Location accuracy and method
-
-### Date/Time Information
-- Original capture time
-- File creation and modification dates
-- GPS timestamp
-- Software processing dates
-
-### Image Properties
-- Dimensions and resolution
-- Color space and profile
-- Orientation and rotation
-- Compression and quality settings
-
-### Software Information
-- Camera firmware version
-- Processing software used
-- Creator and editor tools
-- Software-specific metadata
-
-### Technical Specifications
-- File format and compression
-- Bit depth and color components
-- Encoding and profile information
-- Format-specific technical data
-
-## Advanced Features
-
-### File Hash Generation
-- SHA3-256 hash for image integrity verification
-- Base64 encoding for consistent hashing
-- Useful for duplicate detection and verification
-
-### Error Resilience
-- Graceful fallback when extraction engines fail
-- Partial results when some metadata is corrupted
-- Detailed error reporting for troubleshooting
-
-### Performance Optimization
-- Efficient metadata caching
-- Minimal file I/O operations
-- Fast categorization algorithms
-
-## Supported File Formats
-
-### Primary Support (Full Metadata)
-- **JPEG/JPG**: Complete EXIF, IPTC, XMP extraction
-- **TIFF**: Multi-page support, embedded profiles
-- **RAW Formats**: Canon CR2/CR3, Nikon NEF, Sony ARW, etc.
-- **PNG**: Text chunks, color profiles
-- **WEBP**: Extended metadata support
-
-### Secondary Support (Basic Metadata)
-- **GIF**: Basic properties and comments
-- **BMP**: Header information
-- **HEIC/HEIF**: Modern mobile formats
-- **PSD**: Photoshop documents
-
-## Usage Examples
-
-### Batch Processing
+#### Analyze Image from URL
 ```bash
-# Process multiple images
-for image in *.jpg; do
-    curl -X POST -F "uploadedfile=@$image" http://localhost:7776/
-done
+GET /v3/analyze?url=<image_url>
 ```
 
-### GPS Data Extraction
+**Example:**
 ```bash
-# Extract only GPS information
-curl "http://localhost:7776/?url=https://example.com/gps_photo.jpg" | jq '.metadata.categorized.gps'
+curl "http://localhost:7781/v3/analyze?url=https://example.com/image.jpg"
 ```
 
-### Camera Information Analysis
+#### Analyze Image from File Path
 ```bash
-# Get camera settings
-curl "http://localhost:7776/?url=https://example.com/photo.jpg" | jq '.metadata.categorized.camera'
+GET /v3/analyze?file=<file_path>
 ```
 
-## Performance Metrics
+**Example:**
+```bash
+curl "http://localhost:7781/v3/analyze?file=/path/to/image.jpg"
+```
 
-- **Processing Time**: 0.1-0.5 seconds per image (typical)
-- **Memory Usage**: 50-100MB per image during processing
-- **Throughput**: 10-50 images per second (depending on size and complexity)
-- **Accuracy**: 99%+ metadata extraction success rate
+**Input Validation:**
+- Exactly one parameter must be provided (`url` OR `file`)
+- Cannot provide both parameters simultaneously
+- Returns error if neither parameter is provided
 
-## Error Handling
-
-Comprehensive error handling for common scenarios:
-
+**Response Format:**
 ```json
 {
-  "error": "Metadata extraction failed: Unsupported file format",
-  "status": "error"
+  "metadata": {
+    "model_info": {
+      "framework": "ExifTool + PIL + OpenCV + NumPy"
+    },
+    "processing_time": 0.122
+  },
+  "predictions": [
+    {
+      "color_properties": {
+        "saturation_analysis": {
+          "average_saturation": 81.1,
+          "saturation_level": 81.1
+        }
+      },
+      "composition": {
+        "complexity_analysis": {
+          "complexity_level": 19.3,
+          "edge_density": 0.193
+        },
+        "rule_of_thirds": {
+          "most_interesting_section": 7,
+          "section_brightness": [93.2, 104.8, 92.5, 146.1, 167.5, 88.3, 106.1, 138.2, 54.5]
+        },
+        "symmetry_analysis": {
+          "horizontal_symmetry_score": 0.732,
+          "symmetry_level": 73.2
+        }
+      },
+      "dimensions": {
+        "height": 457,
+        "width": 640
+      },
+      "aspect_ratio": {
+        "category": "landscape",
+        "ratio": 1.4
+      },
+      "file": {
+        "file_size": 111494,
+        "file_type": "jpeg"
+      },
+      "image_quality": {
+        "blur_analysis": {
+          "laplacian_variance": 2449.82,
+          "sharpness_score": 1.0
+        },
+        "contrast_analysis": {
+          "brightness_variation": 68.38,
+          "contrast_quality": 26.7,
+          "contrast_score": 1.07,
+          "dynamic_range": 68.38
+        },
+        "exposure_analysis": {
+          "bright_pixel_ratio": 0.09,
+          "dark_pixel_ratio": 0.041,
+          "exposure_quality": 86.9,
+          "histogram_balance": 68.38
+        },
+        "lighting_analysis": {
+          "lighting_quality": 110.01,
+          "mean_brightness": 110.01
+        }
+      }
+    }
+  ],
+  "service": "metadata",
+  "status": "success"
 }
 ```
 
-Common error types:
-- File too large (>8MB limit)
-- Unsupported file format
-- Corrupted image data
-- ExifTool unavailable
-- Network timeouts for URL downloads
+### V2 Compatibility Endpoints
+
+Legacy V2 endpoints remain available for backward compatibility:
+
+#### V2 URL Analysis
+```bash
+GET /v2/analyze?image_url=<image_url>
+```
+
+#### V2 File Analysis
+```bash
+GET /v2/analyze_file?file_path=<file_path>
+```
+
+Both V2 endpoints return the same format as V3 but with parameter translation.
+
+## Service Management
+
+### Manual Startup
+
+```bash
+# Start service
+cd /home/sd/animal-farm/metadata
+python REST.py
+```
+
+### Systemd Service
+
+```bash
+# Install service
+sudo cp services/metadata-api.service /etc/systemd/system/
+sudo systemctl daemon-reload
+
+# Start/stop service
+sudo systemctl start metadata-api
+sudo systemctl stop metadata-api
+
+# Enable auto-start
+sudo systemctl enable metadata-api
+
+# Check status
+sudo systemctl status metadata-api
+
+# View logs
+sudo journalctl -u metadata-api -f
+```
+
+## Supported Formats
+
+### Input Formats
+- **Images**: PNG, JPG, JPEG, GIF, BMP, WebP, TIFF, RAW
+- **Max Size**: 8MB
+- **Input Methods**: URL, file upload, local path
+
+### Extracted Metadata Categories
+- **Camera**: Make, model, lens, ISO, aperture, shutter speed, flash settings
+- **Image**: Dimensions, color space, compression, orientation
+- **GPS**: Latitude, longitude, altitude, location data
+- **DateTime**: Creation, modification, capture timestamps
+- **Software**: Processing applications, tool versions
+- **Technical**: Encoding, profiles, color depth, sampling
+
+### Advanced Analysis Output
+- **Quality Metrics**: Blur detection, lighting assessment, exposure analysis
+- **Color Properties**: Saturation levels, color statistics
+- **Composition**: Aspect ratio, complexity, symmetry analysis
+- **Accessibility**: Alt-text suggestions, content type detection
+
+## Performance Optimization
+
+### Hardware Requirements
+
+| Component | Minimum | Recommended | Notes |
+|-----------|---------|-------------|--------|
+| CPU | 2 cores | 4+ cores | For OpenCV processing |
+| RAM | 4GB | 8GB+ | Depends on image size |
+| Storage | 1GB | 2GB+ | Temp files + metadata cache |
+
+### Processing Optimization
+
+```python
+# Adjust analysis complexity (in REST.py)
+BLUR_THRESHOLD = 100      # Lower = more sensitive blur detection
+MAX_COMPLEXITY = 0.02     # Higher = more detailed edge analysis
+SYMMETRY_PRECISION = 0.1  # Lower = more precise symmetry analysis
+```
+
+## Error Handling
+
+### Common Errors
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| "ExifTool not available" | Missing system package | Install exiftool package |
+| "File too large" | File > 8MB | Resize or compress image |
+| "File not found" | Invalid file path | Check file path and permissions |
+| "Invalid URL" | Malformed URL | Check URL format and accessibility |
+| "Metadata extraction failed" | Corrupted image | Try different image format |
+
+### Error Response Format
+
+```json
+{
+  "service": "metadata",
+  "status": "error",
+  "predictions": [],
+  "error": {"message": "File not found: /path/to/image.jpg"},
+  "metadata": {"processing_time": 0.001}
+}
+```
+
+## Integration Examples
+
+### Python Integration
+
+```python
+import requests
+
+# URL input
+response = requests.get(
+    "http://localhost:7781/v3/analyze",
+    params={"url": "https://example.com/image.jpg"}
+)
+
+# File input
+response = requests.get(
+    "http://localhost:7781/v3/analyze",
+    params={"file": "/path/to/image.jpg"}
+)
+
+result = response.json()
+if result["status"] == "success":
+    metadata = result["predictions"][0]["properties"]
+    
+    print(f"File size: {metadata['file_size']} bytes")
+    print(f"Dimensions: {metadata['dimensions']['width']}x{metadata['dimensions']['height']}")
+    print(f"Has EXIF: {metadata['has_exif']}")
+    print(f"Has GPS: {metadata['has_gps']}")
+    print(f"Aesthetic score: {metadata['quality_analysis']['aesthetic_score']}")
+    print(f"Alt text: {metadata['accessibility']['alt_text_basic']}")
+```
+
+### JavaScript Integration
+
+```javascript
+// URL input
+const response = await fetch(
+  'http://localhost:7781/v3/analyze?url=https://example.com/image.jpg'
+);
+
+// File input
+const response = await fetch(
+  'http://localhost:7781/v3/analyze?file=/path/to/image.jpg'
+);
+
+const result = await response.json();
+if (result.status === 'success') {
+  const metadata = result.predictions[0].properties;
+  
+  console.log('File type:', metadata.file_type);
+  console.log('Dimensions:', `${metadata.dimensions.width}x${metadata.dimensions.height}`);
+  console.log('Quality score:', metadata.quality_analysis.aesthetic_score);
+  console.log('Composition:', metadata.composition_analysis.aspect_ratio);
+}
+```
 
 ## Troubleshooting
 
-### ExifTool Not Found
+### Installation Issues
+
+**Problem**: ExifTool not available
 ```bash
-# Ubuntu/Debian
+# Solution: Install ExifTool
 sudo apt-get install exiftool
 
-# CentOS/RHEL
-sudo yum install perl-Image-ExifTool
-
-# macOS
-brew install exiftool
+# Verify installation
+exiftool -ver
 ```
 
-### Poor Metadata Extraction
-1. **Check File Format**: Ensure the image format supports metadata
-2. **Verify File Integrity**: Corrupted files may have incomplete metadata
-3. **Camera Settings**: Some cameras don't record full EXIF data
-4. **Processing History**: Edited images may have stripped metadata
+**Problem**: OpenCV import errors
+```bash
+# Solution: Install OpenCV
+pip install opencv-python-headless
+
+# Verify installation
+python -c "import cv2; print(cv2.__version__)"
+```
+
+### Runtime Issues
+
+**Problem**: Service fails to start
+```bash
+# Check port availability
+netstat -tlnp | grep 7781
+
+# Check environment variables
+cat .env
+
+# Test dependencies
+python -c "import exiftool, cv2, PIL; print('All dependencies OK')"
+```
+
+**Problem**: Metadata extraction failures
+```bash
+# Test ExifTool directly
+exiftool /path/to/image.jpg
+
+# Check file permissions
+ls -la /path/to/image.jpg
+
+# Verify file format support
+file /path/to/image.jpg
+```
 
 ### Performance Issues
-1. **File Size**: Large files take longer to process
-2. **Format Complexity**: RAW files require more processing time
-3. **System Resources**: Ensure adequate memory and CPU
-4. **Network Speed**: URL downloads depend on connection speed
 
-## Integration with Animal Farm
+**Problem**: Slow processing
+- Reduce image size before analysis
+- Disable advanced analysis for basic metadata extraction
+- Use SSD storage for temporary files
 
-This service integrates with the Animal Farm distributed AI ecosystem:
-
-- **Metadata Intelligence**: Provides context for image analysis decisions
-- **Location Services**: GPS data enhances location-based AI decisions
-- **Camera Profiling**: Camera information improves image quality assessment
-- **Timestamp Analysis**: Temporal data supports timeline-based analysis
+**Problem**: Memory usage
+- Process images sequentially rather than in batches
+- Clear temporary files regularly
+- Monitor system memory usage
 
 ## Security Considerations
 
-- **Privacy**: GPS and personal data are extracted - handle responsibly
-- **File Validation**: Always validate uploaded files
-- **Access Control**: Use private mode for sensitive environments
-- **Data Retention**: Consider metadata privacy implications
+### Access Control
+- Set `PRIVATE=true` for localhost-only access
+- Use reverse proxy with authentication for public access
+- Validate all input URLs and file paths
 
-## Development
+### File Security
+- Automatic cleanup of temporary files
+- File type validation prevents executable uploads
+- Size limits prevent DoS attacks
+- Path traversal protection
 
-### Adding Custom Categories
-```python
-# Extend categorize_metadata function
-custom_keywords = ['custom', 'special', 'proprietary']
-categories["custom"] = {}
+### Data Privacy
+- No metadata is stored permanently
+- Temporary files are automatically cleaned
+- GPS and personal information can be filtered
+- Processing logs exclude sensitive data
 
-if any(keyword in key_lower for keyword in custom_keywords):
-    categories["custom"][key] = value
-```
+---
 
-### Enhanced Processing
-```python
-# Add custom metadata processing
-def process_custom_metadata(metadata):
-    # Your custom processing logic
-    return enhanced_metadata
-```
-
-## Dependencies
-
-- `flask`: Web framework
-- `python-dotenv`: Environment management  
-- `pillow`: PIL image processing library
-- `requests`: HTTP client for URL downloads
-- `opencv-python`: Computer vision library for image processing
-- `numpy`: Numerical computing library
-- `PyExifTool`: Python wrapper for ExifTool (requires ExifTool binary)
-
-## License
-
-Part of the Animal Farm distributed AI project.
+**Documentation Version**: 1.0  
+**Last Updated**: 2025-08-13  
+**Service Version**: Production  
+**Maintainer**: Animal Farm ML Team
