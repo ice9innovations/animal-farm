@@ -1,378 +1,428 @@
-# Ollama LLM Integration Service - AI Chat and Vision Analysis
+# Ollama LLM Service
 
-Advanced LLM integration service providing both text generation and image analysis capabilities through Ollama. Offers both REST API and Discord bot interfaces with dynamic model selection.
+**Port**: 7782  
+**Framework**: Ollama (Meta LLaMA, Mistral, CodeLlama)  
+**Purpose**: Large Language Model inference with vision and text capabilities  
+**Status**: ✅ Active
+
+## Overview
+
+Ollama provides access to powerful open-source language models including LLaMA, Mistral, CodeLlama, and vision models like LLaVA. The service handles both text generation and image analysis through a unified API, with automatic emoji mapping for enhanced user experience.
 
 ## Features
 
-- **Text Generation**: Chat with various LLM models (Llama2, Mistral, CodeLlama, etc.)
-- **Image Analysis**: Vision models for image description and analysis
-- **Model Management**: Switch between pre-installed models (no auto-installation for security)
-- **Dual Interfaces**: RESTful API and Discord bot integration
-- **Multiple Input Methods**: URL, file upload, and direct text prompts
-- **Streaming Support**: Fast response delivery (API ready, Discord uses chunking)
-- **Error Resilience**: Graceful handling of Ollama connectivity issues
+- **Modern V3 API**: Clean, unified endpoint with intuitive parameters
+- **Unified Input Handling**: Single endpoint for both URL and file path analysis
+- **Multi-Modal Support**: Text generation and vision analysis capabilities
+- **Model Flexibility**: Support for multiple Ollama models (text, vision, code)
+- **Emoji Integration**: Automatic word-to-emoji mapping using local dictionary
+- **Async Processing**: Non-blocking inference with proper resource management
+- **Custom Prompts**: Configurable prompts and temperature settings
+- **Security**: File validation, size limits, secure cleanup
 
-## Quick Start
+## Installation
 
 ### Prerequisites
 
-1. **Install Ollama**:
+- Python 3.8+
+- Ollama server running locally
+- 16GB+ RAM (32GB+ recommended for large models)
+- GPU with 8GB+ VRAM recommended for vision models
+
+### 1. Environment Setup
+
 ```bash
-# Install Ollama
-curl -fsSL https://ollama.ai/install.sh | sh
+# Navigate to Ollama API directory
+cd /home/sd/animal-farm/ollama-api
+
+# Create virtual environment
+python3 -m venv ollama_venv
+
+# Activate virtual environment
+source ollama_venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### 2. Ollama Server Setup
+
+Install and start Ollama server:
+
+```bash
+# Install Ollama (Linux)
+curl -fsSL https://ollama.com/install.sh | sh
 
 # Start Ollama service
 ollama serve
 
-# Pull some models
-ollama pull llama2
-ollama pull llava  # For image analysis
-ollama pull mistral
+# Pull recommended models
+ollama pull llama2                    # Text generation
+ollama pull llava-llama3             # Vision analysis
+ollama pull mistral                  # Alternative text model
+ollama pull codellama               # Code-focused model
 ```
 
-2. **Install Python dependencies**:
+### 3. Model Configuration
+
+The service supports multiple model types:
+
 ```bash
-pip install flask python-dotenv ollama discord.py requests
+# Text Models
+ollama pull llama2:7b              # Default text model
+ollama pull llama2:13b             # Larger text model
+ollama pull mistral                # Fast inference
+ollama pull codellama              # Code generation
+
+# Vision Models  
+ollama pull llava                  # Vision analysis
+ollama pull llava:13b              # Larger vision model
+ollama pull bakllava               # Alternative vision model
+
+# Verify installation
+ollama list
 ```
 
-### Configuration
+## Configuration
 
-1. Copy environment template:
+### Environment Variables (.env)
+
+Create a `.env` file in the ollama-api directory:
+
 ```bash
-cp .env.sample .env
-```
+# Service Configuration
+PORT=7782                           # Service port
+PRIVATE=False                       # Access mode (False=public, True=localhost-only)
 
-2. Edit `.env` file:
-```bash
-# Service Settings
-PORT=7782
-PRIVATE=false
-
-# API Configuration (required for emoji lookup)
-API_HOST=localhost
-API_PORT=8080
-API_TIMEOUT=5.0
+# API Configuration (Required for emoji mapping)
+API_HOST=localhost                  # Host for emoji API
+API_PORT=8080                      # Port for emoji API
+API_TIMEOUT=2.0                    # Timeout for emoji API requests
 
 # Ollama Configuration
-OLLAMA_HOST=http://localhost:11434
-DEFAULT_TEXT_MODEL=llama2
-DEFAULT_VISION_MODEL=llava
+OLLAMA_HOST=http://localhost:11434  # Ollama server URL
+TEXT_MODEL=llama2                   # Default text model
+VISION_MODEL=llava-llama3           # Default vision model
+TEMPERATURE=0.3                     # Sampling temperature (0.0-2.0)
 
-# Discord Bot (optional)
-DISCORD_TOKEN=your_bot_token
-DISCORD_GUILD=your_server_name
-DISCORD_CHANNEL=general,ai-chat
+# Prompts
+PROMPT=What is in this image? One sentence only.  # Default vision prompt
 ```
 
-### Running the Services
+### Configuration Details
 
-#### REST API Only
-```bash
-# Direct execution
-python3 REST.py
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PORT` | Yes | - | Service listening port |
+| `PRIVATE` | Yes | - | Access control (False=public, True=localhost-only) |
+| `API_HOST` | Yes | - | Host for emoji mapping API |
+| `API_PORT` | Yes | - | Port for emoji mapping API |
+| `API_TIMEOUT` | Yes | - | Timeout for emoji API requests |
+| `OLLAMA_HOST` | Yes | - | Ollama server URL |
+| `TEXT_MODEL` | Yes | - | Default model for text generation |
+| `VISION_MODEL` | Yes | - | Default model for image analysis |
+| `TEMPERATURE` | Yes | - | Sampling temperature for generation |
+| `PROMPT` | Yes | - | Default prompt for vision analysis |
 
-# Using startup script
-./llama.sh
-
-# As systemd service
-sudo systemctl start llama-api
-sudo systemctl enable llama-api
-```
-
-#### Discord Bot
-```bash
-# Direct execution
-python3 discord-bot.py
-
-# Using startup script
-./discord.sh
-
-# As systemd service
-sudo systemctl start llama
-sudo systemctl enable llama
-```
-
-## REST API Usage
+## API Endpoints
 
 ### Health Check
 ```bash
 GET /health
 ```
 
-Returns service status, available models, and Ollama connectivity.
+**Response:**
+```json
+{
+  "status": "healthy",
+  "ollama_host": "http://localhost:11434",
+  "text_model": "llama2",
+  "vision_model": "llava-llama3",
+  "temperature": 0.3
+}
+```
 
-### List Available Models
+### Available Models
 ```bash
 GET /models
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "models": {
+    "text": ["llama2", "mistral", "codellama"],
+    "vision": ["llava", "llava:13b"],
+    "code": ["codellama", "deepseek-coder"]
+  },
+  "total_models": 6
+}
+```
+
+### V3 Unified Analysis (Recommended)
+```bash
+GET /v3/analyze?url=<image_url>
+GET /v3/analyze?file=<file_path>
+```
+
+**Parameters:**
+- `url` (string): Image URL to analyze
+- `file` (string): Local file path to analyze
+- `prompt` (string, optional): Custom prompt for analysis
+- `model` (string, optional): Specific model to use
+- `temperature` (float, optional): Sampling temperature (0.0-2.0)
+
+**Note:** Exactly one parameter (`url` or `file`) must be provided.
+
+**Response:**
+```json
+{
+  "service": "ollama",
+  "status": "success",
+  "predictions": [
+    {
+      "text": "A man is giving a teddy bear to a little girl who is wearing a pink dress.",
+      "emoji_mappings": [
+        {"word": "man", "emoji": "🧑"},
+        {"word": "teddy_bear", "emoji": "🧸"},
+        {"word": "girl", "emoji": "👩"},
+        {"word": "dress", "emoji": "👗"}
+      ]
+    }
+  ],
+  "metadata": {
+    "processing_time": 0.216,
+    "model_info": {
+      "framework": "Ollama",
+      "model": "llava-llama3",
+      "prompt": "Briefly describe this image in a single short sentence."
+    }
+  }
+}
+```
+
+### V2 Compatibility Routes
+```bash
+GET /v2/analyze?image_url=<url>       # Translates to V3 url parameter
+GET /v2/analyze_file?file_path=<path>  # Translates to V3 file parameter
 ```
 
 ### Text Generation
 ```bash
 POST /text
-Content-Type: application/json
+```
 
+**Request Body:**
+```json
 {
   "prompt": "Explain quantum computing in simple terms",
-  "model": "llama2"  # optional, uses default if not specified
+  "model": "llama2",
+  "temperature": 0.7
 }
 ```
 
-### Image Analysis
+**Response:**
+```json
+{
+  "status": "success",
+  "response": "Quantum computing uses quantum mechanical phenomena to process information differently than traditional computers...",
+  "model_used": "llama2",
+  "response_length": 256,
+  "temperature": 0.7
+}
+```
+
+### Image Analysis with Custom Prompt
 ```bash
 POST /image
-Content-Type: multipart/form-data
-
-# Form fields:
-# - uploadedfile: image file
-# - prompt: custom analysis prompt (optional)
-# - model: vision model to use (optional)
 ```
 
-### Legacy Image Analysis (URL)
+**Form Data:**
+- `uploadedfile`: Image file
+- `prompt`: Custom analysis prompt
+- `model`: Specific vision model
+
+## Service Management
+
+### Manual Startup
 ```bash
-GET /?url=https://example.com/image.jpg&prompt=Describe this image
+# Ensure Ollama is running
+ollama serve
+
+# Activate virtual environment
+source ollama_venv/bin/activate
+
+# Start service
+python REST.py
 ```
 
-## API Response Format
+### Systemd Service
+```bash
+# Install service file
+sudo cp services/ollama-api.service /etc/systemd/system/
 
-### Text Generation Response
-```json
-{
-  "llm": {
-    "response": "Quantum computing is a type of computing that uses quantum bits...",
-    "model_used": "llama2",
-    "prompt_length": 45,
-    "response_length": 234,
-    "processing_time": 2.456,
-    "type": "text",
-    "status": "success"
-  }
-}
+# Enable and start service
+sudo systemctl daemon-reload
+sudo systemctl enable ollama-api.service
+sudo systemctl start ollama-api.service
+
+# Check status
+sudo systemctl status ollama-api.service
 ```
 
-### Image Analysis Response
-```json
-{
-  "llm": {
-    "response": "This image shows a beautiful sunset over a mountain range...",
-    "model_used": "llava",
-    "prompt": "Describe this image in detail.",
-    "response_length": 156,
-    "processing_time": 3.234,
-    "type": "vision",
-    "status": "success"
-  }
-}
-```
+## Performance Optimization
 
-## Discord Bot Usage
+### Hardware Requirements
 
-### Text Commands
-- Just type a message to chat with the current model
-- `/ask <question>` - Ask a specific question
-- `/chat <message>` - Alternative chat command
+**Minimum:**
+- 16GB RAM
+- 4-core CPU
+- 50GB disk space for models
 
-### Model Management
-- `/list` - Show all available models with current selection
-- `/use <model_name>` or `/use <number>` - Switch models
-- `/model` - Show current active model
+**Recommended:**
+- 32GB+ RAM
+- 8-core CPU
+- RTX 4070 or better for GPU acceleration
+- NVMe SSD storage
 
-### Image Analysis
-- Upload any image to analyze it automatically
-- Add text with your image for custom analysis prompts
-- Supports: JPG, PNG, GIF, BMP, WEBP
+### Model Performance
 
-### Help and Info
-- `/help` - Show detailed command help
+| Model | RAM Usage | Speed | Quality | Use Case |
+|-------|-----------|-------|---------|----------|
+| llama2:7b | 4GB | Fast | Good | General text |
+| llama2:13b | 8GB | Medium | Better | Complex text |
+| mistral | 4GB | Very Fast | Good | Quick responses |
+| llava | 6GB | Medium | Good | Vision analysis |
+| codellama | 4GB | Fast | Good | Code generation |
 
-### Example Discord Usage
-```
-User: Hello, how are you?
-Bot: Hello! I'm doing well, thank you for asking. I'm an AI assistant powered by Llama2...
+### Optimization Settings
 
-User: /use mistral
-Bot: ✅ Model set to: mistral
-
-User: /ask What is the capital of France?
-Bot: The capital of France is Paris...
-
-User: [uploads image of a cat] What breed is this?
-Bot: This appears to be a Maine Coon cat, characterized by...
-```
-
-## Available Models
-
-### Text Models
-- **llama2**: General-purpose conversational AI
-- **llama2:13b**: Larger version with better performance
-- **mistral**: Fast and efficient instruction-following
-- **mixtral**: Mixture of experts model
-- **codellama**: Specialized for code generation
-- **dolphin-mistral**: Uncensored conversational model
-- **phi**: Microsoft's small but capable model
-
-### Vision Models
-- **llava**: LLaVA (Large Language and Vision Assistant)
-- **llava:13b**: Larger version for better image understanding
-- **bakllava**: Alternative vision model
-
-### Code Models
-- **codellama**: General code assistant
-- **codellama:13b**: Enhanced code generation
-- **deepseek-coder:6.7b**: Specialized coding model
-
-## Performance and Limitations
-
-### Performance Metrics
-- **Text Generation**: 2-10 seconds typical (depends on model size and prompt)
-- **Image Analysis**: 3-15 seconds typical (vision models are slower)
-- **Memory Usage**: Varies by model (2GB-16GB+ VRAM recommended)
-- **Concurrent Requests**: Limited by Ollama server capacity
-
-### File Size Limits
-- **Images**: 8MB maximum
-- **Text Prompts**: 10,000 characters maximum
-- **Response Length**: 4,000 characters (truncated if longer)
-
-### Model Requirements
-- **Small models** (7B params): 8GB+ VRAM recommended
-- **Medium models** (13B params): 16GB+ VRAM recommended
-- **Large models** (30B+ params): 24GB+ VRAM recommended
-- **CPU-only**: Possible but much slower
+- **Temperature**: Lower (0.1-0.3) for focused responses, higher (0.7-1.0) for creative output
+- **Context Length**: Adjust based on use case and available memory
+- **Concurrent Requests**: Service handles async processing with proper resource management
 
 ## Error Handling
 
-The service provides comprehensive error handling:
+### Common Errors
 
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `Ollama not available` | Ollama server not running | Start Ollama with `ollama serve` |
+| `Model not found` | Requested model not installed | Pull model with `ollama pull <model>` |
+| `Temperature out of range` | Invalid temperature value | Use values between 0.0 and 2.0 |
+| `Prompt too long` | Prompt exceeds 10,000 characters | Reduce prompt length |
+| `File too large` | Image exceeds 8MB limit | Resize image or increase MAX_FILE_SIZE |
+
+### Error Response Format
 ```json
 {
-  "error": "Text generation failed: Model 'llama2' not found",
-  "status": "error"
+  "service": "ollama",
+  "status": "error",
+  "predictions": [],
+  "error": {"message": "Detailed error description"},
+  "metadata": {"processing_time": 0.001}
 }
 ```
 
-Common error scenarios:
-- Ollama server not running
-- Model not available/not pulled
-- Image too large or invalid format
-- Network connectivity issues
-- GPU memory exhaustion
+## Integration Examples
 
-## Integration with Animal Farm
+### Python
+```python
+import requests
 
-This service integrates with the Animal Farm distributed AI ecosystem:
+# Vision analysis
+response = requests.get('http://localhost:7782/v3/analyze', 
+                       params={
+                           'url': 'https://example.com/image.jpg',
+                           'prompt': 'Describe this image in detail',
+                           'model': 'llava'
+                       })
+data = response.json()
 
-- **Multi-Modal AI**: Combines text and vision capabilities
-- **Voting Ensemble**: LLM responses can inform decision algorithms
-- **Discord Ecosystem**: Unified bot experience across all AI services
-- **API Consistency**: Follows established patterns for easy integration
-
-## Development and Customization
-
-### Model Requirements
-**Required Models (must be pre-installed):**
-- `llava` - Essential for image analysis capability
-- `llama2` - Default text generation model
-
-**Additional Models (optional but recommended):**
-```bash
-# Install required models
-ollama pull llava
-ollama pull llama2
-
-# Optional additional models
-ollama pull mistral
-ollama pull codellama
+# Text generation
+response = requests.post('http://localhost:7782/text',
+                        json={
+                            'prompt': 'Write a Python function to sort a list',
+                            'model': 'codellama',
+                            'temperature': 0.2
+                        })
+result = response.json()
 ```
 
-**Note**: The service only uses pre-installed models for security and consistency. No automatic model installation occurs.
+### JavaScript
+```javascript
+// Vision analysis
+const visionResponse = await fetch('http://localhost:7782/v3/analyze', {
+    method: 'GET',
+    headers: {'Content-Type': 'application/json'},
+    params: new URLSearchParams({
+        url: 'https://example.com/image.jpg',
+        prompt: 'What objects are in this image?'
+    })
+});
 
-### Custom Prompts for Images
-```python
-# REST API
-{
-  "prompt": "Analyze the artistic style and composition of this image",
-  "model": "llava"
-}
-
-# Discord
-# Upload image with message: "What art movement does this represent?"
-```
-
-### Extending the API
-```python
-# Add new endpoint for streaming responses
-@app.route('/stream', methods=['POST'])
-def stream_text():
-    # Implementation for streaming responses
-    pass
+// Text generation
+const textResponse = await fetch('http://localhost:7782/text', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+        prompt: 'Explain machine learning concepts',
+        model: 'llama2',
+        temperature: 0.5
+    })
+});
 ```
 
 ## Troubleshooting
 
-### Ollama Connection Issues
-```bash
-# Check if Ollama is running
-curl http://localhost:11434/api/version
+### Installation Issues
+- **Ollama installation fails**: Use official installation script from ollama.com
+- **Model download slow**: Ensure stable internet connection, models are large (GB)
+- **Python dependencies**: Use virtual environment and install from requirements.txt
 
-# Start Ollama
-ollama serve
-
-# Check available models
-ollama list
-```
-
-### Model Not Found
-```bash
-# Pull missing model
-ollama pull llama2
-ollama pull llava
-
-# Verify model is available
-ollama list
-```
-
-### Discord Bot Issues
-1. **Bot not responding**: Check Discord token and permissions
-2. **Channel restrictions**: Verify DISCORD_CHANNEL settings
-3. **Model switching fails**: Ensure Ollama connectivity
+### Runtime Issues
+- **Connection refused**: Verify Ollama server is running on correct port (11434)
+- **Model loading slow**: First inference loads model into memory, subsequent calls faster
+- **Out of memory**: Use smaller models or increase system RAM
 
 ### Performance Issues
-1. **Slow responses**: Check GPU availability and memory
-2. **Memory errors**: Use smaller models or increase VRAM
-3. **Connection timeouts**: Increase timeout values in code
-
-### Service Startup Issues
-```bash
-# Check service status
-systemctl status llama-api
-systemctl status llama
-
-# View logs
-journalctl -u llama-api -f
-journalctl -u llama -f
-
-# Test direct execution
-python3 REST.py
-python3 discord-bot.py
-```
+- **Slow responses**: Use GPU acceleration, smaller models, or reduce temperature
+- **High memory usage**: Monitor model memory usage with `ollama ps`
+- **Timeouts**: Increase timeout values for complex prompts or large images
 
 ## Security Considerations
 
-- **Model Access**: All users can switch models - consider restrictions in production
-- **Input Validation**: Text prompts and images are validated for size
-- **API Rate Limiting**: Consider implementing rate limiting for production use
-- **Private Mode**: Use PRIVATE=true for localhost-only API access
-- **Discord Permissions**: Restrict bot to specific channels as needed
+### Access Control
+- Set `PRIVATE=True` for localhost-only access
+- Use reverse proxy (nginx) for production deployment
+- Implement rate limiting for public endpoints
 
-## Dependencies
+### Model Security
+- Models run locally, no external API calls for inference
+- Prompts and responses stay on your infrastructure
+- File uploads validated and cleaned up automatically
 
-- `flask`: Web framework for REST API
-- `python-dotenv`: Environment variable management
-- `ollama`: Official Ollama Python client
-- `discord.py`: Discord bot framework
-- `requests`: HTTP client for image downloads
+## Supported Models
 
-## License
+The service supports various Ollama model categories:
 
-Part of the Animal Farm distributed AI project.
+### Text Models
+- **LLaMA 2**: General-purpose conversational AI
+- **Mistral**: Fast, efficient inference
+- **CodeLlama**: Code generation and analysis
+- **Dolphin**: Fine-tuned for instruction following
+
+### Vision Models
+- **LLaVA**: Large Language and Vision Assistant
+- **BakLLaVA**: Alternative vision model
+- **LLaVA-1.5**: Improved vision understanding
+
+### Specialized Models
+- **DeepSeek Coder**: Advanced code generation
+- **Mixtral**: Mixture of experts architecture
+- **Phi**: Microsoft's small language model
+
+---
+
+*Generated with Animal Farm ML Platform v3.0 - Ollama Integration*

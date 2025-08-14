@@ -5,7 +5,9 @@ cd "$(dirname "$0")"
 
 # Load environment variables if .env exists
 if [ -f .env ]; then
-    export $(cat .env | grep -v '^#' | grep -v '^$' | xargs)
+    set -a
+    source .env
+    set +a
 fi
 
 # Start the Ollama LLM REST API service
