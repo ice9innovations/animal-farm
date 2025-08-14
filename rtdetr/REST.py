@@ -131,6 +131,59 @@ def calculate_iou_rtdetr(box1, box2) -> float:
     
     return intersection / union if union > 0 else 0.0
 
+def apply_iou_filtering_rtdetr_scaled(objects, iou_threshold=IOU_THRESHOLD):
+    """Apply IoU filtering to scaled detection objects in final coordinate space"""
+    if not objects:
+        return objects
+    
+    # Group detections by class
+    class_groups = {}
+    for obj in objects:
+        class_name = obj.get('object', '')
+        if class_name not in class_groups:
+            class_groups[class_name] = []
+        class_groups[class_name].append(obj)
+    
+    filtered_objects = []
+    
+    # Process each class separately
+    for class_name, class_objects in class_groups.items():
+        if len(class_objects) == 1:
+            # Only one detection for this class, keep it
+            filtered_objects.extend(class_objects)
+            continue
+        
+        # For multiple detections, apply IoU filtering
+        class_keep = []
+        
+        # Sort by confidence (highest first)
+        class_objects.sort(key=lambda x: x['confidence'], reverse=True)
+        
+        for obj in class_objects:
+            should_keep = True
+            
+            for kept_obj in class_keep:
+                # Both objects have bbox in [x1, y1, x2, y2] format
+                box1 = obj['bbox']
+                box2 = kept_obj['bbox']
+                iou = calculate_iou_rtdetr(box1, box2)
+                
+                if iou > iou_threshold:
+                    # High overlap - don't keep the lower confidence one
+                    should_keep = False
+                    logger.debug(f"RT-DETR IoU filter (scaled): Removing {class_name} "
+                               f"conf={obj['confidence']:.3f} (IoU={iou:.3f} with "
+                               f"conf={kept_obj['confidence']:.3f})")
+                    break
+            
+            if should_keep:
+                class_keep.append(obj)
+        
+        filtered_objects.extend(class_keep)
+        logger.debug(f"RT-DETR IoU filter (scaled): {class_name} {len(class_objects)} → {len(class_keep)} detections")
+    
+    return filtered_objects
+
 def apply_iou_filtering_rtdetr(labels, boxes, scores, class_names, iou_threshold=IOU_THRESHOLD):
     """Apply IoU filtering for RT-DETR numpy arrays"""
     if len(labels) == 0:
@@ -442,29 +495,22 @@ def detect_objects(image_path: str, cleanup: bool = True) -> Dict[str, Any]:
             torch.cuda.synchronize()
             logger.debug(f"GPU sync at request {request_count}")
         
-        # Filter by confidence and keep only highest confidence per class
+        # Filter by confidence only (IoU filtering will happen after scaling)
         if len(scores) > 0:
             valid_indices = scores > CONFIDENCE_THRESHOLD
             labels = labels[valid_indices]
             boxes = boxes[valid_indices]
             scores = scores[valid_indices]
-            
-            # Apply IoU-based filtering instead of naive class-based deduplication
-            labels, boxes, scores = apply_iou_filtering_rtdetr(labels, boxes, scores, COCO_CLASSES)
         
         # Format results with Mirror Stage emoji enrichment
         objects = []
-        
-        # Collect all unique object names for batch emoji lookup
-        unique_objects = list(set(COCO_CLASSES[int(labels[i])] for i in range(len(labels)) 
-                                if 0 <= int(labels[i]) < len(COCO_CLASSES)))
         
         # Build results first without emojis (fast path)
         for i in range(len(labels)):
             label_id = int(labels[i])
             if 0 <= label_id < len(COCO_CLASSES):
                 object_name = COCO_CLASSES[label_id]
-                confidence = float(scores[i])
+                confidence = round(float(scores[i]), 3)
                 box = boxes[i].tolist()
                 
                 # Scale bounding box coordinates from 640x640 back to original image size
@@ -482,6 +528,12 @@ def detect_objects(image_path: str, cleanup: bool = True) -> Dict[str, Any]:
                     'bbox': scaled_box,
                     'emoji': ''  # Will be filled asynchronously
                 })
+        
+        # Apply IoU filtering in final coordinate space (after scaling)
+        objects = apply_iou_filtering_rtdetr_scaled(objects)
+        
+        # Collect unique object names from filtered results for emoji lookup
+        unique_objects = list(set(obj['object'] for obj in objects))
         
         # Look up emojis for each unique object
         if unique_objects:
@@ -740,7 +792,7 @@ def analyze_v3():
             bbox = obj.get('bbox', [])
             prediction = {
                 "label": obj.get('object', ''),
-                "confidence": float(obj.get('confidence', 0))
+                "confidence": round(float(obj.get('confidence', 0)), 3)
             }
             
             # Add bbox if present
