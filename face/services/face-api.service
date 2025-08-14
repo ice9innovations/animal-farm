@@ -1,17 +1,18 @@
 [Unit]
 Description=Face Detection REST API Service
 After=network.target
-StartLimitIntervalSec=0
+StartLimitBurst=3
+StartLimitIntervalSec=300
 
 [Service]
 Type=simple
 Restart=always
 RestartSec=5
-User=ubuntu
-Group=ubuntu
-WorkingDirectory=/home/sd/animal-farm/face
-ExecStart=/home/sd/animal-farm/face/face.sh
-EnvironmentFile=/home/sd/animal-farm/face/.env
+User=sd
+Group=sd
+WorkingDirectory=/home/sd/face
+ExecStart=/home/sd/face/face.sh
+EnvironmentFile=/home/sd/face/.env
 StandardOutput=journal
 StandardError=journal
 

@@ -1,22 +1,39 @@
-# Face Detection Service
+# Face Analysis Service
 
-This service provides reliable face detection using Google's MediaPipe framework, designed for fairness across demographics and superior performance compared to traditional computer vision approaches.
+**Port**: 7772  
+**Framework**: MediaPipe  
+**Purpose**: AI-powered face detection and pose estimation with fairness optimization  
+**Status**: ✅ Active
+
+## Overview
+
+The Face service provides state-of-the-art face detection and pose estimation using Google's MediaPipe framework. The service analyzes images to detect human faces, estimate body poses, and provide comprehensive human analysis with fairness optimizations across demographics.
 
 ## Features
 
-- REST API for face detection and counting with v1 and v2 endpoints
-- MediaPipe Face Detection optimized for fairness across demographics
-- Bounding box detection with confidence scores
-- 6-point facial landmark detection
-- High performance with model initialized once at startup
-- Comprehensive error handling and logging
-- Health check endpoints
+- **Modern V3 API**: Clean, unified endpoint with intuitive parameters
+- **Unified Input Handling**: Single endpoint for both URL and file path analysis
+- **MediaPipe Framework**: Google's production-ready computer vision models
+- **Fairness Optimization**: Tested across demographics to reduce bias
+- **Comprehensive Analysis**: Face detection, pose estimation, and person segmentation
+- **High Performance**: Optimized model initialization and processing pipeline
+- **Security**: File validation, size limits, secure cleanup
 
-## Setup
+## Installation
 
-### 1. Create Python Virtual Environment
+### Prerequisites
+
+- Python 3.8+
+- OpenCV for image processing
+- MediaPipe framework for computer vision
+- 1GB+ RAM for model loading
+
+### 1. Environment Setup
 
 ```bash
+# Navigate to face directory
+cd /home/sd/animal-farm/face
+
 # Create virtual environment
 python3 -m venv face_venv
 
@@ -24,122 +41,427 @@ python3 -m venv face_venv
 source face_venv/bin/activate
 
 # Install dependencies
-pip install flask flask-cors pillow opencv-python mediapipe python-dotenv requests
+pip install -r requirements.txt
 ```
 
-### 2. Configure Environment
+### 2. Dependency Installation
 
-Create a `.env` file with your configuration:
+Install the required Python packages:
 
 ```bash
-# Copy environment template
-cp .env.sample .env
-
-# Edit .env with your settings
+# Core dependencies
+pip install flask flask-cors pillow opencv-python mediapipe python-dotenv requests numpy
 ```
 
-**Environment variables:**
-```bash
-# Service Settings
-PORT=7772
-PRIVATE=false
-```
+## Configuration
 
-### 3. Run Service
+### Environment Variables (.env)
+
+Create a `.env` file in the face directory:
 
 ```bash
-# Start the face detection service
-python REST.py
+# Service Configuration
+PORT=7772                    # Service port (default: 7772)
+PRIVATE=false               # Access mode (false=public, true=localhost-only)
 
-# Or use the startup script
-./face.sh
+# API Configuration (Required for emoji mapping)
+API_HOST=localhost          # Host for emoji API
+API_PORT=8080              # Port for emoji API  
+API_TIMEOUT=5              # Timeout for emoji API requests
 ```
 
-## API Usage
+### Configuration Details
 
-### REST API Endpoints
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PORT` | Yes | - | Service listening port |
+| `PRIVATE` | Yes | - | Access control (false=public, true=localhost-only) |
+| `API_HOST` | Yes | - | Host for emoji mapping API |
+| `API_PORT` | Yes | - | Port for emoji mapping API |
+| `API_TIMEOUT` | Yes | - | Timeout for emoji API requests |
 
-- `GET /health` - Health check and model status
-- `GET /?url=<image_url>` - Detect faces in image from URL
-- `GET /?path=<local_path>` - Detect faces in local image (if not in private mode)
-- `POST /` - Upload and detect faces in image file
-- `GET /v2/analyze?image_url=<url>` - V2 unified format for URL analysis
-- `GET /v2/analyze_file?file_path=<path>` - V2 unified format for file analysis
+### Model Configuration
 
-### Example Usage
+The service uses MediaPipe models with optimized settings:
 
-**Detect faces from URL:**
+| Component | Configuration | Purpose |
+|-----------|---------------|---------|
+| Face Detection | Full-range model, confidence 0.2 | Fairness across demographics |
+| Pose Estimation | Full complexity, 33 landmarks | Comprehensive body analysis |
+| Segmentation | Enabled | Person silhouette extraction |
+
+## API Endpoints
+
+### Health Check
+
 ```bash
-curl "http://localhost:7772/?url=https://example.com/image.jpg"
+GET /health
 ```
 
-**V2 API:**
-```bash
-curl "http://localhost:7772/v2/analyze?image_url=https://example.com/image.jpg"
-```
-
-**Upload file:**
-```bash
-curl -X POST -F "uploadedfile=@image.jpg" http://localhost:7772/
-```
-
-### Response Format
-
-**Legacy format:**
+**Response:**
 ```json
 {
-  "FACE": {
-    "faces": [
-      {
-        "bbox": {"x": 150, "y": 200, "width": 120, "height": 150},
-        "confidence": 0.85,
+  "status": "healthy",
+  "service": "face",
+  "capabilities": ["face_detection", "pose_estimation", "person_segmentation"],
+  "models": {
+    "face_detection": {
+      "status": "ready",
+      "version": "0.10.14",
+      "model": "MediaPipe Face Detection (Full Range)",
+      "fairness": "Tested across demographics"
+    },
+    "pose_estimation": {
+      "status": "ready",
+      "version": "0.10.14",
+      "model": "MediaPipe Pose",
+      "landmarks": 33
+    }
+  },
+  "endpoints": [
+    "GET /health - Health check",
+    "GET /v3/analyze?url=<image_url> - Analyze image from URL", 
+    "GET /v3/analyze?file=<file_path> - Analyze image from file",
+    "GET /v2/analyze?image_url=<image_url> - V2 compatibility (deprecated)",
+    "GET /v2/analyze_file?file_path=<file_path> - V2 compatibility (deprecated)"
+  ]
+}
+```
+
+### Analyze Image (Unified Endpoint)
+
+The unified `/v3/analyze` endpoint accepts either URL or file path input:
+
+#### Analyze Image from URL
+```bash
+GET /v3/analyze?url=<image_url>
+```
+
+**Example:**
+```bash
+curl "http://localhost:7772/v3/analyze?url=https://example.com/image.jpg"
+```
+
+#### Analyze Image from File Path
+```bash
+GET /v3/analyze?file=<file_path>
+```
+
+**Example:**
+```bash
+curl "http://localhost:7772/v3/analyze?file=/path/to/image.jpg"
+```
+
+**Input Validation:**
+- Exactly one parameter must be provided (`url` OR `file`)
+- Cannot provide both parameters simultaneously
+- Returns error if neither parameter is provided
+
+**Response Format:**
+```json
+{
+  "service": "face",
+  "status": "success",
+  "predictions": [
+    {
+      "label": "face",
+      "emoji": "🙂",
+      "confidence": 0.7625,
+      "bbox": [385, 69, 79, 79],
+      "properties": {
+        "keypoints": {
+          "right_eye": [418, 95],
+          "left_eye": [431, 93],
+          "nose_tip": [409, 114],
+          "mouth_center": [421, 129],
+          "right_ear_tragion": [440, 100],
+          "left_ear_tragion": [484, 93]
+        },
         "method": "mediapipe"
       }
-    ],
-    "total_faces": 1,
-    "image_dimensions": {"width": 640, "height": 480},
+    }
+  ],
+  "metadata": {
+    "processing_time": 0.032,
     "model_info": {
-      "detection_method": "mediapipe",
-      "detection_time": 0.156,
       "framework": "MediaPipe"
-    },
-    "status": "success"
+    }
   }
 }
 ```
 
-## Model Information
+### Legacy V2 Endpoints (Deprecated)
 
-This service uses Google's MediaPipe Face Detection framework:
+For backward compatibility, V2 endpoints are still supported but deprecated:
 
-- **Framework**: MediaPipe v0.10.x (designed for fairness across demographics)
-- **Model**: Full-range face detection optimized for diverse faces
-- **Confidence Threshold**: 0.2 (lowered to reduce bias)
-- **Performance**: ~150ms average processing time
-- **Hardware**: CPU-optimized, no GPU requirements
+#### V2 URL Analysis
+```bash
+GET /v2/analyze?image_url=<image_url>
+```
 
-## Configuration Options
+#### V2 File Analysis
+```bash
+GET /v2/analyze_file?file_path=<file_path>
+```
 
-The service supports the following configuration options in `.env`:
+## Service Management
 
-- **PORT**: Service port (default: 7772)
-- **PRIVATE**: Enable private mode - restricts local file access (default: false)
-
-**PRIVATE mode explanation:**
-- `PRIVATE=false`: Service binds to all network interfaces (0.0.0.0) and allows local file path access via `/?path=` parameter
-- `PRIVATE=true`: Service binds to localhost only (127.0.0.1) and blocks local file path access for security
-
-## Health Check
-
-Check service status and model information:
+### Manual Startup
 
 ```bash
-curl http://localhost:7772/health
+# Start service
+cd /home/sd/animal-farm/face
+python3 REST.py
+```
+
+### Service Script
+
+```bash
+# Using startup script (if available)
+./face.sh
+```
+
+### Systemd Service
+
+```bash
+# Start service
+sudo systemctl start face-api
+
+# Enable auto-start
+sudo systemctl enable face-api
+
+# Check status
+sudo systemctl status face-api
+
+# View logs
+journalctl -u face-api -f
+```
+
+## Performance Optimization
+
+### Hardware Requirements
+
+| Configuration | RAM | CPU | Response Time |
+|---------------|-----|-----|---------------|
+| Minimum | 1GB | 2 cores | 0.2-0.4s |
+| Recommended | 2GB+ | 4+ cores | 0.1-0.2s |
+| High Volume | 4GB+ | 8+ cores | 0.05-0.15s |
+
+### Performance Tuning
+
+- **Model Loading**: Models initialized once at startup for optimal performance
+- **File Size Limit**: 8MB maximum (configurable)
+- **Concurrent Requests**: Flask threaded mode enabled
+- **Memory Usage**: ~200MB base + image size during processing
+- **GPU Support**: CPU-optimized, no GPU requirements
+
+## Error Handling
+
+### Common Errors and Solutions
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `Must provide either 'url' or 'file' parameter` | Missing input parameter | Provide exactly one parameter |
+| `Cannot provide both 'url' and 'file' parameters` | Both parameters provided | Use only one parameter |
+| `File not found: <path>` | Invalid file path | Check file exists and path is correct |
+| `File type not allowed` | Unsupported image format | Use supported formats (PNG, JPG, JPEG, GIF, BMP, WEBP) |
+| `Failed to download image` | Network/URL issue | Verify URL is accessible |
+| `Image too large` | File > 8MB | Use smaller image or compress |
+
+### Error Response Format
+
+```json
+{
+  "service": "face",
+  "status": "error",
+  "predictions": [],
+  "error": {"message": "Error description"},
+  "metadata": {
+    "processing_time": 0.003,
+    "model_info": {
+      "framework": "MediaPipe"
+    }
+  }
+}
+```
+
+## Integration Examples
+
+### Python Integration
+
+```python
+import requests
+
+# Analyze image from URL
+response = requests.get(
+    'http://localhost:7772/v3/analyze',
+    params={'url': 'https://example.com/image.jpg'}
+)
+result = response.json()
+
+# Process face detections
+for prediction in result['predictions']:
+    if prediction['label'] == 'face':
+        bbox = prediction['bbox']
+        confidence = prediction['confidence']
+        print(f"Face detected: bbox={bbox}, confidence={confidence:.3f}")
+        
+        # Access facial keypoints
+        keypoints = prediction['properties']['keypoints']
+        print(f"Eyes: {keypoints['left_eye']}, {keypoints['right_eye']}")
+    
+    elif prediction['label'] in ['standing', 'sitting', 'lying']:
+        pose_type = prediction['label']
+        confidence = prediction['confidence']
+        print(f"Pose: {pose_type}, confidence={confidence:.3f}")
+```
+
+### JavaScript Integration
+
+```javascript
+// Analyze image from URL
+async function analyzeFaces(imageUrl) {
+    const response = await fetch(`http://localhost:7772/v3/analyze?url=${encodeURIComponent(imageUrl)}`);
+    const result = await response.json();
+    
+    if (result.status === 'success') {
+        result.predictions.forEach(prediction => {
+            if (prediction.label === 'face') {
+                console.log(`Face: confidence=${prediction.confidence}`);
+                console.log(`Bounding box: [${prediction.bbox.join(', ')}]`);
+            } else {
+                console.log(`Pose: ${prediction.label}, confidence=${prediction.confidence}`);
+            }
+        });
+        
+        console.log(`Processing time: ${result.metadata.processing_time}s`);
+    }
+}
+
+// Usage
+analyzeFaces('https://example.com/image.jpg');
+```
+
+### cURL Examples
+
+```bash
+# Basic face and pose analysis
+curl "http://localhost:7772/v3/analyze?url=https://example.com/image.jpg"
+
+# File analysis
+curl "http://localhost:7772/v3/analyze?file=/path/to/image.jpg"
+
+# Health check
+curl "http://localhost:7772/health"
+
+# V2 compatibility (deprecated)
+curl "http://localhost:7772/v2/analyze?image_url=https://example.com/image.jpg"
 ```
 
 ## Troubleshooting
 
-1. **MediaPipe installation issues**: Ensure you have the correct Python version (3.8+)
-2. **No faces detected**: Check image quality and lighting conditions
-3. **Service won't start**: Verify virtual environment activation and all dependencies installed
-4. **Permission errors**: Check file permissions and PRIVATE mode setting
+### Installation Issues
+
+**Problem**: MediaPipe installation fails
+```bash
+# Solution - install system dependencies
+sudo apt-get update
+sudo apt-get install python3-opencv
+pip install mediapipe==0.10.14
+```
+
+**Problem**: OpenCV import errors
+```bash
+# Solution - reinstall OpenCV
+pip uninstall opencv-python
+pip install opencv-python-headless
+```
+
+### Runtime Issues
+
+**Problem**: Port already in use
+```bash
+# Check what's using the port
+lsof -i :7772
+
+# Change port in .env file
+echo "PORT=7773" >> .env
+```
+
+**Problem**: Models fail to initialize
+```bash
+# Check MediaPipe version
+python -c "import mediapipe as mp; print(mp.__version__)"
+
+# Reinstall if needed
+pip install --upgrade mediapipe
+```
+
+### Performance Issues
+
+**Problem**: Slow face detection
+- Reduce image size before analysis (< 1024px recommended)
+- Ensure sufficient RAM available (2GB+ recommended)
+- Check CPU load during analysis
+
+**Problem**: Memory usage too high
+- Restart service periodically for long-running processes  
+- Monitor memory usage during batch processing
+- Consider processing images in smaller batches
+
+### Configuration Issues
+
+**Problem**: Environment variable errors
+```bash
+# Check .env file exists and has correct format
+cat .env
+
+# Verify all required variables are set
+python3 -c "
+from dotenv import load_dotenv
+import os
+load_dotenv()
+required = ['PORT', 'PRIVATE', 'API_HOST', 'API_PORT', 'API_TIMEOUT']
+missing = [k for k in required if not os.getenv(k)]
+if missing: print(f'Missing: {missing}')
+else: print('All variables set')
+"
+```
+
+**Problem**: Emoji mappings not loading
+- Check API_HOST and API_PORT point to running emoji API
+- Verify network connectivity between services
+- Check API_TIMEOUT setting (increase if needed)
+
+## Security Considerations
+
+### Access Control
+
+- **Private Mode**: Set `PRIVATE=true` for localhost-only access
+- **File Path Access**: Restricted in private mode for security
+- **Input Validation**: All inputs validated before processing
+
+### File Security
+
+- **Size Limits**: 8MB maximum file size
+- **Format Validation**: Only supported image formats accepted  
+- **Temporary Files**: Automatically cleaned up after processing
+- **Path Validation**: File paths validated to prevent directory traversal
+
+### Network Security
+
+- **Timeout Protection**: Download timeouts prevent hanging connections
+- **CORS Configuration**: Configured for controlled browser access
+- **Error Information**: Error messages don't expose system internals
+
+### Model Security
+
+- **Bias Reduction**: MediaPipe models tested for fairness across demographics
+- **No Data Retention**: Images processed in memory, not stored
+- **Privacy**: No external API calls except for emoji mapping
+
+---
+
+**Generated**: August 13, 2025  
+**Framework Version**: MediaPipe 0.10.14  
+**Service Version**: 3.0 (Modernized)
