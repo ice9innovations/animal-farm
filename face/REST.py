@@ -80,7 +80,8 @@ FACE_MIN_DETECTION_CONFIDENCE = 0.2
 POSE_MIN_DETECTION_CONFIDENCE = 0.5
 FACE_MESH_MIN_DETECTION_CONFIDENCE = 0.1
 POSE_MIN_TRACKING_CONFIDENCE = 0.5
-CONFIDENCE_DECIMAL_PLACES = 4
+CONFIDENCE_DECIMAL_PLACES = 3
+LANDMARK_DECIMAL_PLACES = 3  # Precision for landmark coordinates and visibility
 MIN_FACE_SIZE_FOR_MESH = 60  # Minimum face size (pixels) for reliable Face Mesh analysis
 
 # Ensure upload folder exists
@@ -277,10 +278,10 @@ def detect_poses_mediapipe(image_path):
             landmarks = []
             for landmark in results.pose_landmarks.landmark:
                 landmarks.append({
-                    'x': landmark.x,
-                    'y': landmark.y,
-                    'z': landmark.z,
-                    'visibility': landmark.visibility if hasattr(landmark, 'visibility') else 1.0
+                    'x': round(landmark.x, LANDMARK_DECIMAL_PLACES),
+                    'y': round(landmark.y, LANDMARK_DECIMAL_PLACES),
+                    'z': round(landmark.z, LANDMARK_DECIMAL_PLACES),
+                    'visibility': round(landmark.visibility if hasattr(landmark, 'visibility') else 1.0, LANDMARK_DECIMAL_PLACES)
                 })
             
             # Classify pose
