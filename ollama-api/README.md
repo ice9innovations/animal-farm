@@ -1,4 +1,4 @@
-# Ollama LLM Service
+# LLaMa (LLaVa) Service
 
 **Port**: 7782  
 **Framework**: Ollama (Meta LLaMA, Mistral, CodeLlama)  
