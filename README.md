@@ -70,6 +70,18 @@ Services are designed to work together through a centralized API architecture:
 
 ### Example API Usage
 
+#### V3 Unified Endpoints (Recommended)
+
+```bash
+# Local file path
+curl "http://192.168.0.101:7777/v3/analyze?file=/path/to/image/file" | jq
+
+# Image URL
+curl "http://192.168.0.101:7777/v3/analyze?url=https://example.com/image.jpg" | jq
+```
+
+#### Legacy V2 Endpoints (Backward Compatibility)
+
 ```bash
 # Object detection
 curl "http://localhost:7771/v2/analyze?image_url=https://example.com/image.jpg"
