@@ -1,23 +1,40 @@
-# Detectron2 Object Detection and Instance Segmentation Service
+# Detectron2 Object Detection Service
 
-This service provides advanced object detection and instance segmentation using Facebook's Detectron2 framework, capable of detecting and segmenting objects from the 80 COCO classes with high accuracy.
+**Port**: 7771  
+**Framework**: Facebook AI Research Detectron2 (Faster R-CNN)  
+**Purpose**: Advanced object detection and instance segmentation with bounding boxes  
+**Status**: ✅ Active
+
+## Overview
+
+Detectron2 provides state-of-the-art object detection using Facebook AI Research's Detectron2 framework. The service analyzes images and detects objects from 80 COCO classes, returning precise bounding boxes, confidence scores, and emoji mappings for each detection.
 
 ## Features
 
-- REST API for object detection and instance segmentation
-- Discord bot integration with emoji reactions
-- Support for multiple model architectures (Mask R-CNN, RetinaNet, etc.)
-- Bounding box detection with confidence scores
-- Instance segmentation masks
-- Automatic configuration file discovery
-- Comprehensive error handling and logging
-- Health check endpoints
+- **Modern V3 API**: Clean, unified endpoint with intuitive parameters
+- **Unified Input Handling**: Single endpoint for both URL and file path analysis
+- **Advanced Detection**: 80 COCO classes with precise bounding box coordinates
+- **IoU Filtering**: Intelligent overlapping detection removal for cleaner results
+- **Emoji Integration**: Automatic word-to-emoji mapping using local dictionary
+- **GPU Acceleration**: CUDA-optimized inference with FP16 precision support
+- **Security**: File validation, size limits, secure cleanup
+- **Thread Safety**: Model inference locking for concurrent requests
 
-## Setup
+## Installation
 
-### 1. Create Python Virtual Environment
+### Prerequisites
+
+- Python 3.8+
+- CUDA 11.8+ (for GPU acceleration)
+- 12GB+ RAM (16GB+ recommended for optimal performance)
+- GPU with 8GB+ VRAM recommended
+
+### 1. Environment Setup
 
 ```bash
+# Navigate to Detectron2 directory
+cd /home/sd/animal-farm/detectron2
+
 # Create virtual environment
 python3 -m venv detectron2_venv
 
@@ -25,117 +42,294 @@ python3 -m venv detectron2_venv
 source detectron2_venv/bin/activate
 
 # Install dependencies
-pip install torch torchvision torchaudio
-pip install flask flask-cors pillow opencv-python python-dotenv requests
-
-# Install Detectron2 (choose appropriate version for your system)
-pip install detectron2 -f https://dl.fbaipublicfiles.com/detectron2/wheels/cu118/torch2.0/index.html
+pip install -r requirements.txt
 ```
 
-### 2. Model Configuration
+### 2. Detectron2 Installation
 
-The service uses the Detectron2 configuration file:
-- `/home/sd/detectron2/configs/COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml`
-
-This file is included with the Detectron2 installation and provides the Faster R-CNN model configuration for COCO object detection.
-
-### 3. Configure Environment
-
-Create a `.env` file with your configuration:
+Install Detectron2 with CUDA support:
 
 ```bash
-# Copy environment template
-cp .env.sample .env
+# For CUDA 11.8 (adjust version as needed)
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
-# Edit .env with your settings
+# Install Detectron2
+python -m pip install 'git+https://github.com/facebookresearch/detectron2.git'
+
+# Verify installation
+python -c "import detectron2; print(detectron2.__version__)"
 ```
 
-### 4. Run Services
+### 3. Model Configuration
 
-**REST API:**
+The service uses Faster R-CNN with ResNet-50 FPN backbone:
+
 ```bash
-python REST.py
-# or
-./detectron2.sh
+# Config file location (automatically found)
+/home/sd/detectron2/configs/COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml
+
+# Model weights (auto-downloaded on first run)
+# detectron2://COCO-Detection/faster_rcnn_R_50_FPN_3x/137849458/model_final_280758.pkl
 ```
 
-**Discord Bot:**
+## Configuration
+
+### Environment Variables (.env)
+
+Create a `.env` file in the detectron2 directory:
+
 ```bash
-python detectron-discord-rest.py
-# or
-./discord.sh
+# Service Configuration
+PORT=7771                    # Service port (default: 7771)
+PRIVATE=False               # Access mode (False=public, True=localhost-only)
+
+# API Configuration (Required for emoji mapping)
+API_HOST=localhost          # Host for emoji API
+API_PORT=8080              # Port for emoji API  
+API_TIMEOUT=2.0            # Timeout for emoji API requests
 ```
 
-## API Usage
+### Configuration Details
 
-### REST API Endpoints
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PORT` | Yes | - | Service listening port |
+| `PRIVATE` | Yes | - | Access control (False=public, True=localhost-only) |
+| `API_HOST` | Yes | - | Host for emoji mapping API |
+| `API_PORT` | Yes | - | Port for emoji mapping API |
+| `API_TIMEOUT` | Yes | - | Timeout for emoji API requests |
 
-- `GET /health` - Health check and model status
-- `GET /classes` - List all 80 detectable COCO classes
-- `GET /?url=<image_url>` - Detect objects in image from URL
-- `GET /?path=<local_path>` - Detect objects in local image (if not in private mode)
-- `POST /` - Upload and detect objects in image file
+## API Endpoints
 
-### Example Usage
-
-**Detect objects from URL:**
+### Health Check
 ```bash
-curl "http://localhost:7771/?url=https://example.com/image.jpg"
+GET /health
 ```
 
-**Upload file:**
-```bash
-curl -X POST -F "uploadedfile=@image.jpg" http://localhost:7771/
-```
-
-**Response format:**
+**Response:**
 ```json
 {
-  "DETECTRON": {
-    "detections": [
-      {
-        "class_id": 16,
-        "class_name": "dog",
-        "confidence": 0.892,
-        "bbox": {
-          "x1": 150,
-          "y1": 200,
-          "x2": 450,
-          "y2": 600,
-          "width": 300,
-          "height": 400
-        },
-        "emoji": "🐕"
-      }
-    ],
-    "total_detections": 1,
-    "image_dimensions": {
-      "width": 640,
-      "height": 480
+  "status": "healthy",
+  "model_status": "loaded",
+  "config_file": "/home/sd/detectron2/configs/...",
+  "confidence_threshold": 0.5,
+  "coco_classes_loaded": 80,
+  "framework": "Detectron2"
+}
+```
+
+### V3 Unified Analysis (Recommended)
+```bash
+GET /v3/analyze?url=<image_url>
+GET /v3/analyze?file=<file_path>
+```
+
+**Parameters:**
+- `url` (string): Image URL to analyze
+- `file` (string): Local file path to analyze
+
+**Note:** Exactly one parameter (`url` or `file`) must be provided.
+
+**Response:**
+```json
+{
+  "service": "detectron2",
+  "status": "success",
+  "predictions": [
+    {
+      "label": "person",
+      "confidence": 0.998,
+      "bbox": {
+        "x": 256,
+        "y": 9,
+        "width": 384,
+        "height": 440
+      },
+      "emoji": "🧑"
     },
+    {
+      "label": "person",
+      "confidence": 0.996,
+      "bbox": {
+        "x": 6,
+        "y": 23,
+        "width": 232,
+        "height": 429
+      },
+      "emoji": "🧑"
+    },
+    {
+      "label": "teddy bear",
+      "confidence": 0.991,
+      "bbox": {
+        "x": 260,
+        "y": 162,
+        "width": 115,
+        "height": 113
+      },
+      "emoji": "🧸"
+    }
+  ],
+  "metadata": {
+    "processing_time": 0.153,
     "model_info": {
-      "confidence_threshold": 0.5,
-      "detection_time": 0.234,
-      "framework": "Detectron2"
-    },
-    "status": "success"
+      "framework": "Facebook AI Research"
+    }
   }
 }
 ```
 
-## Discord Bot
+### V2 Compatibility Routes
+```bash
+GET /v2/analyze?image_url=<url>      # Translates to V3 url parameter
+GET /v2/analyze_file?file_path=<path> # Translates to V3 file parameter
+```
 
-The Discord bot automatically:
-- Processes image attachments in configured channels
-- Detects objects using the Detectron2 API
-- Performs instance segmentation when available
-- Adds emoji reactions for detected objects (up to 3 unique emojis)
-- Logs detections to database (if configured)
-- Ignores duplicate emojis and low-confidence detections
+These endpoints maintain backward compatibility by translating parameters and calling the V3 endpoint internally.
 
-## Detectable Object Classes (80 COCO Classes)
+## Service Management
 
-The service can detect these object categories:
+### Manual Startup
+```bash
+# Activate virtual environment
+source detectron2_venv/bin/activate
+
+# Start service
+python REST.py
+```
+
+### Systemd Service
+```bash
+# Install service file
+sudo cp services/detectron-api.service /etc/systemd/system/
+
+# Enable and start service
+sudo systemctl daemon-reload
+sudo systemctl enable detectron-api.service
+sudo systemctl start detectron-api.service
+
+# Check status
+sudo systemctl status detectron-api.service
+```
+
+## Performance Optimization
+
+### Hardware Requirements
+
+**Minimum:**
+- 8GB RAM
+- GTX 1060 6GB or equivalent
+- 4-core CPU
+
+**Recommended:**
+- 16GB+ RAM
+- RTX 3070 8GB or better
+- 8-core CPU
+- SSD storage
+
+### Performance Settings
+
+The service includes several optimizations:
+- **FP16 Precision**: 50% VRAM reduction with autocast
+- **Batch Size Optimization**: ROI heads batch size reduced to 128
+- **Detection Limits**: Maximum 20 detections per image
+- **Image Resizing**: 512px max dimension for faster inference
+- **IoU Filtering**: Threshold 0.3 for overlapping detection removal
+
+## Error Handling
+
+### Common Errors
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `Model not loaded` | Detectron2 initialization failed | Check CUDA installation and model files |
+| `Config file not found` | Missing configuration file | Verify Detectron2 installation |
+| `File too large` | Image exceeds 8MB limit | Resize image or increase MAX_FILE_SIZE |
+| `Invalid URL format` | Malformed image URL | Check URL syntax and accessibility |
+| `CUDA not available` | GPU/CUDA setup issue | Install CUDA drivers or use CPU mode |
+
+### Error Response Format
+```json
+{
+  "service": "detectron2",
+  "status": "error",
+  "predictions": [],
+  "error": {"message": "Detailed error description"},
+  "metadata": {"processing_time": 0.001}
+}
+```
+
+## Integration Examples
+
+### Python
+```python
+import requests
+
+# URL analysis
+response = requests.get('http://localhost:7771/v3/analyze', 
+                       params={'url': 'https://example.com/image.jpg'})
+data = response.json()
+
+# File analysis
+response = requests.get('http://localhost:7771/v3/analyze',
+                       params={'file': '/path/to/image.jpg'})
+data = response.json()
+
+# Process detections
+for prediction in data['predictions']:
+    print(f"Detected {prediction['label']} with {prediction['confidence']:.3f} confidence")
+    bbox = prediction['bbox']
+    print(f"Location: ({bbox['x']}, {bbox['y']}) {bbox['width']}x{bbox['height']}")
+```
+
+### JavaScript
+```javascript
+// URL analysis
+const response = await fetch('http://localhost:7771/v3/analyze?url=' + 
+                            encodeURIComponent('https://example.com/image.jpg'));
+const data = await response.json();
+
+// Process detections
+data.predictions.forEach(prediction => {
+    console.log(`Detected ${prediction.label} (${prediction.confidence})`);
+    const bbox = prediction.bbox;
+    console.log(`Bounding box: ${bbox.x},${bbox.y} ${bbox.width}x${bbox.height}`);
+});
+```
+
+## Troubleshooting
+
+### Installation Issues
+- **ImportError**: Ensure Detectron2 is properly installed for your CUDA version
+- **Config errors**: Verify Detectron2 repository structure and config files
+- **CUDA errors**: Check PyTorch and Detectron2 CUDA compatibility
+
+### Runtime Issues
+- **Model loading fails**: Check GPU memory availability and CUDA installation
+- **Slow inference**: Enable FP16 precision or reduce image resolution
+- **Memory errors**: Reduce batch size or use CPU mode
+
+### Performance Issues
+- **High memory usage**: Enable FP16 precision with `USE_HALF_PRECISION = True`
+- **Slow responses**: Check GPU utilization and consider multi-GPU setup
+- **Detection quality**: Adjust `CONFIDENCE_THRESHOLD` (default: 0.5)
+
+## Security Considerations
+
+### Access Control
+- Set `PRIVATE=True` for localhost-only access
+- Use reverse proxy (nginx) for production deployment
+- Implement rate limiting for public endpoints
+
+### File Security
+- File size limits enforced (8MB default)
+- Allowed extensions validated
+- Temporary files automatically cleaned up
+- Path traversal protection enabled
+
+## Detectable Objects (80 COCO Classes)
+
+The service detects these object categories:
 
 **People & Animals:**
 person, bird, cat, dog, horse, sheep, cow, elephant, bear, zebra, giraffe
@@ -161,83 +355,6 @@ tv, laptop, mouse, remote, keyboard, cell phone, microwave, oven, toaster, sink,
 **Personal Items:**
 backpack, umbrella, handbag, tie, suitcase, book, clock, vase, scissors, teddy bear, hair drier, toothbrush
 
-## Configuration Options
+---
 
-- **Confidence Threshold**: 0.5 (adjustable, minimum confidence for detections)
-- **Max File Size**: 8MB for uploaded images
-- **Device**: Automatic GPU/CPU detection
-- **Max Emoji Reactions**: 3 unique emojis per Discord message
-
-## Performance & Model Information
-
-- **Framework**: Facebook Detectron2
-- **Models**: Mask R-CNN, RetinaNet, Panoptic FPN (configurable)
-- **Input**: Images up to 8MB
-- **Output**: Bounding boxes, confidence scores, instance segmentation masks
-- **Classes**: 80 COCO object categories
-- **Performance**: High accuracy, optimized for GPU
-
-## Troubleshooting
-
-1. **Model loading errors**: Ensure Detectron2 is properly installed
-2. **Config file not found**: Check config file paths and permissions
-3. **CUDA errors**: Verify PyTorch CUDA compatibility
-4. **Discord bot not responding**: Check token and channel configuration
-5. **API connection issues**: Verify API_URL and API_PORT settings
-6. **No detections**: Check confidence threshold and image quality
-
-## Technical Details
-
-- **Framework**: Flask (REST API), Discord.py (bot), Detectron2 (detection)
-- **Database**: MySQL (optional)
-- **Deployment**: Systemd services available
-- **Hardware**: GPU recommended for best performance, CPU supported
-
-## Files Structure
-
-```
-detectron2/
-├── REST.py                           # REST API service
-├── detectron-discord-rest.py         # Discord bot
-├── detectron2.sh                     # API startup script
-├── discord.sh                        # Discord bot startup script
-├── .env.sample                       # Environment template
-├── services/                         # Systemd service files
-│   ├── detectron2-api.service
-│   └── detectron2.service
-├── coco_classes.txt                  # COCO class names
-├── emojis.json                       # Emoji mappings
-└── README.md                         # This file
-```
-
-## Systemd Service
-
-Service files are available in the `services/` directory for production deployment:
-
-```bash
-# Install services
-sudo cp services/*.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable detectron2-api detectron2
-sudo systemctl start detectron2-api detectron2
-```
-
-## Model Architectures
-
-Detectron2 supports multiple architectures:
-
-| Architecture | Use Case | Speed | Accuracy |
-|-------------|----------|-------|----------|
-| Mask R-CNN | Instance segmentation | Medium | High |
-| RetinaNet | Object detection | Fast | Good |
-| Panoptic FPN | Panoptic segmentation | Slow | Highest |
-| FCOS | Single-stage detection | Fast | Good |
-
-## Integration Notes
-
-This service is part of the Animal Farm voting ensemble system. It provides:
-- High-accuracy object detection with bounding boxes
-- Instance segmentation capabilities
-- Consistent API format for the voting algorithm
-- Emoji reactions for Discord integration
-- Reliable error handling and logging
+*Generated with Animal Farm ML Platform v3.0 - Facebook AI Research Detectron2 Integration*

@@ -1,14 +1,20 @@
 [Unit]
-Description=Detectron REST API Service
+Description=Detectron2 Object Detection and Instance Segmentation REST API Service
 After=network.target
-StartLimitIntervalSec=0
+StartLimitBurst=3
+StartLimitIntervalSec=300
 
 [Service]
 Type=simple
-Restart=0
-User=ubuntu
-WorkingDirectory=/home/ubuntu/detectron2
-ExecStart=/home/ubuntu/detectron2/detectron.sh
+Restart=always
+RestartSec=5
+User=sd
+Group=sd
+WorkingDirectory=/home/sd/detectron2
+ExecStart=/home/sd/detectron2/detectron.sh
+EnvironmentFile=/home/sd/detectron2/.env
+StandardOutput=journal
+StandardError=journal
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target

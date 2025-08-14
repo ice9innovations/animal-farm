@@ -33,9 +33,21 @@ from PIL import Image
 load_dotenv()
 
 # API Configuration for emoji downloads (required)
-API_HOST = os.getenv('API_HOST')  # Must be set in .env
-API_PORT = int(os.getenv('API_PORT'))  # Must be set in .env
-API_TIMEOUT = float(os.getenv('API_TIMEOUT', '2.0'))
+API_HOST = os.getenv('API_HOST')
+API_PORT_STR = os.getenv('API_PORT')
+API_TIMEOUT_STR = os.getenv('API_TIMEOUT')
+
+# Validate critical environment variables
+if not API_HOST:
+    raise ValueError("API_HOST environment variable is required")
+if not API_PORT_STR:
+    raise ValueError("API_PORT environment variable is required")
+if not API_TIMEOUT_STR:
+    raise ValueError("API_TIMEOUT environment variable is required")
+
+# Convert to appropriate types after validation
+API_PORT = int(API_PORT_STR)
+API_TIMEOUT = float(API_TIMEOUT_STR)
 
 # Detectron2 imports (assumes Detectron2 repo is installed)
 from detectron2.config import get_cfg
@@ -55,8 +67,18 @@ logger = logging.getLogger(__name__)
 UPLOAD_FOLDER = './uploads'
 MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
-PRIVATE = os.getenv('PRIVATE', 'False').lower() == 'true'
-PORT = int(os.getenv('PORT', '7771'))
+PRIVATE_STR = os.getenv('PRIVATE')
+PORT_STR = os.getenv('PORT')
+
+# Validate critical configuration
+if not PRIVATE_STR:
+    raise ValueError("PRIVATE environment variable is required")
+if not PORT_STR:
+    raise ValueError("PORT environment variable is required")
+
+# Convert to appropriate types
+PRIVATE = PRIVATE_STR.lower() == 'true'
+PORT = int(PORT_STR)
 CONFIDENCE_THRESHOLD = 0.5
 IMAGE_SIZE = 160
 
@@ -118,20 +140,112 @@ load_emoji_mappings()
 # Ensure upload directory exists
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Environment variables validation
-for var in ['DISCORD_TOKEN', 'DISCORD_GUILD', 'DISCORD_CHANNEL']:
-    if not os.getenv(var):
-        logger.warning(f"Environment variable {var} not set")
-
-TOKEN = os.getenv('DISCORD_TOKEN')
-GUILD = os.getenv('DISCORD_GUILD')
-CHANNELS = os.getenv('DISCORD_CHANNEL', '').split(',') if os.getenv('DISCORD_CHANNEL') else []
 
 # Global variables
 demo = None
 coco_classes = []
 # Thread lock for model inference
 model_lock = threading.Lock()
+
+# IoU threshold for filtering overlapping detections  
+# Lowered from 0.45 to 0.3 to catch more overlapping detections
+IOU_THRESHOLD = 0.3
+
+def calculate_iou(box1: Dict[str, float], box2: Dict[str, float]) -> float:
+    """Calculate Intersection over Union (IoU) between two bounding boxes"""
+    # Extract coordinates - now using consistent x,y,width,height format
+    x1_1, y1_1 = box1['x'], box1['y']
+    x2_1, y2_1 = x1_1 + box1['width'], y1_1 + box1['height']
+    
+    x1_2, y1_2 = box2['x'], box2['y']
+    x2_2, y2_2 = x1_2 + box2['width'], y1_2 + box2['height']
+    
+    # Calculate intersection
+    x1_inter = max(x1_1, x1_2)
+    y1_inter = max(y1_1, y1_2)
+    x2_inter = min(x2_1, x2_2)
+    y2_inter = min(y2_1, y2_2)
+    
+    # Check if there's an intersection
+    if x1_inter >= x2_inter or y1_inter >= y2_inter:
+        return 0.0
+    
+    # Calculate intersection area
+    intersection = (x2_inter - x1_inter) * (y2_inter - y1_inter)
+    
+    # Calculate areas using width/height from bbox
+    area1 = box1['width'] * box1['height']
+    area2 = box2['width'] * box2['height']
+    
+    union = area1 + area2 - intersection
+    
+    # Return IoU
+    return intersection / union if union > 0 else 0.0
+
+def apply_iou_filtering(detections: List[Dict], iou_threshold: float = IOU_THRESHOLD) -> List[Dict]:
+    """Apply IoU-based filtering to merge overlapping detections of the same class"""
+    if not detections:
+        return detections
+    
+    # Group detections by class
+    class_groups = {}
+    for detection in detections:
+        class_name = detection.get('class_name', '')
+        if class_name not in class_groups:
+            class_groups[class_name] = []
+        class_groups[class_name].append(detection)
+    
+    filtered_detections = []
+    
+    # Process each class separately
+    for class_name, class_detections in class_groups.items():
+        if len(class_detections) == 1:
+            # Only one detection for this class, keep it
+            filtered_detections.extend(class_detections)
+            continue
+        
+        # For multiple detections of the same class, apply IoU filtering
+        keep_indices = []
+        
+        for i, det1 in enumerate(class_detections):
+            should_keep = True
+            
+            for j in keep_indices:
+                det2 = class_detections[j]
+                bbox1 = det1.get('bbox', {})
+                bbox2 = det2.get('bbox', {})
+                
+                # Calculate IoU if both have valid bboxes
+                if all(k in bbox1 for k in ['x', 'y', 'width', 'height']) and \
+                   all(k in bbox2 for k in ['x', 'y', 'width', 'height']):
+                    iou = calculate_iou(bbox1, bbox2)
+                    
+                    if iou > iou_threshold:
+                        # High overlap detected
+                        if det1['confidence'] <= det2['confidence']:
+                            # Current detection has lower confidence, don't keep it
+                            should_keep = False
+                            logger.debug(f"Detectron2 IoU filter: Removing {class_name} "
+                                       f"conf={det1['confidence']:.3f} (IoU={iou:.3f} with "
+                                       f"conf={det2['confidence']:.3f})")
+                            break
+                        else:
+                            # Current detection has higher confidence, remove the previous one
+                            keep_indices.remove(j)
+                            logger.debug(f"Detectron2 IoU filter: Replacing {class_name} "
+                                       f"conf={det2['confidence']:.3f} with "
+                                       f"conf={det1['confidence']:.3f} (IoU={iou:.3f})")
+            
+            if should_keep:
+                keep_indices.append(i)
+        
+        # Add the kept detections
+        for i in keep_indices:
+            filtered_detections.append(class_detections[i])
+        
+        logger.debug(f"Detectron2 IoU filter: {class_name} {len(class_detections)} → {len(keep_indices)} detections")
+    
+    return filtered_detections
 
 def resize_image_for_inference(image, max_size=512):
     """Resize image to speed up inference"""
@@ -344,10 +458,8 @@ def process_detections(predictions: Dict[str, Any], scale_x: float = 1.0, scale_
                         y2_scaled = max(y1_scaled + 1, y2_scaled)  # Ensure height > 0
                         
                         detection["bbox"] = {
-                            "x1": x1_scaled,
-                            "y1": y1_scaled,
-                            "x2": x2_scaled,
-                            "y2": y2_scaled,
+                            "x": x1_scaled,
+                            "y": y1_scaled,
                             "width": x2_scaled - x1_scaled,
                             "height": y2_scaled - y1_scaled
                         }
@@ -382,10 +494,8 @@ def process_detections(predictions: Dict[str, Any], scale_x: float = 1.0, scale_
                             y2_scaled = max(y1_scaled + 1, y2_scaled)
                             
                             detection["bbox"] = {
-                                "x1": x1_scaled,
-                                "y1": y1_scaled,
-                                "x2": x2_scaled,
-                                "y2": y2_scaled,
+                                "x": x1_scaled,
+                                "y": y1_scaled,
                                 "width": x2_scaled - x1_scaled,
                                 "height": y2_scaled - y1_scaled
                             }
@@ -402,18 +512,10 @@ def process_detections(predictions: Dict[str, Any], scale_x: float = 1.0, scale_
     # Sort by confidence (highest first)
     detections.sort(key=lambda x: x['confidence'], reverse=True)
     
-    # Deduplicate by class name - keep only highest confidence per class
-    seen_classes = {}
-    deduplicated = []
+    # Apply IoU-based filtering to merge overlapping detections of the same class
+    filtered_detections = apply_iou_filtering(detections)
     
-    for detection in detections:
-        class_name = detection.get('class_name', '')
-        if class_name:
-            if class_name not in seen_classes:
-                seen_classes[class_name] = detection
-                deduplicated.append(detection)
-    
-    return deduplicated
+    return filtered_detections
 
 def detect_objects(image_path: str, cleanup: bool = True) -> Dict[str, Any]:
     """Detect objects using Detectron2"""
@@ -546,46 +648,158 @@ def get_classes():
         "framework": "Detectron2"
     })
 
+
+# V2 Compatibility Routes - Translate parameters and call V3
+@app.route('/v2/analyze', methods=['GET'])
+def analyze_v2_compat():
+    """V2 compatibility - translate parameters to V3 format"""
+    import time
+    from flask import request
+    
+    # Get V2 parameter
+    image_url = request.args.get('image_url')
+    
+    if image_url:
+        # Create new request args with V3 parameter name
+        new_args = request.args.copy()
+        new_args = new_args.to_dict()
+        new_args['url'] = image_url
+        del new_args['image_url']
+        
+        # Create a mock request object for V3
+        with app.test_request_context('/v3/analyze', query_string=new_args):
+            return analyze_v3()
+    else:
+        # No parameters - let V3 handle the error
+        with app.test_request_context('/v3/analyze'):
+            return analyze_v3()
+
 @app.route('/v2/analyze_file', methods=['GET'])
-def analyze_file_v2():
-    """V2 API endpoint for direct file path analysis"""
+def analyze_file_v2_compat():
+    """V2 file compatibility - translate parameters to V3 format"""
+    import time
+    from flask import request
+    
+    # Get V2 parameter
+    file_path = request.args.get('file_path')
+    
+    if file_path:
+        # Create new request args with V3 parameter name
+        new_args = {'file': file_path}
+        
+        # Create a mock request object for V3
+        with app.test_request_context('/v3/analyze', query_string=new_args):
+            return analyze_v3()
+    else:
+        # No parameters - let V3 handle the error
+        with app.test_request_context('/v3/analyze'):
+            return analyze_v3()
+
+@app.route('/v3/analyze', methods=['GET'])
+def analyze_v3():
+    """Unified V3 API endpoint for both URL and file path analysis"""
     import time
     start_time = time.time()
     
     try:
-        # Get file path from query parameters
-        file_path = request.args.get('file_path')
-        if not file_path:
+        # Get input parameters - support both url and file
+        url = request.args.get('url')
+        file = request.args.get('file')
+        
+        # Validate input - exactly one parameter must be provided
+        if not url and not file:
             return jsonify({
                 "service": "detectron2",
                 "status": "error",
                 "predictions": [],
-                "error": {"message": "Missing file_path parameter"},
+                "error": {"message": "Must provide either url or file parameter"},
                 "metadata": {"processing_time": round(time.time() - start_time, 3)}
             }), 400
         
-        # Validate file path
-        if not os.path.exists(file_path):
+        if url and file:
             return jsonify({
                 "service": "detectron2",
                 "status": "error",
                 "predictions": [],
-                "error": {"message": f"File not found: {file_path}"},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 404
-        
-        if not is_allowed_file(file_path):
-            return jsonify({
-                "service": "detectron2",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": "File type not allowed"},
+                "error": {"message": "Cannot provide both url and file parameters"},
                 "metadata": {"processing_time": round(time.time() - start_time, 3)}
             }), 400
         
-        # Detect objects directly from file (no cleanup needed - we don't own the file)
-        result = detect_objects(file_path, cleanup=False)
+        # Handle URL input
+        if url:
+            filepath = None
+            try:
+                parsed_url = urlparse(url)
+                if not parsed_url.scheme or not parsed_url.netloc:
+                    raise ValueError("Invalid URL format")
+                
+                # Download image
+                filename = uuid.uuid4().hex + ".jpg"
+                filepath = os.path.join(UPLOAD_FOLDER, filename)
+                
+                response = requests.get(url, timeout=10, stream=True)
+                response.raise_for_status()
+                
+                content_type = response.headers.get('content-type', '')
+                if not content_type.startswith('image/'):
+                    raise ValueError("URL does not point to an image")
+                
+                with open(filepath, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                
+                if not validate_file_size(filepath):
+                    os.remove(filepath)
+                    filepath = None
+                    raise ValueError("Downloaded file too large")
+                
+                # Detect objects using existing function
+                result = detect_objects(filepath)
+                filepath = None  # detect_objects handles cleanup
+                
+            except Exception as e:
+                logger.error(f"Error processing URL {url}: {e}")
+                return jsonify({
+                    "service": "detectron2",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": f"Failed to process URL: {str(e)}"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 500
+            finally:
+                # Ensure cleanup of temporary file
+                if filepath and os.path.exists(filepath):
+                    try:
+                        os.remove(filepath)
+                        logger.debug(f"Cleaned up temporary file: {filepath}")
+                    except Exception as e:
+                        logger.warning(f"Failed to cleanup file {filepath}: {e}")
         
+        # Handle file input
+        if file:
+            # Validate file path
+            if not os.path.exists(file):
+                return jsonify({
+                    "service": "detectron2",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": f"File not found: {file}"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 404
+            
+            if not is_allowed_file(file):
+                return jsonify({
+                    "service": "detectron2",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": "File type not allowed"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 400
+            
+            # Detect objects directly from file (no cleanup needed - we don't own the file)
+            result = detect_objects(file, cleanup=False)
+        
+        # Process results (common for both URL and file)
         if result.get('status') == 'error':
             return jsonify({
                 "service": "detectron2",
@@ -595,33 +809,26 @@ def analyze_file_v2():
                 "metadata": {"processing_time": round(time.time() - start_time, 3)}
             }), 500
         
-        # Convert to v2 format
+        # Convert to v3 format
         detectron_data = result.get('DETECTRON', {})
         detections = detectron_data.get('detections', [])
-        image_dims = detectron_data.get('image_dimensions', {})
         
         # Create unified prediction format
         predictions = []
         for detection in detections:
             bbox = detection.get('bbox', {})
             prediction = {
-                "type": "object_detection",
                 "label": detection.get('class_name', ''),
-                "confidence": round(float(detection.get('confidence', 0)), 3)  # Normalize to 0-1
+                "confidence": round(float(detection.get('confidence', 0)), 3)
             }
             
-            # Add bbox if present - convert from x1,y1,x2,y2 to x,y,width,height format
+            # Add bbox if present
             if bbox:
-                x1 = bbox.get('x1', 0)
-                y1 = bbox.get('y1', 0)
-                x2 = bbox.get('x2', 0)
-                y2 = bbox.get('y2', 0)
-                
                 prediction["bbox"] = {
-                    "x": x1,
-                    "y": y1,
-                    "width": x2 - x1,
-                    "height": y2 - y1
+                    "x": bbox.get('x', 0),
+                    "y": bbox.get('y', 0),
+                    "width": bbox.get('width', 0),
+                    "height": bbox.get('height', 0)
                 }
             
             # Add emoji if present
@@ -637,18 +844,13 @@ def analyze_file_v2():
             "metadata": {
                 "processing_time": round(time.time() - start_time, 3),
                 "model_info": {
-                    "name": "Detectron2",
                     "framework": "Facebook AI Research"
-                },
-                "image_dimensions": image_dims,
-                "parameters": {
-                    "confidence_threshold": CONFIDENCE_THRESHOLD
                 }
             }
         })
         
     except Exception as e:
-        logger.error(f"V2 file analysis error: {e}")
+        logger.error(f"V3 API error: {e}")
         return jsonify({
             "service": "detectron2",
             "status": "error",
@@ -657,277 +859,6 @@ def analyze_file_v2():
             "metadata": {"processing_time": round(time.time() - start_time, 3)}
         }), 500
 
-@app.route('/v2/analyze', methods=['GET'])
-def analyze_v2():
-    """V2 API endpoint with unified response format"""
-    import time
-    start_time = time.time()
-    
-    try:
-        # Get image URL from query parameters
-        image_url = request.args.get('image_url')
-        if not image_url:
-            return jsonify({
-                "service": "detectron2",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": "Missing image_url parameter"},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 400
-        
-        # Download and process image (reuse existing logic)
-        filepath = None
-        try:
-            parsed_url = urlparse(image_url)
-            if not parsed_url.scheme or not parsed_url.netloc:
-                raise ValueError("Invalid URL format")
-            
-            # Download image
-            filename = uuid.uuid4().hex + ".jpg"
-            filepath = os.path.join(UPLOAD_FOLDER, filename)
-            
-            response = requests.get(image_url, timeout=10, stream=True)
-            response.raise_for_status()
-            
-            content_type = response.headers.get('content-type', '')
-            if not content_type.startswith('image/'):
-                raise ValueError("URL does not point to an image")
-            
-            with open(filepath, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            
-            if not validate_file_size(filepath):
-                os.remove(filepath)
-                filepath = None  # Mark as already removed
-                raise ValueError("Downloaded file too large")
-            
-            # Detect objects using existing function
-            result = detect_objects(filepath)
-            filepath = None  # detect_objects handles cleanup
-            
-            if result.get('status') == 'error':
-                return jsonify({
-                    "service": "detectron2",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": result.get('error', 'Detection failed')},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 500
-            
-            # Convert to v2 format
-            detectron_data = result.get('DETECTRON', {})
-            detections = detectron_data.get('detections', [])
-            image_dims = detectron_data.get('image_dimensions', {})
-            
-            # Create unified prediction format
-            predictions = []
-            for detection in detections:
-                bbox = detection.get('bbox', {})
-                prediction = {
-                    "type": "object_detection",
-                    "label": detection.get('class_name', ''),
-                    "confidence": round(float(detection.get('confidence', 0)), 3)  # Normalize to 0-1
-                }
-                
-                # Add bbox if present - convert from x1,y1,x2,y2 to x,y,width,height format
-                if bbox:
-                    x1 = bbox.get('x1', 0)
-                    y1 = bbox.get('y1', 0)
-                    x2 = bbox.get('x2', 0)
-                    y2 = bbox.get('y2', 0)
-                    
-                    prediction["bbox"] = {
-                        "x": x1,
-                        "y": y1,
-                        "width": x2 - x1,
-                        "height": y2 - y1
-                    }
-                
-                # Add emoji if present
-                if detection.get('emoji'):
-                    prediction["emoji"] = detection['emoji']
-                
-                predictions.append(prediction)
-            
-            return jsonify({
-                "service": "detectron2",
-                "status": "success",
-                "predictions": predictions,
-                "metadata": {
-                    "processing_time": round(time.time() - start_time, 3),
-                    "model_info": {
-                        "name": "Detectron2",
-                        "framework": "Facebook AI Research"
-                    },
-                    "image_dimensions": image_dims,
-                    "parameters": {
-                        "confidence_threshold": CONFIDENCE_THRESHOLD
-                    }
-                }
-            })
-            
-        except Exception as e:
-            logger.error(f"Error processing image URL {image_url}: {e}")
-            return jsonify({
-                "service": "detectron2",
-                "status": "error", 
-                "predictions": [],
-                "error": {"message": f"Failed to process image: {str(e)}"},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 500
-        finally:
-            # Ensure cleanup of temporary file
-            if filepath and os.path.exists(filepath):
-                try:
-                    os.remove(filepath)
-                    logger.debug(f"Cleaned up temporary file: {filepath}")
-                except Exception as e:
-                    logger.warning(f"Failed to cleanup file {filepath}: {e}")
-        
-    except Exception as e:
-        logger.error(f"V2 API error: {e}")
-        return jsonify({
-            "service": "detectron2",
-            "status": "error",
-            "predictions": [],
-            "error": {"message": f"Internal error: {str(e)}"},
-            "metadata": {"processing_time": round(time.time() - start_time, 3)}
-        }), 500
-
-@app.route('/', methods=['GET', 'POST'])
-def index():
-    if request.method == 'GET':
-        # Handle URL parameter
-        url = request.args.get('url') or request.args.get('img')
-        path = request.args.get('path')
-        
-        if url:
-            filepath = None
-            try:
-                # Validate URL
-                parsed_url = urlparse(url)
-                if not parsed_url.scheme or not parsed_url.netloc:
-                    return jsonify({"error": "Invalid URL", "status": "error"}), 400
-                    
-                # Download image
-                filename = uuid.uuid4().hex + ".jpg"
-                filepath = os.path.join(UPLOAD_FOLDER, filename)
-                
-                response = requests.get(url, timeout=10, stream=True)
-                response.raise_for_status()
-                
-                # Check content type
-                content_type = response.headers.get('content-type', '')
-                if not content_type.startswith('image/'):
-                    return jsonify({"error": "URL does not point to an image", "status": "error"}), 400
-                
-                with open(filepath, 'wb') as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                        
-                # Validate downloaded file
-                if not validate_file_size(filepath):
-                    os.remove(filepath)
-                    filepath = None  # Mark as already removed
-                    return jsonify({"error": "Downloaded file too large", "status": "error"}), 400
-                    
-                result = detect_objects(filepath)
-                filepath = None  # detect_objects handles cleanup
-                return jsonify(result)
-                
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Error downloading image from URL {url}: {e}")
-                return jsonify({"error": "Failed to download image", "status": "error"}), 400
-            except Exception as e:
-                logger.error(f"Error processing URL {url}: {e}")
-                return jsonify({"error": "Error processing image", "status": "error"}), 500
-            finally:
-                # Ensure cleanup of temporary file
-                if filepath and os.path.exists(filepath):
-                    try:
-                        os.remove(filepath)
-                        logger.debug(f"Cleaned up temporary file: {filepath}")
-                    except Exception as e:
-                        logger.warning(f"Failed to cleanup file {filepath}: {e}")
-                
-        elif path:
-            # Handle local path (only if not in private mode)
-            if PRIVATE:
-                return jsonify({"error": "Path access disabled in private mode", "status": "error"}), 403
-                
-            if not os.path.exists(path):
-                return jsonify({"error": "File not found", "status": "error"}), 404
-                
-            if not is_allowed_file(path):
-                return jsonify({"error": "File type not allowed", "status": "error"}), 400
-                
-            result = detect_objects(path)
-            return jsonify(result)
-            
-        else:
-            # Return HTML form
-            try:
-                with open('form.html', 'r') as file:
-                    html = file.read()
-            except FileNotFoundError:
-                html = f'''<!DOCTYPE html>
-<html>
-<head><title>Detectron2 Object Detection</title></head>
-<body>
-<h1>Detectron2 Object Detection & Instance Segmentation</h1>
-<form enctype="multipart/form-data" action="" method="POST">
-    <input type="hidden" name="MAX_FILE_SIZE" value="{MAX_FILE_SIZE}" />
-    <p>Upload an image file:</p>
-    <input name="uploadedfile" type="file" accept="image/*" required /><br /><br />
-    <input type="submit" value="Detect Objects" />
-</form>
-<p>Supported formats: {', '.join(ALLOWED_EXTENSIONS)}</p>
-<p>Max file size: {MAX_FILE_SIZE // (1024*1024)}MB</p>
-<p>Detects objects and instance segmentation using Detectron2</p>
-</body>
-</html>'''
-            return html
-            
-    elif request.method == 'POST':
-        filepath = None
-        try:
-            if 'uploadedfile' not in request.files:
-                return jsonify({"error": "No file uploaded", "status": "error"}), 400
-                
-            file = request.files['uploadedfile']
-            if file.filename == '':
-                return jsonify({"error": "No file selected", "status": "error"}), 400
-                
-            if not is_allowed_file(file.filename):
-                return jsonify({"error": "File type not allowed", "status": "error"}), 400
-                
-            # Save uploaded file
-            filename = uuid.uuid4().hex + '.' + file.filename.rsplit('.', 1)[1].lower()
-            filepath = os.path.join(UPLOAD_FOLDER, filename)
-            file.save(filepath)
-            
-            # Validate file size
-            if not validate_file_size(filepath):
-                os.remove(filepath)
-                filepath = None  # Mark as already removed
-                return jsonify({"error": "File too large", "status": "error"}), 400
-                
-            result = detect_objects(filepath)
-            filepath = None  # detect_objects handles cleanup
-            return jsonify(result)
-            
-        except Exception as e:
-            logger.error(f"Error processing upload: {e}")
-            return jsonify({"error": "Error processing upload", "status": "error"}), 500
-        finally:
-            # Ensure cleanup of temporary file
-            if filepath and os.path.exists(filepath):
-                try:
-                    os.remove(filepath)
-                    logger.debug(f"Cleaned up temporary file: {filepath}")
-                except Exception as e:
-                    logger.warning(f"Failed to cleanup file {filepath}: {e}")
 
 if __name__ == '__main__':
     # Set multiprocessing start method for Detectron2
