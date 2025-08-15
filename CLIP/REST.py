@@ -79,8 +79,8 @@ MAX_PREDICTIONS = int(MAX_PREDICTIONS_STR)
 LABELS_FOLDER = './labels'
 
 # CLIP model configuration - Options: ViT-B/32, ViT-L/14, ViT-L/14@336px
-#CLIP_MODEL = 'ViT-L/14'  # Upgraded from ViT-B/32 for better accuracy (~4-6GB VRAM)
-CLIP_MODEL = 'ViT-B/32'  # Upgraded from ViT-B/32 for better accuracy (~4-6GB VRAM)
+CLIP_MODEL = 'ViT-L/14'  # Larger model for better discrimination (~6-8GB VRAM)
+#CLIP_MODEL = 'ViT-B/32'  # Smaller model (~4-6GB VRAM)
 
 # Ensure upload directory exists
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -299,6 +299,62 @@ def compute_similarity(image_path: str) -> Optional[torch.Tensor]:
         logger.error(f"Error computing similarity for {image_path}: {e}")
         return None
 
+def compute_caption_similarity(image_path: str, caption: str) -> Optional[float]:
+    """Compute similarity between image and arbitrary caption text"""
+    logger.info(f"Computing caption similarity for: '{caption}'")
+    
+    if model is None:
+        logger.error("Model not initialized")
+        return None
+        
+    try:
+        with torch.no_grad():
+            # Preprocess image
+            logger.info("Preprocessing image...")
+            image_tensor = preprocess_image(image_path)
+            if image_tensor is None:
+                return None
+                
+            # Convert image tensor to half precision if model is FP16
+            if device == "cuda" and hasattr(model, 'dtype') and model.dtype == torch.float16:
+                image_tensor = image_tensor.half()
+                
+            # Tokenize caption text - try raw caption for better discrimination
+            logger.info("Tokenizing caption...")
+            # Use raw caption without formatting to see if we get better score distribution
+            logger.info(f"Using raw caption: '{caption}'")
+            text_tokens = clip.tokenize([caption]).to(device)
+            
+            logger.info("Encoding features...")
+            # Encode both image and text with autocast for FP16 stability
+            if device == "cuda" and hasattr(model, 'dtype') and model.dtype == torch.float16:
+                with torch.cuda.amp.autocast():
+                    image_features = model.encode_image(image_tensor)
+                    text_features = model.encode_text(text_tokens)
+            else:
+                image_features = model.encode_image(image_tensor)
+                text_features = model.encode_text(text_tokens)
+            
+            # Normalize features (important for cosine similarity)
+            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+            
+            # Compute cosine similarity
+            logger.info("Computing similarity...")
+            similarity = (image_features @ text_features.T).item()
+            
+            logger.info(f"Caption similarity computed: {similarity:.3f}")
+            
+            # Clean up GPU memory
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+        return similarity
+        
+    except Exception as e:
+        logger.error(f"Error computing caption similarity for {image_path}: {e}")
+        return None
+
 def is_allowed_file(filename: str) -> bool:
     """Check if file extension is allowed"""
     return '.' in filename and \
@@ -310,6 +366,72 @@ def validate_file_size(file_path: str) -> bool:
         return os.path.getsize(file_path) <= MAX_FILE_SIZE
     except OSError:
         return False
+
+def handle_image_input(url: str = None, file: str = None) -> Dict[str, Any]:
+    """
+    Handle image input from either URL or file path
+    Returns: {"success": bool, "filepath": str, "cleanup": bool, "error": str}
+    """
+    # Validate input - exactly one parameter must be provided
+    if not url and not file:
+        return {"success": False, "error": "Must provide either url or file parameter"}
+    
+    if url and file:
+        return {"success": False, "error": "Cannot provide both url and file parameters"}
+    
+    # Handle URL input
+    if url:
+        filepath = None
+        try:
+            parsed_url = urlparse(url)
+            if not parsed_url.scheme or not parsed_url.netloc:
+                raise ValueError("Invalid URL format")
+            
+            # Download image
+            filename = uuid.uuid4().hex + ".jpg"
+            filepath = os.path.join(UPLOAD_FOLDER, filename)
+            
+            response = requests.get(url, timeout=10, stream=True)
+            response.raise_for_status()
+            
+            content_type = response.headers.get('content-type', '')
+            if not content_type.startswith('image/'):
+                raise ValueError("URL does not point to an image")
+            
+            with open(filepath, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            
+            if not validate_file_size(filepath):
+                os.remove(filepath)
+                raise ValueError("Downloaded file too large")
+            
+            return {"success": True, "filepath": filepath, "cleanup": True, "error": None}
+            
+        except Exception as e:
+            logger.error(f"Error processing image URL {url}: {e}")
+            # Cleanup on error
+            if filepath and os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                except Exception as cleanup_error:
+                    logger.warning(f"Failed to cleanup file {filepath}: {cleanup_error}")
+            
+            return {"success": False, "error": f"Failed to process image URL: {str(e)}"}
+    
+    # Handle file path input
+    elif file:
+        # Validate file path
+        if not os.path.exists(file):
+            return {"success": False, "error": f"File not found: {file}"}
+        
+        if not is_allowed_file(file):
+            return {"success": False, "error": "File type not allowed"}
+        
+        if not validate_file_size(file):
+            return {"success": False, "error": "File too large"}
+        
+        return {"success": True, "filepath": file, "cleanup": False, "error": None}
 
 
 def classify_image(image_path: str, cleanup: bool = True) -> Dict[str, Any]:
@@ -427,98 +549,42 @@ def analyze_v3():
         url = request.args.get('url')
         file = request.args.get('file')
         
-        # Validate input - exactly one parameter must be provided
-        if not url and not file:
+        # Handle image input using shared helper
+        image_result = handle_image_input(url=url, file=file)
+        
+        if not image_result["success"]:
             return jsonify({
                 "service": "clip",
                 "status": "error",
                 "predictions": [],
-                "error": {"message": "Must provide either url or file parameter"},
+                "error": {"message": image_result["error"]},
                 "metadata": {"processing_time": round(time.time() - start_time, 3)}
             }), 400
         
-        if url and file:
+        filepath = image_result["filepath"]
+        cleanup = image_result["cleanup"]
+        
+        try:
+            # Classify using existing function
+            result = classify_image(filepath, cleanup=cleanup)
+            
+        except Exception as e:
+            logger.error(f"Error classifying image {filepath}: {e}")
             return jsonify({
                 "service": "clip",
                 "status": "error",
                 "predictions": [],
-                "error": {"message": "Cannot provide both url and file parameters"},
+                "error": {"message": f"Classification failed: {str(e)}"},
                 "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 400
-        
-        # Handle URL input
-        if url:
-            filepath = None
-            try:
-                parsed_url = urlparse(url)
-                if not parsed_url.scheme or not parsed_url.netloc:
-                    raise ValueError("Invalid URL format")
-                
-                # Download image
-                filename = uuid.uuid4().hex + ".jpg"
-                filepath = os.path.join(UPLOAD_FOLDER, filename)
-                
-                response = requests.get(url, timeout=10, stream=True)
-                response.raise_for_status()
-                
-                content_type = response.headers.get('content-type', '')
-                if not content_type.startswith('image/'):
-                    raise ValueError("URL does not point to an image")
-                
-                with open(filepath, 'wb') as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                
-                if not validate_file_size(filepath):
+            }), 500
+        finally:
+            # Ensure cleanup of temporary file if needed
+            if cleanup and filepath and os.path.exists(filepath):
+                try:
                     os.remove(filepath)
-                    filepath = None  # Mark as already removed
-                    raise ValueError("Downloaded file too large")
-                
-                # Classify using existing function (with cleanup)
-                result = classify_image(filepath, cleanup=True)
-                filepath = None  # classify_image handles cleanup
-                
-            except Exception as e:
-                logger.error(f"Error processing image URL {url}: {e}")
-                return jsonify({
-                    "service": "clip",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": f"Failed to process image URL: {str(e)}"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 500
-            finally:
-                # Ensure cleanup of temporary file
-                if filepath and os.path.exists(filepath):
-                    try:
-                        os.remove(filepath)
-                        logger.debug(f"Cleaned up temporary file: {filepath}")
-                    except Exception as e:
-                        logger.warning(f"Failed to cleanup file {filepath}: {e}")
-        
-        # Handle file path input
-        elif file:
-            # Validate file path
-            if not os.path.exists(file):
-                return jsonify({
-                    "service": "clip",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": f"File not found: {file}"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 404
-            
-            if not is_allowed_file(file):
-                return jsonify({
-                    "service": "clip",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": "File type not allowed"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 400
-            
-            # Classify directly from file (no cleanup - we don't own the file)
-            result = classify_image(file, cleanup=False)
+                    logger.debug(f"Cleaned up temporary file: {filepath}")
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup file {filepath}: {e}")
         
         # Common processing for both input types
         if result.get('status') == 'error':
@@ -579,6 +645,114 @@ def analyze_v3():
             "service": "clip",
             "status": "error",
             "predictions": [],
+            "error": {"message": f"Internal error: {str(e)}"},
+            "metadata": {"processing_time": round(time.time() - start_time, 3)}
+        }), 500
+
+@app.route('/v3/score', methods=['GET'])
+def score_caption_v3():
+    """Score caption similarity against image using CLIP"""
+    import time
+    start_time = time.time()
+    
+    try:
+        # Get input parameters - same pattern as /v3/analyze
+        caption = request.args.get('caption')
+        url = request.args.get('url')
+        file = request.args.get('file')
+        
+        # Validate caption parameter
+        if not caption or not isinstance(caption, str) or not caption.strip():
+            return jsonify({
+                "service": "clip",
+                "status": "error",
+                "similarity_score": None,
+                "error": {"message": "Must provide non-empty caption string"},
+                "metadata": {"processing_time": round(time.time() - start_time, 3)}
+            }), 400
+        
+        caption = caption.strip()
+        
+        # Handle image input using shared helper
+        image_result = handle_image_input(url=url, file=file)
+        
+        if not image_result["success"]:
+            return jsonify({
+                "service": "clip",
+                "status": "error",
+                "similarity_score": None,
+                "error": {"message": image_result["error"]},
+                "metadata": {"processing_time": round(time.time() - start_time, 3)}
+            }), 400
+        
+        filepath = image_result["filepath"]
+        cleanup = image_result["cleanup"]
+        
+        try:
+            # Check model availability
+            if model is None:
+                return jsonify({
+                    "service": "clip",
+                    "status": "error",
+                    "similarity_score": None,
+                    "error": {"message": "CLIP model not initialized"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 500
+            
+            # Compute similarity score
+            similarity_score = compute_caption_similarity(filepath, caption)
+            
+            if similarity_score is None:
+                return jsonify({
+                    "service": "clip",
+                    "status": "error",
+                    "similarity_score": None,
+                    "error": {"message": "Failed to compute similarity score"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 500
+            
+            # Determine image source for response
+            image_source = "url" if url else "file"
+            
+            return jsonify({
+                "service": "clip",
+                "status": "success",
+                "similarity_score": round(float(similarity_score), 3),
+                "caption": caption,
+                "image_source": image_source,
+                "metadata": {
+                    "processing_time": round(time.time() - start_time, 3),
+                    "model_info": {
+                        "framework": "OpenAI",
+                        "model": CLIP_MODEL
+                    }
+                }
+            })
+            
+        except Exception as e:
+            logger.error(f"Error computing caption similarity: {e}")
+            return jsonify({
+                "service": "clip",
+                "status": "error",
+                "similarity_score": None,
+                "error": {"message": f"Similarity computation failed: {str(e)}"},
+                "metadata": {"processing_time": round(time.time() - start_time, 3)}
+            }), 500
+        finally:
+            # Ensure cleanup of temporary file if needed
+            if cleanup and filepath and os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                    logger.debug(f"Cleaned up temporary file: {filepath}")
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup file {filepath}: {e}")
+        
+    except Exception as e:
+        logger.error(f"V3 caption scoring error: {e}")
+        return jsonify({
+            "service": "clip",
+            "status": "error",
+            "similarity_score": None,
             "error": {"message": f"Internal error: {str(e)}"},
             "metadata": {"processing_time": round(time.time() - start_time, 3)}
         }), 500
