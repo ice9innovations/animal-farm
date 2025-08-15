@@ -1,10 +1,12 @@
-# Animal Farm
+# 🐷 Animal Farm
 
-"All animals are equal, but some animals are more equal than others"
+**All animals are equal, but some animals are more equal than others**
 
 Animal Farm is an edge-computing, distributed AI solution based on the technology developed in Window to the World. Using less than 100W of power, Animal Farm supports field deployments in low power or battery-only environments. Window to the World, the technology that Animal Farm is based on, is a new form of emergent AI that uses a novel consensus-based architecture and detailed data storage to create and map a complex system. It uses emergent intelligence to make decisions about any data the system can analyze. The result is an open system that is a powerful and generalizable AI. It is able to make decisions about any form of data that it has the models to analyze.
 
 ## Architecture
+
+**From each service according to its capability, to each according to its needs**
 
 Animal Farm consists of multiple specialized AI services that work together in a distributed ensemble. Each service runs independently and communicates through RESTful APIs, allowing for scalable deployment across multiple machines or containers.
 
@@ -60,6 +62,34 @@ Animal Farm consists of multiple specialized AI services that work together in a
    ./[service-name].sh
    ```
 
+## Animal Farm Democracy: The Voting System
+
+**Consensus is Truth, Evidence is Democracy, Algorithms are Liberation**
+
+Animal Farm employs a sophisticated democratic voting system inspired by Orwell's famous quote: *"All animals are equal, but some animals are more equal than others."* 
+
+### How Voting Works
+
+**Democratic Foundation**: Every AI service gets exactly one vote per detection - no arbitrary service favoritism or weighting.
+
+**Evidence-Based Consensus**: Services become "more equal than others" through verifiable evidence:
+
+- **Spatial Consensus**: When multiple object detection services (YOLO, Detectron2, RT-DETR) agree on bounding box locations, they receive consensus bonuses equal to `detection_count - 1`
+- **Content Consensus**: When semantic services (BLIP, Ollama) and classification services (CLIP, Inception) agree on the same emoji, they receive consensus bonuses equal to `total_agreeing_services - 1`
+- **Instance Weighting**: Multiple detected instances vote proportionally - 3 people detected gets 3x the spatial votes of 1 person detected
+
+**Specialist Authority**: Each specialist service is authoritative but not exclusive in their domain:
+- **Face**: Authoritative for face detection, validates person emojis
+- **OCR**: Authoritative for text reading, contributes to emoji discovery through text mining  
+- **NSFW**: Authoritative for content safety, requires human context for validation
+
+**Post-Processing Curation**: Clean +1/-1 adjustments ensure logical consistency:
+- Face detection validates person detection (+1)
+- Pose detection validates person detection (+1)
+- NSFW detection without human context receives skepticism (-1)
+
+This creates an intelligent democracy where consensus amplifies evidence rather than arbitrary algorithmic favoritism determining outcomes.
+
 ## API Integration
 
 Services are designed to work together through a centralized API architecture:
@@ -98,7 +128,7 @@ curl "http://localhost:7774/?url=https://example.com/image.jpg"
 - **Multi-Modal AI**: Text, vision, and multimodal analysis capabilities
 - **Distributed Architecture**: Services can run on separate machines for load distribution
 - **GPU Acceleration**: Optimized for NVIDIA GPU deployment with CUDA support
-- **Consensus Voting**: Multiple AI models vote on decisions for improved accuracy
+- **Animal Farm Democracy**: Intelligent consensus voting system where all services are equal, but some are more equal than others
 - **Edge Computing Ready**: Low power consumption suitable for field deployment
 - **Docker Support**: Containerized deployment options available
 - **Comprehensive Logging**: Detailed logging and monitoring across all services
