@@ -20,6 +20,7 @@ import threading
 import time
 import asyncio
 import concurrent.futures
+import random
 from typing import List, Dict, Any, Optional, Tuple
 from urllib.parse import urlparse
 from PIL import Image, ImageDraw
@@ -264,6 +265,12 @@ def get_emoji(concept: str):
         return None
     concept_clean = concept.lower().strip()
     return emoji_mappings.get(concept_clean)
+
+def check_shiny():
+    """Check if this detection should be shiny (1/2500 chance)"""
+    roll = random.randint(1, 2500)
+    is_shiny = roll == 1
+    return is_shiny, roll
 
 # Load emoji mappings on startup
 load_emoji_mappings()
@@ -790,10 +797,17 @@ def analyze_v3():
         predictions = []
         for obj in objects:
             bbox = obj.get('bbox', [])
+            is_shiny, shiny_roll = check_shiny()
+            
             prediction = {
                 "label": obj.get('object', ''),
                 "confidence": round(float(obj.get('confidence', 0)), 3)
             }
+            
+            # Add shiny flag only for shiny detections
+            if is_shiny:
+                prediction["shiny"] = True
+                logger.info(f"✨ SHINY {obj.get('object', '').upper()} DETECTED! Roll: {shiny_roll} ✨")
             
             # Add bbox if present
             if len(bbox) >= 4:

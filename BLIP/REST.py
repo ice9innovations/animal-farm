@@ -4,6 +4,7 @@ import os
 import sys
 import uuid
 import logging
+import random
 import nltk
 from nltk.tokenize import MWETokenizer
 from typing import List, Optional, Dict, Any
@@ -144,6 +145,12 @@ def get_emoji_for_word(word: str) -> str:
             return emoji_mappings[singular]
 
     return None
+
+def check_shiny():
+    """Check if this detection should be shiny (1/2500 chance)"""
+    roll = random.randint(1, 2500)
+    is_shiny = roll == 1
+    return is_shiny, roll
 
 def lookup_text_for_emojis(text: str) -> Dict[str, Any]:
     """Look up emojis for text with tokenization - returns same format as utils"""
@@ -615,10 +622,19 @@ def analyze_v3():
             emoji_mappings = []
             if word_mappings:
                 for word, emoji in word_mappings.items():
-                    emoji_mappings.append({
+                    is_shiny, shiny_roll = check_shiny()
+                    
+                    mapping = {
                         "word": word,
                         "emoji": emoji
-                    })
+                    }
+                    
+                    # Add shiny flag only for shiny detections
+                    if is_shiny:
+                        mapping["shiny"] = True
+                        logging.info(f"✨ SHINY {word.upper()} EMOJI DETECTED! Roll: {shiny_roll} ✨")
+                    
+                    emoji_mappings.append(mapping)
             
             predictions.append({
                 "text": caption,

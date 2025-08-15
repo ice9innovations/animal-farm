@@ -12,6 +12,7 @@ import logging
 import tempfile
 import uuid
 import json
+import random
 from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
@@ -141,6 +142,12 @@ def load_emoji_mappings():
 def get_emoji(word):
     """Get emoji for a given word"""
     return emoji_mappings.get(word.lower(), "")
+
+def check_shiny():
+    """Check if this detection should be shiny (1/2500 chance)"""
+    roll = random.randint(1, 2500)
+    is_shiny = roll == 1
+    return is_shiny, roll
 
 def allowed_file(filename):
     """Check if file extension is allowed"""
@@ -569,7 +576,9 @@ def analyze_v3():
         
         # Add face predictions
         for face in raw_data['faces']:
-            predictions.append({
+            is_shiny, shiny_roll = check_shiny()
+            
+            prediction = {
                 "label": "face",
                 "emoji": get_emoji("face"),
                 "confidence": round(float(face['confidence']), CONFIDENCE_DECIMAL_PLACES),
@@ -578,10 +587,19 @@ def analyze_v3():
                     "keypoints": face.get('keypoints', {}),
                     "method": face['method']
                 }
-            })
+            }
+            
+            # Add shiny flag only for shiny detections
+            if is_shiny:
+                prediction["shiny"] = True
+                logger.info(f"✨ SHINY FACE DETECTED! Roll: {shiny_roll} ✨")
+            
+            predictions.append(prediction)
         
         # Add pose predictions
         for pose in raw_data.get('poses', []):
+            is_shiny, shiny_roll = check_shiny()
+            
             pose_prediction = {
                 "label": pose['pose_category'],
                 "emoji": get_emoji(pose['pose_category']),
@@ -591,6 +609,11 @@ def analyze_v3():
                     "method": pose['method']
                 }
             }
+            
+            # Add shiny flag only for shiny detections
+            if is_shiny:
+                pose_prediction["shiny"] = True
+                logger.info(f"✨ SHINY {pose['pose_category'].upper()} DETECTED! Roll: {shiny_roll} ✨")
             
             # Add segmentation data if available
             if 'segmentation' in pose and pose['segmentation']:

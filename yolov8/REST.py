@@ -13,6 +13,7 @@ import requests
 import os
 import uuid
 import logging
+import random
 from typing import List, Dict, Any, Optional, Tuple
 from urllib.parse import urlparse
 from PIL import Image, ImageDraw
@@ -101,6 +102,12 @@ def get_emoji(word: str) -> str:
     
     word_clean = word.lower().strip()
     return emoji_mappings.get(word_clean)
+
+def check_shiny():
+    """Check if this detection should be shiny (1/2500 chance)"""
+    roll = random.randint(1, 2500)
+    is_shiny = roll == 1
+    return is_shiny, roll
 
 # COCO class names (YOLOv8 uses COCO dataset classes)
 COCO_CLASSES = [
@@ -664,6 +671,8 @@ def analyze_v3():
         predictions = []
         for detection in detections:
             bbox = detection.get('bbox', {})
+            is_shiny, shiny_roll = check_shiny()
+            
             prediction = {
                 "label": detection.get('class_name', ''),
                 "confidence": float(detection.get('confidence', 0)),
@@ -674,6 +683,11 @@ def analyze_v3():
                     "height": bbox.get('height', 0)
                 }
             }
+            
+            # Add shiny flag only for shiny detections
+            if is_shiny:
+                prediction["shiny"] = True
+                logger.info(f"✨ SHINY {detection.get('class_name', '').upper()} DETECTED! Roll: {shiny_roll} ✨")
             
             # Add emoji if present
             if detection.get('emoji'):

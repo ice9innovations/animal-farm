@@ -6,6 +6,7 @@ import os
 import uuid
 import time
 import logging
+import random
 import nltk
 from nltk.tokenize import MWETokenizer
 from typing import Dict, Any, Optional, List
@@ -158,6 +159,12 @@ def get_emoji_for_word(word: str) -> str:
 
     return None
 
+def check_shiny():
+    """Check if this detection should be shiny (1/2500 chance)"""
+    roll = random.randint(1, 2500)
+    is_shiny = roll == 1
+    return is_shiny, roll
+
 def lookup_text_for_emojis(text: str) -> Dict[str, Any]:
     """Look up emojis for text with tokenization - returns same format as utils"""
     if not text or not text.strip():
@@ -212,7 +219,17 @@ def get_emojis_for_text(text: str) -> List[Dict[str, str]]:
             # Only add if we haven't seen this normalized word before
             if normalized_word not in seen_words:
                 seen_words.add(normalized_word)
-                found_mappings.append({"word": normalized_word, "emoji": emoji})
+                
+                is_shiny, shiny_roll = check_shiny()
+                
+                mapping = {"word": normalized_word, "emoji": emoji}
+                
+                # Add shiny flag only for shiny detections
+                if is_shiny:
+                    mapping["shiny"] = True
+                    logger.info(f"✨ SHINY {normalized_word.upper()} EMOJI DETECTED! Roll: {shiny_roll} ✨")
+                
+                found_mappings.append(mapping)
         
         logger.debug(f"LLaMa: Found {len(found_mappings)} emoji mappings")
         return found_mappings

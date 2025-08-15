@@ -13,6 +13,7 @@ import requests
 import uuid
 import time
 import shutil
+import random
 from typing import Dict, Any
 
 import tensorflow as tf
@@ -72,6 +73,12 @@ def get_nsfw_emoji(probability: float) -> str:
     if probability > NSFW_THRESHOLD:
         return "🔞"
     return ""
+
+def check_shiny():
+    """Check if this detection should be shiny (1/2500 chance)"""
+    roll = random.randint(1, 2500)
+    is_shiny = roll == 1
+    return is_shiny, roll
 
 def convert_to_jpg(filepath: str) -> str:
     """Convert image to JPG format if needed"""
@@ -140,14 +147,23 @@ def detect_nsfw_opennsfw2(image_path: str, cleanup: bool = True) -> Dict[str, An
             # If safe, confidence is 1 - NSFW probability (confidence it's safe)
             prediction_confidence = round(1.0 - nsfw_probability, 3)
         
+        is_shiny, shiny_roll = check_shiny()
+        
+        prediction = {
+            "confidence": prediction_confidence,
+            "emoji": emoji,
+            "nsfw": is_nsfw
+        }
+        
+        # Add shiny flag only for shiny detections
+        if is_shiny:
+            prediction["shiny"] = True
+            print(f"✨ SHINY NSFW2 MODERATION DETECTED! Roll: {shiny_roll} ✨")
+        
         response = {
             "service": "nsfw2",
             "status": "success",
-            "predictions": [{
-                "confidence": prediction_confidence,
-                "emoji": emoji,
-                "nsfw": is_nsfw
-            }],
+            "predictions": [prediction],
             "metadata": {
                 "processing_time": detection_time,
                 "model_info": {

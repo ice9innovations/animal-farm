@@ -4,6 +4,7 @@ import os
 import uuid
 import time
 import re
+import random
 from typing import Dict, Any, Optional, List, Tuple
 
 from flask import Flask, request, jsonify
@@ -112,8 +113,14 @@ def get_emoji(label):
     """Get emoji for a given label from emoji mappings"""
     return emoji_mappings.get(label, None)
 
+def check_shiny():
+    """Check if this detection should be shiny (1/2500 chance)"""
+    roll = random.randint(1, 2500)
+    is_shiny = roll == 1
+    return is_shiny, roll
+
 def get_emojis_for_words(words: List[str]) -> List[Dict[str, str]]:
-    """Get emoji mappings for a list of words"""
+    """Get emoji mappings for a list of words with shiny detection"""
     if not words:
         return []
     
@@ -121,7 +128,16 @@ def get_emojis_for_words(words: List[str]) -> List[Dict[str, str]]:
     for word in words:
         emoji = get_emoji(word.lower())
         if emoji:
-            mappings.append({"word": word, "emoji": emoji})
+            is_shiny, shiny_roll = check_shiny()
+            
+            mapping = {"word": word, "emoji": emoji}
+            
+            # Add shiny flag only for shiny detections
+            if is_shiny:
+                mapping["shiny"] = True
+                print(f"✨ SHINY {word.upper()} EMOJI FROM TEXT DETECTED! Roll: {shiny_roll} ✨")
+            
+            mappings.append(mapping)
     
     print(f"OCR: Found {len(mappings)} emoji mappings from {len(words)} words")
     return mappings
@@ -451,6 +467,8 @@ def analyze_v3():
                 emoji_mappings_list = get_emojis_for_words(meaningful_words)
                 print(f"OCR: Generated {len(emoji_mappings_list)} emoji mappings from text content")
         
+        is_shiny, shiny_roll = check_shiny()
+        
         text_prediction = {
             "text": text,
             "emoji": (get_emoji("ocr") or "💬") if has_text else "",
@@ -459,6 +477,12 @@ def analyze_v3():
             "text_regions": text_regions,
             "emoji_mappings": emoji_mappings_list
         }
+        
+        # Add shiny flag only for shiny detections
+        if is_shiny:
+            text_prediction["shiny"] = True
+            print(f"✨ SHINY TEXT DETECTION! Roll: {shiny_roll} ✨")
+        
         predictions.append(text_prediction)
         
         return jsonify({

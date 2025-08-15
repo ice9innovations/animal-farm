@@ -13,6 +13,7 @@ import json
 import re
 import uuid
 import logging
+import random
 from typing import List, Dict, Any, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -114,6 +115,12 @@ def get_emoji(concept: str) -> Optional[str]:
         return None
     concept_clean = concept.lower().strip().replace(' ', '_')
     return emoji_mappings.get(concept_clean)
+
+def check_shiny():
+    """Check if this detection should be shiny (1/2500 chance)"""
+    roll = random.randint(1, 2500)
+    is_shiny = roll == 1
+    return is_shiny, roll
 
 # Load emoji mappings on startup
 load_emoji_mappings()
@@ -535,10 +542,17 @@ def analyze_v3():
         # Create unified prediction format
         predictions = []
         for item in raw_predictions:
+            is_shiny, shiny_roll = check_shiny()
+            
             prediction = {
                 "label": item.get('label', ''),
                 "confidence": round(float(item.get('confidence', 0)), 3)
             }
+            
+            # Add shiny flag only for shiny detections
+            if is_shiny:
+                prediction["shiny"] = True
+                logger.info(f"✨ SHINY {item.get('label', '').upper()} DETECTED! Roll: {shiny_roll} ✨")
             
             # Add emoji if found
             label = item.get('label', '')
