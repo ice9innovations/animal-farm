@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import uuid
 import re
 import time
+import tempfile
 from typing import Dict, Any, Optional
 
 from flask import Flask, request, jsonify
@@ -309,6 +310,129 @@ def cleanup_file(filepath: str) -> None:
     except Exception as e:
         print(f"Warning: Could not remove file {filepath}: {e}")
 
+def analyze_colors_from_image(image: Image.Image) -> Dict[str, Any]:
+    """Analyze colors directly from PIL Image object (in-memory processing)"""
+    start_time = time.time()
+    
+    try:
+        # Save image to temporary file for Haishoku (Haishoku requires file path)
+        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
+            temp_path = temp_file.name
+            image.save(temp_path, 'JPEG', quality=95)
+        
+        try:
+            # Get dominant color using Haishoku
+            dominant_color = Haishoku.getDominant(temp_path)
+            dr, dg, db = dominant_color[0], dominant_color[1], dominant_color[2]
+            dhex = rgb2hex(dr, dg, db)
+            
+            # Get dominant color names
+            dominant_copic = get_color_name(dominant_color, "copic")
+            copic_d = format_copic(dominant_copic)
+            copic_str = f"{copic_d[0]} ({copic_d[1]})"
+            
+            # Get Prismacolor for dominant color
+            dominant_prisma = get_color_name(dominant_color, "prismacolor")
+            prisma_d = format_copic(dominant_prisma)
+            prisma_str = f"{prisma_d[0]} ({prisma_d[1]})"
+            
+            # Get color palette
+            palette_colors = Haishoku.getPalette(temp_path)
+            cnames_copic = []
+            cnames_prisma = []
+            
+            for p in palette_colors:
+                clr = p[1]
+                if 'copic' in COLOR_SYSTEM:
+                    cnames_copic.append(get_color_name(clr, "copic"))
+                if 'prismacolor' in COLOR_SYSTEM:
+                    cnames_prisma.append(get_color_name(clr, "prismacolor"))
+            
+            # Remove duplicates
+            if 'copic' in COLOR_SYSTEM:
+                cnames_copic = unique(cnames_copic)
+            if 'prismacolor' in COLOR_SYSTEM:
+                cnames_prisma = unique(cnames_prisma)
+            
+            # Build palette arrays with both systems
+            palette_with_both = []
+            for p in palette_colors:
+                clr = p[1]
+                copic_name = get_color_name(clr, "copic")
+                prisma_name = get_color_name(clr, "prismacolor")
+                
+                if copic_name:
+                    copic_formatted = format_copic(copic_name)
+                    copic_str_pal = f"{copic_formatted[0]} ({copic_formatted[1]})"
+                    
+                    prisma_formatted = format_copic(prisma_name) if prisma_name else ["Unknown", ""]
+                    prisma_str_pal = f"{prisma_formatted[0]} ({prisma_formatted[1]})" if prisma_name else "Unknown"
+                    
+                    hex_val = rgb2hex(clr[0], clr[1], clr[2])
+                    temp = get_color_temperature(copic_str_pal)
+                    
+                    palette_with_both.append({
+                        "copic": copic_str_pal,
+                        "hex": hex_val,
+                        "prismacolor": prisma_str_pal,
+                        "temperature": temp
+                    })
+            
+            # Remove duplicates based on hex value
+            unique_palette = []
+            seen_hex = set()
+            for color in palette_with_both:
+                if color["hex"] not in seen_hex:
+                    unique_palette.append(color)
+                    seen_hex.add(color["hex"])
+            
+            # Calculate palette temperature
+            palette_temp = calculate_palette_temperature([{"color": c["copic"]} for c in unique_palette])
+            
+            # Get primary color temperature and Prismacolor
+            primary_temp = get_color_temperature(copic_str)
+            
+            analysis_time = round(time.time() - start_time, 3)
+            
+            # Build response in V3 format
+            color_prediction = {
+                "primary": {
+                    "copic": copic_str,
+                    "hex": dhex,
+                    "prismacolor": prisma_str,
+                    "temperature": primary_temp
+                },
+                "palette": {
+                    "temperature": palette_temp,
+                    "colors": unique_palette
+                }
+            }
+            
+            return {
+                "service": "colors",
+                "status": "success",
+                "predictions": [color_prediction],
+                "metadata": {
+                    "processing_time": analysis_time,
+                    "model_info": {
+                        "framework": "Haishoku + PIL"
+                    }
+                }
+            }
+            
+        finally:
+            # Clean up temporary file
+            os.unlink(temp_path)
+            
+    except Exception as e:
+        return {
+            "service": "colors",
+            "status": "error",
+            "predictions": [],
+            "error": {"message": f"Color analysis failed: {str(e)}"},
+            "metadata": {"processing_time": round(time.time() - start_time, 3)}
+        }
+
 def analyze_colors(image_file: str, cleanup: bool = True) -> Dict[str, Any]:
     """Analyze colors in image and return structured response"""
     start_time = time.time()
@@ -464,13 +588,66 @@ def health_check():
         ]
     })
 
-@app.route('/v3/analyze', methods=['GET'])
+@app.route('/v3/analyze', methods=['GET', 'POST'])
 def analyze_v3():
-    """Unified V3 API endpoint for both URL and file path analysis"""
+    """Unified V3 API endpoint for URL, file path, and POST file upload analysis"""
     import time
     start_time = time.time()
     
     try:
+        # Handle POST file upload
+        if request.method == 'POST':
+            # Check for file upload
+            if 'file' not in request.files:
+                return jsonify({
+                    "service": "colors",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": "No file provided in POST request"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 400
+            
+            file = request.files['file']
+            if file.filename == '':
+                return jsonify({
+                    "service": "colors",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": "No file selected"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 400
+            
+            # Validate file size
+            file.seek(0, 2)  # Seek to end
+            file_size = file.tell()
+            file.seek(0)     # Seek back to beginning
+            
+            if file_size > MAX_FILE_SIZE:
+                return jsonify({
+                    "service": "colors",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 400
+            
+            # Process directly from memory
+            try:
+                from io import BytesIO
+                image = Image.open(BytesIO(file.read())).convert('RGB')
+                result = analyze_colors_from_image(image)
+                return jsonify(result)
+                
+            except Exception as e:
+                return jsonify({
+                    "service": "colors",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": f"Failed to process uploaded image: {str(e)}"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 500
+        
+        # Handle GET requests
         # Get parameters from query string
         url = request.args.get('url')
         file_path = request.args.get('file')
