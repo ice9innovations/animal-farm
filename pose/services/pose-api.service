@@ -1,0 +1,20 @@
+[Unit]
+Description=Pose Estimation REST API Service
+After=network.target
+StartLimitBurst=3
+StartLimitIntervalSec=300
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+User=sd
+Group=sd
+WorkingDirectory=/home/sd/pose
+ExecStart=/home/sd/pose/pose.sh
+EnvironmentFile=/home/sd/pose/.env
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

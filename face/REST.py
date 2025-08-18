@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Human Analysis Service using MediaPipe
-Provides face detection, pose estimation, and facial expression analysis
+Face Detection Service using MediaPipe
+Provides dedicated face detection and facial analysis capabilities
 Replaces the outdated and biased Haar Cascade/SSD models with Google's MediaPipe framework
 """
 
@@ -64,12 +64,10 @@ CORS(app)
 
 # MediaPipe initialization
 mp_face_detection = mp.solutions.face_detection
-mp_pose = mp.solutions.pose
 mp_drawing = mp.solutions.drawing_utils
 
 # Global MediaPipe models - initialize once at startup
 face_detection_model = None
-pose_model = None
 
 # Configuration
 UPLOAD_FOLDER = 'uploads'
@@ -78,12 +76,8 @@ MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
 
 # MediaPipe model configuration
 FACE_MIN_DETECTION_CONFIDENCE = 0.2
-POSE_MIN_DETECTION_CONFIDENCE = 0.5
-FACE_MESH_MIN_DETECTION_CONFIDENCE = 0.1
-POSE_MIN_TRACKING_CONFIDENCE = 0.5
 CONFIDENCE_DECIMAL_PLACES = 3
 LANDMARK_DECIMAL_PLACES = 3  # Precision for landmark coordinates and visibility
-MIN_FACE_SIZE_FOR_MESH = 60  # Minimum face size (pixels) for reliable Face Mesh analysis
 
 # Ensure upload folder exists
 if not os.path.exists(UPLOAD_FOLDER):
@@ -97,10 +91,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def initialize_models():
-    """Initialize MediaPipe models once at startup"""
-    global face_detection_model, pose_model
+    """Initialize MediaPipe face detection model at startup"""
+    global face_detection_model
     try:
-        logger.info("Initializing MediaPipe models...")
+        logger.info("Initializing MediaPipe Face Detection model...")
         
         # Face Detection
         face_detection_model = mp_face_detection.FaceDetection(
@@ -109,21 +103,10 @@ def initialize_models():
         )
         logger.info("✅ MediaPipe Face Detection model initialized")
         
-        # Pose Detection
-        pose_model = mp_pose.Pose(
-            static_image_mode=True,
-            model_complexity=1,  # 0=lite, 1=full, 2=heavy
-            smooth_landmarks=True,
-            enable_segmentation=True,  # Enable person silhouette extraction
-            min_detection_confidence=POSE_MIN_DETECTION_CONFIDENCE,
-            min_tracking_confidence=POSE_MIN_TRACKING_CONFIDENCE
-        )
-        logger.info("✅ MediaPipe Pose model initialized")
-        
         return True
         
     except Exception as e:
-        logger.error(f"❌ Error initializing MediaPipe models: {str(e)}")
+        logger.error(f"❌ Error initializing MediaPipe Face Detection model: {str(e)}")
         return False
 
 def load_emoji_mappings():
@@ -261,111 +244,9 @@ def detect_faces_mediapipe(image_path):
         logger.error(f"MediaPipe face detection error: {str(e)}")
         return [], {'width': 0, 'height': 0}
 
-def detect_poses_mediapipe(image_path):
-    """Detect poses using MediaPipe"""
-    global pose_model
-    
-    try:
-        # Read image
-        image = cv2.imread(image_path)
-        if image is None:
-            return [], {'width': 0, 'height': 0}
-        
-        height, width, _ = image.shape
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        
-        # Process with MediaPipe
-        results = pose_model.process(image_rgb)
-        
-        poses = []
-        segmentation_data = None
-        
-        if results.pose_landmarks:
-            # Extract landmarks
-            landmarks = []
-            for landmark in results.pose_landmarks.landmark:
-                landmarks.append({
-                    'x': round(landmark.x, LANDMARK_DECIMAL_PLACES),
-                    'y': round(landmark.y, LANDMARK_DECIMAL_PLACES),
-                    'z': round(landmark.z, LANDMARK_DECIMAL_PLACES),
-                    'visibility': round(landmark.visibility if hasattr(landmark, 'visibility') else 1.0, LANDMARK_DECIMAL_PLACES)
-                })
-            
-            # Classify pose
-            pose_category = classify_pose(landmarks)
-            
-            # Get overall confidence (average visibility of key landmarks)
-            key_landmarks = landmarks[:15]  # Focus on upper body for confidence
-            confidence = sum(lm['visibility'] for lm in key_landmarks) / len(key_landmarks)
-            
-            pose_data = {
-                'landmarks': landmarks,
-                'pose_category': pose_category,
-                'confidence': confidence,
-                'method': 'mediapipe'
-            }
-            
-            # Add segmentation data if available
-            if results.segmentation_mask is not None:
-                # Convert segmentation mask to base64 for JSON serialization
-                segmentation_mask = (results.segmentation_mask > 0.1).astype(np.uint8) * 255
-                segmentation_data = {
-                    'width': width,
-                    'height': height,
-                    'has_segmentation': True
-                }
-                pose_data['segmentation'] = segmentation_data
-            
-            poses.append(pose_data)
-        
-        return poses, {'width': width, 'height': height, 'segmentation': segmentation_data}
-        
-    except Exception as e:
-        logger.error(f"MediaPipe pose detection error: {str(e)}")
-        return [], {'width': 0, 'height': 0}
-
-def classify_pose(landmarks):
-    """Classify pose based on landmark positions"""
-    try:
-        # Simple pose classification based on key landmark relationships
-        if len(landmarks) < 16:
-            return 'unknown'
-        
-        # Get key landmarks
-        nose = landmarks[0]
-        left_shoulder = landmarks[11]
-        right_shoulder = landmarks[12]
-        left_hip = landmarks[23]
-        right_hip = landmarks[24]
-        left_knee = landmarks[25] if len(landmarks) > 25 else None
-        right_knee = landmarks[26] if len(landmarks) > 26 else None
-        left_ankle = landmarks[27] if len(landmarks) > 27 else None
-        right_ankle = landmarks[28] if len(landmarks) > 28 else None
-        
-        # Calculate hip-to-shoulder ratio
-        shoulder_y = (left_shoulder['y'] + right_shoulder['y']) / 2
-        hip_y = (left_hip['y'] + right_hip['y']) / 2
-        
-        # Basic pose classification
-        if abs(shoulder_y - hip_y) < 0.1:  # Very close together
-            return 'lying'
-        elif shoulder_y > hip_y:  # Shoulders below hips (unusual)
-            return 'inverted'
-        elif left_knee and right_knee:
-            knee_y = (left_knee['y'] + right_knee['y']) / 2
-            if knee_y > hip_y + 0.2:  # Knees significantly below hips
-                return 'standing'
-            elif abs(knee_y - hip_y) < 0.1:  # Knees close to hip level
-                return 'sitting'
-        
-        return 'standing'  # Default
-        
-    except Exception as e:
-        logger.warning(f"Pose classification error: {e}")
-        return 'unknown'
 
 def process_image(image_source, is_url=False, is_file_path=False):
-    """Process image and perform comprehensive human analysis - returns raw data"""
+    """Process image and perform face detection analysis - returns raw data"""
     start_time = time.time()
     temp_path = None
     
@@ -376,12 +257,9 @@ def process_image(image_source, is_url=False, is_file_path=False):
         elif is_file_path:
             # Direct file path - use directly without temporary conversion
             faces, dimensions = detect_faces_mediapipe(image_source)
-            poses, _ = detect_poses_mediapipe(image_source)
             processing_time = time.time() - start_time
             return {
                 'faces': faces,
-                'poses': poses,
-                'expressions': [],  # No longer using Face Mesh
                 'dimensions': dimensions,
                 'processing_time': processing_time,
                 'error': None
@@ -398,17 +276,14 @@ def process_image(image_source, is_url=False, is_file_path=False):
             tmp_file.write(jpg_bytes.read())
             temp_path = tmp_file.name
         
-        # Perform comprehensive analysis
+        # Perform face detection analysis
         faces, dimensions = detect_faces_mediapipe(temp_path)
-        poses, _ = detect_poses_mediapipe(temp_path)
         
         # Calculate processing time
         processing_time = time.time() - start_time
         
         return {
             'faces': faces,
-            'poses': poses,
-            'expressions': [],  # No longer using Face Mesh
             'dimensions': dimensions,
             'processing_time': processing_time,
             'error': None
@@ -419,8 +294,6 @@ def process_image(image_source, is_url=False, is_file_path=False):
         processing_time = time.time() - start_time
         return {
             'faces': [],
-            'poses': [],
-            'expressions': [],
             'dimensions': {'width': 0, 'height': 0},
             'processing_time': processing_time,
             'error': str(e)
@@ -437,36 +310,30 @@ def process_image(image_source, is_url=False, is_file_path=False):
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    global face_detection_model, pose_model
+    global face_detection_model
     try:
-        # Check if models are initialized
+        # Check if model is initialized
         face_status = 'ready' if face_detection_model is not None else 'not_initialized'
-        pose_status = 'ready' if pose_model is not None else 'not_initialized'
         
-        all_ready = all([face_detection_model, pose_model])
+        all_ready = face_detection_model is not None
         
         return jsonify({
             'status': 'healthy' if all_ready else 'degraded',
             'service': 'face',
-            'capabilities': ['face_detection', 'pose_estimation', 'person_segmentation'],
+            'capabilities': ['face_detection', 'facial_keypoints'],
             'models': {
                 'face_detection': {
                     'status': face_status,
                     'version': mp.__version__,
                     'model': 'MediaPipe Face Detection (Full Range)',
-                    'fairness': 'Tested across demographics'
-                },
-                'pose_estimation': {
-                    'status': pose_status,
-                    'version': mp.__version__,
-                    'model': 'MediaPipe Pose',
-                    'landmarks': 33
+                    'fairness': 'Tested across demographics',
+                    'keypoints': 6
                 }
             },
             'endpoints': [
                 "GET /health - Health check",
-                "GET /v3/analyze?url=<image_url> - Analyze image from URL", 
-                "GET /v3/analyze?file=<file_path> - Analyze image from file",
+                "GET /v3/analyze?url=<image_url> - Analyze face detection from URL", 
+                "GET /v3/analyze?file=<file_path> - Analyze face detection from file",
                 "GET /v2/analyze?image_url=<image_url> - V2 compatibility (deprecated)",
                 "GET /v2/analyze_file?file_path=<file_path> - V2 compatibility (deprecated)"
             ],
@@ -596,30 +463,6 @@ def analyze_v3():
             
             predictions.append(prediction)
         
-        # Add pose predictions
-        for pose in raw_data.get('poses', []):
-            is_shiny, shiny_roll = check_shiny()
-            
-            pose_prediction = {
-                "label": pose['pose_category'],
-                "emoji": get_emoji(pose['pose_category']),
-                "confidence": round(float(pose['confidence']), CONFIDENCE_DECIMAL_PLACES),
-                "properties": {
-                    "landmarks": pose['landmarks'],
-                    "method": pose['method']
-                }
-            }
-            
-            # Add shiny flag only for shiny detections
-            if is_shiny:
-                pose_prediction["shiny"] = True
-                logger.info(f"✨ SHINY {pose['pose_category'].upper()} DETECTED! Roll: {shiny_roll} ✨")
-            
-            # Add segmentation data if available
-            if 'segmentation' in pose and pose['segmentation']:
-                pose_prediction["properties"]["segmentation"] = pose['segmentation']
-            
-            predictions.append(pose_prediction)
         
         return jsonify({
             "service": "face",
@@ -683,10 +526,10 @@ def analyze_v2_compat():
             return analyze_v3()
 
 if __name__ == '__main__':
-    # Initialize all MediaPipe models at startup
-    logger.info("Initializing MediaPipe models...")
+    # Initialize MediaPipe face detection model at startup
+    logger.info("Initializing MediaPipe Face Detection model...")
     if not initialize_models():
-        logger.error("Failed to initialize MediaPipe models. Service will not function properly.")
+        logger.error("Failed to initialize MediaPipe Face Detection model. Service will not function properly.")
         exit(1)
     
     # Load emoji mappings on startup
@@ -695,8 +538,8 @@ if __name__ == '__main__':
     # Determine host based on private mode (like other services)
     host = "127.0.0.1" if PRIVATE_MODE else "0.0.0.0"
     
-    logger.info(f"Starting Face Analysis API on {host}:{PORT}")
+    logger.info(f"Starting Face Detection Service on {host}:{PORT}")
     logger.info(f"Private mode: {PRIVATE_MODE}")
-    logger.info("Using MediaPipe framework for face detection, pose estimation, and facial expressions")
+    logger.info("Using MediaPipe framework for dedicated face detection and facial keypoints")
     logger.info("V3 API available at /v3/analyze endpoint with V2 backward compatibility")
     app.run(host=host, port=PORT, debug=False)

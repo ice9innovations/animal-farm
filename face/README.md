@@ -1,13 +1,13 @@
-# Face Analysis Service
+# Face Detection Service
 
 **Port**: 7772  
 **Framework**: MediaPipe  
-**Purpose**: AI-powered face detection and pose estimation with fairness optimization  
+**Purpose**: AI-powered face detection and facial analysis with fairness optimization  
 **Status**: ✅ Active
 
 ## Overview
 
-The Face service provides state-of-the-art face detection and pose estimation using Google's MediaPipe framework. The service analyzes images to detect human faces, estimate body poses, and provide comprehensive human analysis with fairness optimizations across demographics.
+The Face service provides state-of-the-art face detection using Google's MediaPipe framework. The service analyzes images to detect human faces and facial keypoints with fairness optimizations across demographics.
 
 ## Features
 
@@ -15,7 +15,7 @@ The Face service provides state-of-the-art face detection and pose estimation us
 - **Unified Input Handling**: Single endpoint for both URL and file path analysis
 - **MediaPipe Framework**: Google's production-ready computer vision models
 - **Fairness Optimization**: Tested across demographics to reduce bias
-- **Comprehensive Analysis**: Face detection, pose estimation, and person segmentation
+- **Focused Analysis**: Dedicated face detection with facial keypoints
 - **High Performance**: Optimized model initialization and processing pipeline
 - **Security**: File validation, size limits, secure cleanup
 
