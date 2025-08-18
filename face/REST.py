@@ -334,6 +334,7 @@ def health_check():
                 "GET /health - Health check",
                 "GET /v3/analyze?url=<image_url> - Analyze face detection from URL", 
                 "GET /v3/analyze?file=<file_path> - Analyze face detection from file",
+                "POST /v3/analyze - Analyze face detection from uploaded file",
                 "GET /v2/analyze?image_url=<image_url> - V2 compatibility (deprecated)",
                 "GET /v2/analyze_file?file_path=<file_path> - V2 compatibility (deprecated)"
             ],
@@ -345,44 +346,125 @@ def health_check():
             'error': str(e)
         }), 500
 
-@app.route('/v3/analyze', methods=['GET'])
+def build_error_response(error_message, start_time, status_code):
+    """Build standardized error response for V3 API"""
+    return jsonify({
+        "service": "face",
+        "status": "error",
+        "predictions": [],
+        "error": {"message": error_message},
+        "metadata": {
+            "processing_time": round(time.time() - start_time, 3),
+            "model_info": {"framework": "MediaPipe"}
+        }
+    }), status_code
+
+def build_v3_response(raw_data):
+    """Build standardized V3 response from raw face detection data"""
+    # Handle errors
+    if raw_data['error']:
+        return jsonify({
+            "service": "face",
+            "status": "error",
+            "predictions": [],
+            "metadata": {
+                "processing_time": round(raw_data['processing_time'], 3),
+                "model_info": {"framework": "MediaPipe"}
+            },
+            "error": {"message": str(raw_data['error'])}
+        }), 500
+    
+    # Build V3 predictions
+    predictions = []
+    
+    # Add face predictions
+    for face in raw_data['faces']:
+        is_shiny, shiny_roll = check_shiny()
+        
+        prediction = {
+            "label": "face",
+            "emoji": get_emoji("face"),
+            "confidence": round(float(face['confidence']), CONFIDENCE_DECIMAL_PLACES),
+            "bbox": face['bbox'],
+            "properties": {
+                "keypoints": face.get('keypoints', {}),
+                "method": face['method']
+            }
+        }
+        
+        # Add shiny flag only for shiny detections
+        if is_shiny:
+            prediction["shiny"] = True
+            logger.info(f"✨ SHINY FACE DETECTED! Roll: {shiny_roll} ✨")
+        
+        predictions.append(prediction)
+    
+    return jsonify({
+        "service": "face",
+        "status": "success",
+        "predictions": predictions,
+        "metadata": {
+            "processing_time": round(raw_data['processing_time'], 3),
+            "model_info": {"framework": "MediaPipe"}
+        }
+    })
+
+@app.route('/v3/analyze', methods=['GET', 'POST'])
 def analyze_v3():
     """Unified V3 API endpoint for both URL and file path analysis"""
     start_time = time.time()
     
     try:
+        # Handle POST file upload
+        if request.method == 'POST':
+            # Check for file upload
+            if 'file' not in request.files:
+                return build_error_response("No file provided in POST request", start_time, 400)
+            
+            file = request.files['file']
+            if file.filename == '':
+                return build_error_response("No file selected", start_time, 400)
+            
+            # Validate file size
+            file.seek(0, 2)  # Seek to end
+            file_size = file.tell()
+            file.seek(0)     # Seek back to beginning
+            
+            if file_size > MAX_FILE_SIZE:
+                return build_error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB", start_time, 400)
+            
+            # Process uploaded file
+            try:
+                # Save to temporary file for processing
+                with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
+                    temp_path = temp_file.name
+                    file.save(temp_path)
+                
+                # Process with face detection
+                raw_data = process_image(temp_path, is_file_path=True)
+                return build_v3_response(raw_data)
+                
+            except Exception as e:
+                return build_error_response(f"Failed to process uploaded image: {str(e)}", start_time, 500)
+            finally:
+                # Clean up temporary file
+                try:
+                    if 'temp_path' in locals() and os.path.exists(temp_path):
+                        os.unlink(temp_path)
+                except Exception as e:
+                    logger.warning(f"Could not clean up temp file: {e}")
+        
+        # Handle GET requests
         # Get parameters from query string
         url = request.args.get('url')
         file_path = request.args.get('file')
         
         # Validate input - exactly one parameter required
         if not url and not file_path:
-            return jsonify({
-                "service": "face",
-                "status": "error", 
-                "predictions": [],
-                "error": {"message": "Must provide either 'url' or 'file' parameter"},
-                "metadata": {
-                    "processing_time": round(time.time() - start_time, 3),
-                    "model_info": {
-                        "framework": "MediaPipe"
-                    }
-                }
-            }), 400
+            return build_error_response("Must provide either 'url' or 'file' parameter", start_time, 400)
         
         if url and file_path:
-            return jsonify({
-                "service": "face",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": "Cannot provide both 'url' and 'file' parameters - choose one"},
-                "metadata": {
-                    "processing_time": round(time.time() - start_time, 3),
-                    "model_info": {
-                        "framework": "MediaPipe"
-                    }
-                }
-            }), 400
+            return build_error_response("Cannot provide both 'url' and 'file' parameters - choose one", start_time, 400)
         
         # Handle URL input
         if url:
@@ -392,106 +474,19 @@ def analyze_v3():
         elif file_path:
             # Validate file path
             if not os.path.exists(file_path):
-                return jsonify({
-                    "service": "face",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": f"File not found: {file_path}"},
-                    "metadata": {
-                        "processing_time": round(time.time() - start_time, 3),
-                        "model_info": {
-                            "framework": "MediaPipe"
-                        }
-                    }
-                }), 404
+                return build_error_response(f"File not found: {file_path}", start_time, 404)
             
             if not allowed_file(file_path):
-                return jsonify({
-                    "service": "face",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": "File type not allowed"},
-                    "metadata": {
-                        "processing_time": round(time.time() - start_time, 3),
-                        "model_info": {
-                            "framework": "MediaPipe"
-                        }
-                    }
-                }), 400
+                return build_error_response("File type not allowed", start_time, 400)
             
             raw_data = process_image(file_path, is_file_path=True)
         
-        # Handle errors
-        if raw_data['error']:
-            return jsonify({
-                "service": "face",
-                "status": "error",
-                "predictions": [],
-                "metadata": {
-                    "processing_time": round(raw_data['processing_time'], 3),
-                    "model_info": {
-                        "framework": "MediaPipe"
-                    }
-                },
-                "error": {
-                    "message": str(raw_data['error'])
-                }
-            }), 500
-        
-        # Build V3 predictions
-        predictions = []
-        
-        # Add face predictions
-        for face in raw_data['faces']:
-            is_shiny, shiny_roll = check_shiny()
-            
-            prediction = {
-                "label": "face",
-                "emoji": get_emoji("face"),
-                "confidence": round(float(face['confidence']), CONFIDENCE_DECIMAL_PLACES),
-                "bbox": face['bbox'],
-                "properties": {
-                    "keypoints": face.get('keypoints', {}),
-                    "method": face['method']
-                }
-            }
-            
-            # Add shiny flag only for shiny detections
-            if is_shiny:
-                prediction["shiny"] = True
-                logger.info(f"✨ SHINY FACE DETECTED! Roll: {shiny_roll} ✨")
-            
-            predictions.append(prediction)
-        
-        
-        return jsonify({
-            "service": "face",
-            "status": "success",
-            "predictions": predictions,
-            "metadata": {
-                "processing_time": round(raw_data['processing_time'], 3),
-                "model_info": {
-                    "framework": "MediaPipe"
-                }
-            }
-        })
+        # Use shared response builder
+        return build_v3_response(raw_data)
         
     except Exception as e:
         logger.error(f"Error in V3 analysis: {str(e)}")
-        return jsonify({
-            'service': 'face',
-            'status': 'error',
-            'predictions': [],
-            'metadata': {
-                'processing_time': round(time.time() - start_time, 3),
-                'model_info': {
-                    'framework': 'MediaPipe'
-                }
-            },
-            'error': {
-                'message': str(e)
-            }
-        }), 500
+        return build_error_response(str(e), start_time, 500)
 
 @app.route('/v2/analyze_file', methods=['GET'])
 def analyze_file_v2_compat():
