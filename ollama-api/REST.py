@@ -520,13 +520,140 @@ def analyze_file_v2_compat():
         with app.test_request_context('/v3/analyze'):
             return analyze_v3()
 
-@app.route('/v3/analyze', methods=['GET'])
+@app.route('/v3/analyze', methods=['GET', 'POST'])
 def analyze_v3():
-    """Unified V3 API endpoint for both URL and file path analysis"""
+    """Unified V3 API endpoint for URL, file path, and POST file upload analysis"""
     import time
     start_time = time.time()
     
     try:
+        # Handle POST file upload
+        if request.method == 'POST':
+            # Check for file upload
+            if 'file' not in request.files:
+                return jsonify({
+                    "service": "ollama",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": "No file provided in POST request"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 400
+            
+            file_obj = request.files['file']
+            if file_obj.filename == '':
+                return jsonify({
+                    "service": "ollama",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": "No file selected"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 400
+            
+            # Get optional parameters from form data
+            prompt = request.form.get('prompt', VISION_PROMPT)
+            model = request.form.get('model', VISION_MODEL)
+            temperature_param = request.form.get('temperature')
+            temperature = float(temperature_param) if temperature_param else None
+            
+            # Validate file size
+            file_obj.seek(0, 2)  # Seek to end
+            file_size = file_obj.tell()
+            file_obj.seek(0)     # Seek back to beginning
+            
+            if file_size > MAX_FILE_SIZE:
+                return jsonify({
+                    "service": "ollama",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 400
+            
+            # Process directly from memory - no temporary files!
+            try:
+                import base64
+                from io import BytesIO
+                
+                # Read file data into memory
+                file_data = file_obj.read()
+                
+                # Convert to JPG in memory if needed
+                try:
+                    image = Image.open(BytesIO(file_data))
+                    if image.mode in ('RGBA', 'LA', 'P'):
+                        image = image.convert('RGB')
+                    
+                    # Convert to JPG in memory
+                    jpg_buffer = BytesIO()
+                    image.save(jpg_buffer, 'JPEG', quality=95)
+                    jpg_data = jpg_buffer.getvalue()
+                    jpg_buffer.close()
+                    
+                except Exception as e:
+                    # If image conversion fails, try using original data
+                    jpg_data = file_data
+                
+                # Encode for Ollama
+                image_b64 = base64.b64encode(jpg_data).decode('utf-8')
+                
+                # Process with Ollama directly (no file system involved)
+                client = AsyncClient(host=OLLAMA_HOST)
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                ollama_response = loop.run_until_complete(client.generate(
+                    model=model,
+                    prompt=prompt,
+                    images=[image_b64],
+                    stream=False,
+                    options={"temperature": temperature if temperature is not None else TEMPERATURE}
+                ))
+                
+                loop.close()
+                
+                processing_time = round(time.time() - start_time, 3)
+                output = ollama_response["response"]
+                
+                # Truncate if too long
+                if len(output) > MAX_RESPONSE_LENGTH:
+                    output = output[:MAX_RESPONSE_LENGTH] + "... [truncated]"
+                
+                # Extract emojis from response
+                emoji_list = get_emojis_for_text(output)
+                
+                # Create unified prediction format
+                prediction = {
+                    "text": output
+                }
+                
+                # Add emoji mappings if found
+                if emoji_list:
+                    prediction["emoji_mappings"] = emoji_list
+                
+                return jsonify({
+                    "service": "ollama",
+                    "status": "success",
+                    "predictions": [prediction],
+                    "metadata": {
+                        "processing_time": processing_time,
+                        "model_info": {
+                            "framework": "Ollama",
+                            "model": model,
+                            "prompt": prompt
+                        }
+                    }
+                })
+                
+            except Exception as e:
+                return jsonify({
+                    "service": "ollama",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": f"Failed to process uploaded image: {str(e)}"},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 500
+        
+        # Handle GET requests
         # Get input parameters - support both url and file
         url = request.args.get('url')
         file = request.args.get('file')

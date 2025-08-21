@@ -14,6 +14,7 @@ import re
 import uuid
 import logging
 import random
+import pickle
 from typing import List, Dict, Any, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -85,6 +86,10 @@ CLIP_MODEL = 'ViT-L/14'  # Larger model for better discrimination (~6-8GB VRAM)
 # Ensure upload directory exists
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+# Text embedding cache
+text_embedding_cache = {}
+TEXT_EMBEDDINGS_CACHE_FILE = './text_embeddings_cache.pkl'
+
 
 # Device configuration
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -115,6 +120,30 @@ def get_emoji(concept: str) -> Optional[str]:
         return None
     concept_clean = concept.lower().strip().replace(' ', '_')
     return emoji_mappings.get(concept_clean)
+
+def load_text_embeddings_cache():
+    """Load text embeddings from cache file if it exists"""
+    global text_embedding_cache
+    
+    if os.path.exists(TEXT_EMBEDDINGS_CACHE_FILE):
+        try:
+            with open(TEXT_EMBEDDINGS_CACHE_FILE, 'rb') as f:
+                text_embedding_cache = pickle.load(f)
+            logger.info(f"Loaded {len(text_embedding_cache)} text embeddings from cache file")
+        except Exception as e:
+            logger.error(f"Failed to load text embeddings cache: {e}")
+            text_embedding_cache = {}
+    else:
+        logger.info("No text embeddings cache file found, will create one after first computation")
+
+def save_text_embeddings_cache():
+    """Save text embeddings to cache file"""
+    try:
+        with open(TEXT_EMBEDDINGS_CACHE_FILE, 'wb') as f:
+            pickle.dump(text_embedding_cache, f)
+        logger.info(f"Saved {len(text_embedding_cache)} text embeddings to cache file")
+    except Exception as e:
+        logger.error(f"Failed to save text embeddings cache: {e}")
 
 def check_shiny():
     """Check if this detection should be shiny (1/2500 chance)"""
@@ -173,7 +202,7 @@ label_tensor = None
 label_features = None  # CACHED TEXT FEATURES
 
 def initialize_clip_model() -> bool:
-    """Initialize CLIP model and labels with FP16 optimization"""
+    """Initialize CLIP model and labels with FP16 optimization and text embedding caching"""
     global model, preprocess, labels, label_tensor, label_features
     try:
         logger.info(f"Loading CLIP model: {CLIP_MODEL}...")
@@ -187,6 +216,9 @@ def initialize_clip_model() -> bool:
         
         logger.info(f"CLIP model {CLIP_MODEL} loaded successfully")
         
+        # Load cached embeddings
+        load_text_embeddings_cache()
+        
         # Load labels from files
         labels = load_labels_from_files()
         
@@ -197,22 +229,56 @@ def initialize_clip_model() -> bool:
         # Create text descriptions
         labels_desc = [f"a picture of a {label}" for label in labels]
         
-        # Tokenize labels (convert to half precision if model is FP16)
-        label_tensor = clip.tokenize(labels_desc).to(device)
-        if device == "cuda" and hasattr(model, 'dtype') and model.dtype == torch.float16:
-            # No need to convert text tokens to half - CLIP handles this internally
-            pass
+        # Check which embeddings need to be computed
+        labels_to_compute = []
+        cached_features = []
         
-        # PRE-COMPUTE TEXT FEATURES ONCE (MEMORY LEAK FIX)
-        logger.info("Pre-computing text features to prevent memory leak...")
-        with torch.no_grad():
-            if device == "cuda" and hasattr(model, 'dtype') and model.dtype == torch.float16:
-                with torch.cuda.amp.autocast():
-                    label_features = model.encode_text(label_tensor)
+        for i, (label, desc) in enumerate(zip(labels, labels_desc)):
+            cache_key = desc.lower()  # Use description as cache key
+            if cache_key in text_embedding_cache:
+                # Convert cached numpy array back to tensor
+                cached_tensor = torch.from_numpy(text_embedding_cache[cache_key]).to(device)
+                if device == "cuda" and hasattr(model, 'dtype') and model.dtype == torch.float16:
+                    cached_tensor = cached_tensor.half()
+                cached_features.append(cached_tensor)
             else:
-                label_features = model.encode_text(label_tensor)
+                labels_to_compute.append((i, label, desc))
+                cached_features.append(None)  # Placeholder
         
-        logger.info(f"Pre-computed text features for {len(labels)} labels - memory leak fixed!")
+        # Compute missing embeddings if any
+        if labels_to_compute:
+            logger.info(f"Computing embeddings for {len(labels_to_compute)} new labels...")
+            
+            # Tokenize only the missing labels
+            missing_descs = [desc for _, _, desc in labels_to_compute]
+            label_tensor = clip.tokenize(missing_descs).to(device)
+            
+            # Compute text features for missing labels
+            with torch.no_grad():
+                if device == "cuda" and hasattr(model, 'dtype') and model.dtype == torch.float16:
+                    with torch.cuda.amp.autocast():
+                        computed_features = model.encode_text(label_tensor)
+                else:
+                    computed_features = model.encode_text(label_tensor)
+            
+            # Cache the computed features and fill in the placeholders
+            for i, (original_idx, label, desc) in enumerate(labels_to_compute):
+                feature_tensor = computed_features[i]
+                cached_features[original_idx] = feature_tensor
+                
+                # Cache as numpy array for persistence
+                cache_key = desc.lower()
+                text_embedding_cache[cache_key] = feature_tensor.cpu().numpy()
+            
+            # Save updated cache
+            save_text_embeddings_cache()
+        else:
+            logger.info(f"All {len(labels)} label embeddings loaded from cache")
+        
+        # Stack all features into final tensor
+        label_features = torch.stack(cached_features)
+        
+        logger.info(f"Pre-computed text features for {len(labels)} labels with caching - memory leak fixed!")
         logger.info(f"Initialized {len(labels)} classification labels from files")
         
         return True
@@ -300,7 +366,7 @@ def compute_similarity(image_path: str) -> Optional[torch.Tensor]:
         return None
 
 def compute_caption_similarity(image_path: str, caption: str) -> Optional[float]:
-    """Compute similarity between image and arbitrary caption text"""
+    """Compute similarity between image and arbitrary caption text with caching"""
     logger.info(f"Computing caption similarity for: '{caption}'")
     
     if model is None:
@@ -319,21 +385,42 @@ def compute_caption_similarity(image_path: str, caption: str) -> Optional[float]
             if device == "cuda" and hasattr(model, 'dtype') and model.dtype == torch.float16:
                 image_tensor = image_tensor.half()
                 
-            # Tokenize caption text - try raw caption for better discrimination
-            logger.info("Tokenizing caption...")
-            # Use raw caption without formatting to see if we get better score distribution
-            logger.info(f"Using raw caption: '{caption}'")
-            text_tokens = clip.tokenize([caption]).to(device)
-            
-            logger.info("Encoding features...")
-            # Encode both image and text with autocast for FP16 stability
+            # Check cache for text features first
+            cache_key = caption.lower().strip()
+            if cache_key in text_embedding_cache:
+                logger.info(f"Using cached text features for caption: '{caption}'")
+                text_features = torch.from_numpy(text_embedding_cache[cache_key]).to(device)
+                if device == "cuda" and hasattr(model, 'dtype') and model.dtype == torch.float16:
+                    text_features = text_features.half()
+                # Ensure proper shape (add batch dimension if needed)
+                if len(text_features.shape) == 1:
+                    text_features = text_features.unsqueeze(0)
+            else:
+                # Tokenize caption text - try raw caption for better discrimination
+                logger.info("Tokenizing and encoding caption...")
+                logger.info(f"Using raw caption: '{caption}'")
+                text_tokens = clip.tokenize([caption]).to(device)
+                
+                # Encode text with autocast for FP16 stability
+                if device == "cuda" and hasattr(model, 'dtype') and model.dtype == torch.float16:
+                    with torch.cuda.amp.autocast():
+                        text_features = model.encode_text(text_tokens)
+                else:
+                    text_features = model.encode_text(text_tokens)
+                
+                # Cache the text features
+                text_embedding_cache[cache_key] = text_features.cpu().numpy()
+                # Save cache periodically (but not every single request to avoid I/O overhead)
+                if len(text_embedding_cache) % 10 == 0:  # Save every 10 new entries
+                    save_text_embeddings_cache()
+                
+            logger.info("Encoding image features...")
+            # Encode image with autocast for FP16 stability
             if device == "cuda" and hasattr(model, 'dtype') and model.dtype == torch.float16:
                 with torch.cuda.amp.autocast():
                     image_features = model.encode_image(image_tensor)
-                    text_features = model.encode_text(text_tokens)
             else:
                 image_features = model.encode_image(image_tensor)
-                text_features = model.encode_text(text_tokens)
             
             # Normalize features (important for cosine similarity)
             image_features = image_features / image_features.norm(dim=-1, keepdim=True)
