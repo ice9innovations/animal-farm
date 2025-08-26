@@ -13,7 +13,6 @@ import os
 import tempfile
 import time
 import warnings
-import cv2
 import json
 import requests
 import uuid
@@ -254,14 +253,14 @@ def apply_iou_filtering(detections: List[Dict], iou_threshold: float = IOU_THRES
     
     return filtered_detections
 
-def resize_image_for_inference(image, max_size=512):
-    """Resize image to speed up inference"""
-    height, width = image.shape[:2]
+def resize_pil_image_for_inference(image: Image.Image, max_size=512) -> Image.Image:
+    """Resize PIL image to speed up inference"""
+    width, height = image.size
     if max(height, width) > max_size:
         scale = max_size / max(height, width)
         new_width = int(width * scale)
         new_height = int(height * scale)
-        image = cv2.resize(image, (new_width, new_height))
+        image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
     return image
 
 def find_config_file() -> Optional[str]:
@@ -524,6 +523,134 @@ def process_detections(predictions: Dict[str, Any], scale_x: float = 1.0, scale_
     
     return filtered_detections
 
+def process_image_for_detection(image: Image.Image) -> Dict[str, Any]:
+    """
+    Main processing function - takes PIL Image, returns detection data
+    This is the core business logic, separated from HTTP concerns
+    Uses unified in-memory processing
+    """
+    start_time = time.time()
+    
+    if not demo:
+        return {
+            "success": False,
+            "error": "Detectron2 model not loaded"
+        }
+    
+    try:
+        # Store original dimensions before resizing
+        original_width, original_height = image.size
+        
+        # Resize PIL image for faster inference
+        resized_image = resize_pil_image_for_inference(image, max_size=512)
+        resized_width, resized_height = resized_image.size
+        
+        # Calculate scaling factors to convert coordinates back to original image
+        scale_x = original_width / resized_width
+        scale_y = original_height / resized_height
+        
+        # Convert PIL Image to numpy array for Detectron2
+        img_array = np.array(resized_image)
+        # Convert RGB to BGR for Detectron2 (numpy slice - no CV2 needed!)
+        img = img_array[:, :, ::-1]
+        
+        # Run detection with autocast for FP16 optimization (thread-safe)
+        detection_start = time.time()
+        import torch
+        
+        # Acquire lock for thread-safe model inference
+        with model_lock:
+            with torch.amp.autocast('cuda'):
+                predictions, visualized_output = demo.run_on_image(img)
+                precision_used = "FP16"
+        
+        detection_time = time.time() - detection_start
+        
+        # Process results with coordinate scaling
+        detections = process_detections(predictions, scale_x, scale_y)
+        
+        logger.info(f"Detected {len(detections)} objects in {detection_time:.2f}s")
+        
+        # Get image dimensions from PIL Image
+        image_width, image_height = image.size
+        
+        # Build successful response
+        response_data = {
+            "detections": detections,
+            "total_detections": len(detections),
+            "image_dimensions": {
+                "width": image_width,
+                "height": image_height
+            },
+            "model_info": {
+                "confidence_threshold": CONFIDENCE_THRESHOLD,
+                "detection_time": round(detection_time, 3),
+                "framework": "Detectron2",
+                "precision": precision_used
+            }
+        }
+        
+        return {
+            "success": True,
+            "data": response_data,
+            "processing_time": round(time.time() - start_time, 3)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error detecting objects: {e}")
+        return {
+            "success": False,
+            "error": f"Detection failed: {str(e)}",
+            "processing_time": round(time.time() - start_time, 3)
+        }
+
+def create_detectron_response(data: Dict[str, Any], processing_time: float) -> Dict[str, Any]:
+    """Create standardized detectron2 response"""
+    detections = data.get("detections", [])
+    
+    # Create unified prediction format
+    predictions = []
+    for detection in detections:
+        bbox = detection.get('bbox', {})
+        is_shiny, shiny_roll = check_shiny()
+        
+        prediction = {
+            "label": detection.get('class_name', ''),
+            "confidence": round(float(detection.get('confidence', 0)), 3)
+        }
+        
+        # Add shiny flag only for shiny detections
+        if is_shiny:
+            prediction["shiny"] = True
+            logger.info(f"✨ SHINY {detection.get('class_name', '').upper()} DETECTED! Roll: {shiny_roll} ✨")
+        
+        # Add bbox if present
+        if bbox:
+            prediction["bbox"] = {
+                "x": bbox.get('x', 0),
+                "y": bbox.get('y', 0),
+                "width": bbox.get('width', 0),
+                "height": bbox.get('height', 0)
+            }
+        
+        # Add emoji if present
+        if detection.get('emoji'):
+            prediction["emoji"] = detection['emoji']
+        
+        predictions.append(prediction)
+    
+    return {
+        "service": "detectron2",
+        "status": "success",
+        "predictions": predictions,
+        "metadata": {
+            "processing_time": round(processing_time, 3),
+            "model_info": {
+                "framework": "Facebook AI Research"
+            }
+        }
+    }
+
 def detect_objects(image_path: str, cleanup: bool = True) -> Dict[str, Any]:
     """Detect objects using Detectron2"""
     if not demo:
@@ -634,13 +761,16 @@ def internal_error(e):
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    model_status = "loaded" if demo else "not_loaded"
-    config_file = find_config_file()
+    if not demo:
+        return jsonify({
+            "status": "unhealthy",
+            "reason": "Detectron2 model not loaded",
+            "framework": "Detectron2"
+        }), 503
     
     return jsonify({
         "status": "healthy",
-        "model_status": model_status,
-        "config_file": config_file,
+        "model_status": "loaded",
         "confidence_threshold": CONFIDENCE_THRESHOLD,
         "coco_classes_loaded": len(coco_classes),
         "framework": "Detectron2"
@@ -656,54 +786,178 @@ def get_classes():
     })
 
 
-# V2 Compatibility Routes - Translate parameters and call V3
-@app.route('/v2/analyze', methods=['GET'])
-def analyze_v2_compat():
-    """V2 compatibility - translate parameters to V3 format"""
-    import time
-    from flask import request
+
+@app.route('/analyze', methods=['GET', 'POST'])
+def analyze():
+    """Unified analyze endpoint - orchestrates input handling and processing"""
+    start_time = time.time()
     
-    # Get V2 parameter
-    image_url = request.args.get('image_url')
+    def error_response(message: str, status_code: int = 400):
+        return jsonify({
+            "service": "detectron2",
+            "status": "error",
+            "predictions": [],
+            "error": {"message": message},
+            "metadata": {"processing_time": round(time.time() - start_time, 3)}
+        }), status_code
     
-    if image_url:
-        # Create new request args with V3 parameter name
-        new_args = request.args.copy()
-        new_args = new_args.to_dict()
-        new_args['url'] = image_url
-        del new_args['image_url']
+    try:
+        # Step 1: Get image into memory from any source
+        if request.method == 'POST' and 'file' in request.files:
+            # Handle file upload
+            uploaded_file = request.files['file']
+            if uploaded_file.filename == '':
+                return error_response("No file selected")
+            
+            # Validate file size
+            uploaded_file.seek(0, 2)  # Seek to end
+            file_size = uploaded_file.tell()
+            uploaded_file.seek(0)     # Seek back to beginning
+            
+            if file_size > MAX_FILE_SIZE:
+                return error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB")
+            
+            # Validate file type
+            if not is_allowed_file(uploaded_file.filename):
+                return error_response("File type not allowed")
+            
+            try:
+                from io import BytesIO
+                file_data = uploaded_file.read()
+                image = Image.open(BytesIO(file_data)).convert('RGB')
+            except Exception as e:
+                return error_response(f"Failed to process uploaded image: {str(e)}", 500)
         
-        # Create a mock request object for V3
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
-    else:
-        # No parameters - let V3 handle the error
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        else:
+            # Handle URL or file parameter
+            url = request.args.get('url')
+            file_path = request.args.get('file')
+            
+            if not url and not file_path:
+                return error_response("Must provide either 'url' or 'file' parameter, or POST a file")
+            
+            if url and file_path:
+                return error_response("Cannot provide both 'url' and 'file' parameters")
+            
+            if url:
+                # Download from URL directly into memory
+                try:
+                    from urllib.parse import urlparse
+                    parsed_url = urlparse(url)
+                    if not parsed_url.scheme or not parsed_url.netloc:
+                        return error_response("Invalid URL format")
+                    
+                    response = requests.get(url, timeout=10, stream=True)
+                    response.raise_for_status()
+                    
+                    content_type = response.headers.get('content-type', '')
+                    if not content_type.startswith('image/'):
+                        return error_response("URL does not point to an image")
+                    
+                    # Check content length if provided
+                    content_length = response.headers.get('content-length')
+                    if content_length and int(content_length) > MAX_FILE_SIZE:
+                        return error_response("Downloaded file too large")
+                    
+                    from io import BytesIO
+                    image_data = BytesIO()
+                    for chunk in response.iter_content(chunk_size=8192):
+                        image_data.write(chunk)
+                        if image_data.tell() > MAX_FILE_SIZE:
+                            return error_response("Downloaded file too large")
+                    
+                    image_data.seek(0)
+                    image = Image.open(image_data).convert('RGB')
+                    
+                except Exception as e:
+                    return error_response(f"Failed to download/process image: {str(e)}")
+            else:  # file_path
+                # Load file directly into memory
+                if not os.path.exists(file_path):
+                    return error_response(f"File not found: {file_path}")
+                
+                if not is_allowed_file(file_path):
+                    return error_response("File type not allowed")
+                
+                if not validate_file_size(file_path):
+                    return error_response("File too large")
+                
+                try:
+                    image = Image.open(file_path).convert('RGB')
+                except Exception as e:
+                    return error_response(f"Failed to load image file: {str(e)}", 500)
+        
+        # Step 2: Process the image (unified processing path)
+        processing_result = process_image_for_detection(image)
+        
+        # Step 3: Handle processing result
+        if not processing_result["success"]:
+            return error_response(processing_result["error"], 500)
+        
+        # Step 4: Create response
+        response = create_detectron_response(
+            processing_result["data"],
+            processing_result["processing_time"]
+        )
+        
+        return jsonify(response)
+        
+    except ValueError as e:
+        return error_response(str(e))
+    except Exception as e:
+        logger.error(f"Analyze API error: {e}")
+        return error_response(f"Internal error: {str(e)}", 500)
+
+@app.route('/v3/analyze', methods=['GET', 'POST'])
+def analyze_v3_compat():
+    """V3 compatibility - calls new analyze function directly"""
+    try:
+        return analyze()
+    except Exception as e:
+        logger.error(f"V3 compatibility error: {e}")
+        return jsonify({
+            "service": "detectron2", 
+            "status": "error",
+            "predictions": [],
+            "error": {"message": f"V3 endpoint error: {str(e)}"},
+            "metadata": {"processing_time": 0}
+        }), 500
 
 @app.route('/v2/analyze_file', methods=['GET'])
 def analyze_file_v2_compat():
-    """V2 file compatibility - translate parameters to V3 format"""
-    import time
-    from flask import request
-    
-    # Get V2 parameter
+    """V2 file compatibility - translate parameters to new analyze format"""
     file_path = request.args.get('file_path')
     
     if file_path:
-        # Create new request args with V3 parameter name
         new_args = {'file': file_path}
-        
-        # Create a mock request object for V3
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        # No parameters - let V3 handle the error
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        with app.test_request_context('/analyze'):
+            return analyze()
 
-@app.route('/v3/analyze', methods=['GET'])
-def analyze_v3():
+@app.route('/v2/analyze', methods=['GET'])
+def analyze_v2_compat():
+    """V2 compatibility - translate parameters to new analyze format"""
+    image_url = request.args.get('image_url')
+    
+    if image_url:
+        # Parameter translation
+        new_args = request.args.copy().to_dict()
+        new_args['url'] = image_url
+        if 'image_url' in new_args:
+            del new_args['image_url']
+        
+        # Call new analyze with translated parameters
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
+    else:
+        # Let new analyze handle validation errors
+        with app.test_request_context('/analyze'):
+            return analyze()
+
+@app.route('/v3/analyze_old', methods=['GET'])
+def analyze_v3_old():
     """Unified V3 API endpoint for both URL and file path analysis"""
     import time
     start_time = time.time()
@@ -887,11 +1141,15 @@ if __name__ == '__main__':
     # Using local emoji file - no external dependencies
     
     if not model_loaded:
-        logger.error("Failed to load Detectron2 model. Service will run but detection will fail.")
+        logger.error("Failed to load Detectron2 model.")
         logger.error("Please ensure Detectron2 is installed and config files are available.")
+        logger.error("Service cannot function without model. Exiting.")
+        exit(1)
         
     if not coco_loaded:
-        logger.error("Failed to load COCO classes. Detection may fail.")
+        logger.error("Failed to load COCO classes.")
+        logger.error("Service cannot function without class definitions. Exiting.")
+        exit(1)
         
     
     # Always use 0.0.0.0 to allow external connections

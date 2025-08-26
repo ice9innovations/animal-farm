@@ -310,128 +310,189 @@ def cleanup_file(filepath: str) -> None:
     except Exception as e:
         print(f"Warning: Could not remove file {filepath}: {e}")
 
-def analyze_colors_from_image(image: Image.Image) -> Dict[str, Any]:
-    """Analyze colors directly from PIL Image object (in-memory processing)"""
+def get_colors_from_image(image: Image.Image):
+    """Extract color groups directly from PIL Image (bypasses Haishoku file requirement)"""
+    import sys
+    sys.path.append('/home/sd/anaconda3/lib/python3.9/site-packages/haishoku')
+    import haillow
+    
+    # Use Haishoku's internal thumbnail function
+    thumbnail = haillow.get_thumbnail(image.copy())
+    
+    # Get colors directly (this is what Haishoku does internally)
+    max_colors = thumbnail.height * thumbnail.width
+    image_colors = thumbnail.getcolors(max_colors)
+    return image_colors
+
+def get_colors_mean_from_image(image: Image.Image):
+    """Implement Haishoku's getColorsMean logic for PIL Images"""
+    import sys
+    sys.path.append('/home/sd/anaconda3/lib/python3.9/site-packages/haishoku')
+    import alg
+    
+    # Get colors using our direct method
+    image_colors = get_colors_from_image(image)
+    
+    # Follow Haishoku's exact algorithm
+    sorted_image_colors = alg.sort_by_rgb(image_colors)
+    grouped_image_colors = alg.group_by_accuracy(sorted_image_colors)
+    
+    # Get weighted mean of all colors
+    colors_mean = []
+    for i in range(3):
+        for j in range(3):
+            for k in range(3):
+                grouped_image_color = grouped_image_colors[i][j][k]
+                if 0 != len(grouped_image_color):
+                    color_mean = alg.get_weighted_mean(grouped_image_color)
+                    colors_mean.append(color_mean)
+    
+    # Return the most 8 colors (following Haishoku's logic)
+    temp_sorted_colors_mean = sorted(colors_mean)
+    if 8 < len(temp_sorted_colors_mean):
+        colors_mean = temp_sorted_colors_mean[len(temp_sorted_colors_mean)-8 : len(temp_sorted_colors_mean)]
+    else:
+        colors_mean = temp_sorted_colors_mean
+    
+    # Sort colors_mean
+    colors_mean = sorted(colors_mean, reverse=True)
+    return colors_mean
+
+def get_dominant_from_image(image: Image.Image):
+    """Get dominant color directly from PIL Image"""
+    colors_mean = get_colors_mean_from_image(image)
+    colors_mean = sorted(colors_mean, reverse=True)
+    dominant_tuple = colors_mean[0]
+    dominant = dominant_tuple[1]
+    return dominant
+
+def get_palette_from_image(image: Image.Image):
+    """Get color palette directly from PIL Image"""
+    colors_mean = get_colors_mean_from_image(image)
+    
+    # Calculate percentages (following Haishoku's logic)
+    palette_tmp = []
+    count_sum = 0
+    for c_m in colors_mean:
+        count_sum += c_m[0]
+        palette_tmp.append(c_m)
+    
+    # Calculate the percentage
+    palette = []
+    for p in palette_tmp:
+        pp = '%.2f' % (p[0] / count_sum)
+        tp = (float(pp), p[1])
+        palette.append(tp)
+    
+    return palette
+
+def process_image_for_colors(image: Image.Image) -> Dict[str, Any]:
+    """
+    Main processing function - takes PIL Image, returns color analysis data
+    This is the core business logic, separated from HTTP concerns
+    Uses pure in-memory processing without temporary files
+    """
     start_time = time.time()
     
     try:
-        # Save image to temporary file for Haishoku (Haishoku requires file path)
-        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
-            temp_path = temp_file.name
-            image.save(temp_path, 'JPEG', quality=95)
+        # Get dominant color using our in-memory implementation
+        dominant_color = get_dominant_from_image(image)
+        dr, dg, db = dominant_color[0], dominant_color[1], dominant_color[2]
+        dhex = rgb2hex(dr, dg, db)
         
-        try:
-            # Get dominant color using Haishoku
-            dominant_color = Haishoku.getDominant(temp_path)
-            dr, dg, db = dominant_color[0], dominant_color[1], dominant_color[2]
-            dhex = rgb2hex(dr, dg, db)
+        # Get dominant color names
+        dominant_copic = get_color_name(dominant_color, "copic")
+        copic_d = format_copic(dominant_copic)
+        copic_str = f"{copic_d[0]} ({copic_d[1]})"
+        
+        # Get Prismacolor for dominant color
+        dominant_prisma = get_color_name(dominant_color, "prismacolor")
+        prisma_d = format_copic(dominant_prisma)
+        prisma_str = f"{prisma_d[0]} ({prisma_d[1]})"
+        
+        # Get color palette using our in-memory implementation
+        palette_colors = get_palette_from_image(image)
+        
+        # Build palette arrays with both systems
+        palette_with_both = []
+        for p in palette_colors:
+            clr = p[1]
+            copic_name = get_color_name(clr, "copic")
+            prisma_name = get_color_name(clr, "prismacolor")
             
-            # Get dominant color names
-            dominant_copic = get_color_name(dominant_color, "copic")
-            copic_d = format_copic(dominant_copic)
-            copic_str = f"{copic_d[0]} ({copic_d[1]})"
-            
-            # Get Prismacolor for dominant color
-            dominant_prisma = get_color_name(dominant_color, "prismacolor")
-            prisma_d = format_copic(dominant_prisma)
-            prisma_str = f"{prisma_d[0]} ({prisma_d[1]})"
-            
-            # Get color palette
-            palette_colors = Haishoku.getPalette(temp_path)
-            cnames_copic = []
-            cnames_prisma = []
-            
-            for p in palette_colors:
-                clr = p[1]
-                if 'copic' in COLOR_SYSTEM:
-                    cnames_copic.append(get_color_name(clr, "copic"))
-                if 'prismacolor' in COLOR_SYSTEM:
-                    cnames_prisma.append(get_color_name(clr, "prismacolor"))
-            
-            # Remove duplicates
-            if 'copic' in COLOR_SYSTEM:
-                cnames_copic = unique(cnames_copic)
-            if 'prismacolor' in COLOR_SYSTEM:
-                cnames_prisma = unique(cnames_prisma)
-            
-            # Build palette arrays with both systems
-            palette_with_both = []
-            for p in palette_colors:
-                clr = p[1]
-                copic_name = get_color_name(clr, "copic")
-                prisma_name = get_color_name(clr, "prismacolor")
+            if copic_name:
+                copic_formatted = format_copic(copic_name)
+                copic_str_pal = f"{copic_formatted[0]} ({copic_formatted[1]})"
                 
-                if copic_name:
-                    copic_formatted = format_copic(copic_name)
-                    copic_str_pal = f"{copic_formatted[0]} ({copic_formatted[1]})"
-                    
-                    prisma_formatted = format_copic(prisma_name) if prisma_name else ["Unknown", ""]
-                    prisma_str_pal = f"{prisma_formatted[0]} ({prisma_formatted[1]})" if prisma_name else "Unknown"
-                    
-                    hex_val = rgb2hex(clr[0], clr[1], clr[2])
-                    temp = get_color_temperature(copic_str_pal)
-                    
-                    palette_with_both.append({
-                        "copic": copic_str_pal,
-                        "hex": hex_val,
-                        "prismacolor": prisma_str_pal,
-                        "temperature": temp
-                    })
-            
-            # Remove duplicates based on hex value
-            unique_palette = []
-            seen_hex = set()
-            for color in palette_with_both:
-                if color["hex"] not in seen_hex:
-                    unique_palette.append(color)
-                    seen_hex.add(color["hex"])
-            
-            # Calculate palette temperature
-            palette_temp = calculate_palette_temperature([{"color": c["copic"]} for c in unique_palette])
-            
-            # Get primary color temperature and Prismacolor
-            primary_temp = get_color_temperature(copic_str)
-            
-            analysis_time = round(time.time() - start_time, 3)
-            
-            # Build response in V3 format
-            color_prediction = {
-                "primary": {
-                    "copic": copic_str,
-                    "hex": dhex,
-                    "prismacolor": prisma_str,
-                    "temperature": primary_temp
-                },
-                "palette": {
-                    "temperature": palette_temp,
-                    "colors": unique_palette
-                }
+                prisma_formatted = format_copic(prisma_name) if prisma_name else ["Unknown", ""]
+                prisma_str_pal = f"{prisma_formatted[0]} ({prisma_formatted[1]})" if prisma_name else "Unknown"
+                
+                hex_val = rgb2hex(clr[0], clr[1], clr[2])
+                temp = get_color_temperature(copic_str_pal)
+                
+                palette_with_both.append({
+                    "copic": copic_str_pal,
+                    "hex": hex_val,
+                    "prismacolor": prisma_str_pal,
+                    "temperature": temp
+                })
+        
+        # Remove duplicates based on hex value
+        unique_palette = []
+        seen_hex = set()
+        for color in palette_with_both:
+            if color["hex"] not in seen_hex:
+                unique_palette.append(color)
+                seen_hex.add(color["hex"])
+        
+        # Calculate palette temperature
+        palette_temp = calculate_palette_temperature([{"color": c["copic"]} for c in unique_palette])
+        
+        # Get primary color temperature
+        primary_temp = get_color_temperature(copic_str)
+        
+        analysis_time = round(time.time() - start_time, 3)
+        
+        # Build response in V3 format
+        color_prediction = {
+            "primary": {
+                "copic": copic_str,
+                "hex": dhex,
+                "prismacolor": prisma_str,
+                "temperature": primary_temp
+            },
+            "palette": {
+                "temperature": palette_temp,
+                "colors": unique_palette
             }
-            
-            return {
-                "service": "colors",
-                "status": "success",
-                "predictions": [color_prediction],
-                "metadata": {
-                    "processing_time": analysis_time,
-                    "model_info": {
-                        "framework": "Haishoku + PIL"
-                    }
-                }
-            }
-            
-        finally:
-            # Clean up temporary file
-            os.unlink(temp_path)
-            
+        }
+        
+        return {
+            "success": True,
+            "predictions": [color_prediction],
+            "processing_time": analysis_time
+        }
+        
     except Exception as e:
         return {
-            "service": "colors",
-            "status": "error",
-            "predictions": [],
-            "error": {"message": f"Color analysis failed: {str(e)}"},
-            "metadata": {"processing_time": round(time.time() - start_time, 3)}
+            "success": False,
+            "error": f"Color analysis failed: {str(e)}",
+            "processing_time": round(time.time() - start_time, 3)
         }
+
+def create_colors_response(predictions: list, processing_time: float) -> Dict[str, Any]:
+    """Create standardized colors response"""
+    return {
+        "service": "colors",
+        "status": "success", 
+        "predictions": predictions,
+        "metadata": {
+            "processing_time": round(processing_time, 3),
+            "model_info": {
+                "framework": "Haishoku + PIL (in-memory)"
+            }
+        }
+    }
 
 def analyze_colors(image_file: str, cleanup: bool = True) -> Dict[str, Any]:
     """Analyze colors in image and return structured response"""
@@ -588,7 +649,106 @@ def health_check():
         ]
     })
 
+
+@app.route('/analyze', methods=['GET', 'POST'])
+def analyze():
+    """Unified analyze endpoint - orchestrates input handling and processing"""
+    start_time = time.time()
+    
+    def error_response(message: str, status_code: int = 400):
+        return jsonify({
+            "service": "colors",
+            "status": "error",
+            "predictions": [],
+            "error": {"message": message},
+            "metadata": {"processing_time": round(time.time() - start_time, 3)}
+        }), status_code
+    
+    try:
+        # Step 1: Get image into memory from any source
+        if request.method == 'POST' and 'file' in request.files:
+            # Handle file upload
+            uploaded_file = request.files['file']
+            if uploaded_file.filename == '':
+                return error_response("No file selected")
+            
+            # Validate file size
+            uploaded_file.seek(0, 2)  # Seek to end
+            file_size = uploaded_file.tell()
+            uploaded_file.seek(0)     # Seek back to beginning
+            
+            if file_size > MAX_FILE_SIZE:
+                return error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB")
+            
+            try:
+                from io import BytesIO
+                file_data = uploaded_file.read()
+                image = Image.open(BytesIO(file_data)).convert('RGB')
+            except Exception as e:
+                return error_response(f"Failed to process uploaded image: {str(e)}", 500)
+        
+        else:
+            # Handle URL or file parameter
+            url = request.args.get('url')
+            file_path = request.args.get('file')
+            
+            if not url and not file_path:
+                return error_response("Must provide either 'url' or 'file' parameter, or POST a file")
+            
+            if url and file_path:
+                return error_response("Cannot provide both 'url' and 'file' parameters")
+            
+            if url:
+                # Download from URL directly into memory
+                try:
+                    response = requests.get(url, timeout=10)
+                    response.raise_for_status()
+                    
+                    if len(response.content) > MAX_FILE_SIZE:
+                        return error_response("Downloaded file too large")
+                    
+                    from io import BytesIO
+                    image = Image.open(BytesIO(response.content)).convert('RGB')
+                    
+                except Exception as e:
+                    return error_response(f"Failed to download/process image: {str(e)}")
+            else:  # file_path
+                # Load file directly into memory
+                if not os.path.exists(file_path):
+                    return error_response(f"File not found: {file_path}")
+                
+                try:
+                    image = Image.open(file_path).convert('RGB')
+                except Exception as e:
+                    return error_response(f"Failed to load image file: {str(e)}", 500)
+        
+        # Step 2: Process the image (unified processing path)
+        processing_result = process_image_for_colors(image)
+        
+        # Step 3: Handle processing result
+        if not processing_result["success"]:
+            return error_response(processing_result["error"], 500)
+        
+        # Step 4: Create response
+        response = create_colors_response(
+            processing_result["predictions"],
+            processing_result["processing_time"]
+        )
+        
+        return jsonify(response)
+        
+    except ValueError as e:
+        return error_response(str(e))
+    except Exception as e:
+        return error_response(f"Internal error: {str(e)}", 500)
+
 @app.route('/v3/analyze', methods=['GET', 'POST'])
+def analyze_v3_compat():
+    """V3 compatibility - redirect to new analyze endpoint"""
+    with app.test_request_context('/analyze', method=request.method, data=request.get_data(), query_string=request.args):
+        return analyze()
+
+@app.route('/v3/analyze_old', methods=['GET', 'POST'])
 def analyze_v3():
     """Unified V3 API endpoint for URL, file path, and POST file upload analysis"""
     import time
@@ -823,11 +983,11 @@ def analyze_file_v2_compat():
     
     if file_path:
         new_args = {'file': file_path}
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        with app.test_request_context('/analyze'):
+            return analyze()
 
 @app.route('/v2/analyze', methods=['GET'])
 def analyze_v2_compat():
@@ -842,11 +1002,11 @@ def analyze_v2_compat():
         
         # Call V3 with translated parameters
         with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+            return analyze()
     else:
         # Let V3 handle validation errors
         with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+            return analyze()
 
 
 if __name__ == '__main__':

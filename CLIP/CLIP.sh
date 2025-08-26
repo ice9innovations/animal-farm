@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/sd/CLIP
+cd "$(dirname "$0")"
 source clip_venv/bin/activate
 source .env
-python REST.py
+python3 REST.py

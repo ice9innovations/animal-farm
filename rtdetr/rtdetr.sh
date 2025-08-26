@@ -1,4 +1,5 @@
 #!/bin/bash
-cd /home/sd/rtdetr
-source /home/sd/rtdetr/rtdetr-venv/bin/activate
-python REST.py
+cd "$(dirname "$0")"
+source rtdetr-venv/bin/activate
+source .env
+python3 REST.py

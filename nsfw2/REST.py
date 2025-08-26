@@ -80,57 +80,30 @@ def check_shiny():
     is_shiny = roll == 1
     return is_shiny, roll
 
-def convert_to_jpg(filepath: str) -> str:
-    """Convert image to JPG format if needed"""
-    try:
-        # Check if already JPG/JPEG
-        if filepath.lower().endswith(('.jpg', '.jpeg')):
-            return filepath
-            
-        # Open image with PIL and convert to JPG
-        with Image.open(filepath) as img:
-            # Convert to RGB if necessary (removes alpha channel)
-            if img.mode in ('RGBA', 'LA', 'P'):
-                img = img.convert('RGB')
-            
-            # Create new filename with .jpg extension
-            jpg_filepath = filepath.rsplit('.', 1)[0] + '.jpg'
-            
-            # Save as JPG
-            img.save(jpg_filepath, 'JPEG', quality=95)
-            
-            return jpg_filepath
-    except Exception as e:
-        print(f"Error converting image to JPG: {e}")
-        return filepath  # Return original if conversion fails
+# Note: Old file-based functions removed - now using pure in-memory processing
 
-def cleanup_file(filepath: str) -> None:
-    """Safely remove temporary file"""
-    try:
-        if os.path.exists(filepath):
-            os.remove(filepath)
-    except Exception as e:
-        print(f"Warning: Could not remove file {filepath}: {e}")
-
-def detect_nsfw_opennsfw2(image_path: str, cleanup: bool = True) -> Dict[str, Any]:
-    """Detect NSFW content using OpenNSFW2 model"""
+def process_image_for_nsfw(image: Image.Image) -> Dict[str, Any]:
+    """
+    Main processing function - takes PIL Image, returns NSFW detection data
+    This is the core business logic, separated from HTTP concerns
+    Uses pure in-memory processing with OpenNSFW2 PIL Image support
+    """
     start_time = time.time()
-    full_path = os.path.join(FOLDER, image_path)
     
     try:
-        # Convert to JPG if needed (OpenNSFW2 handles multiple formats but JPG is most reliable)
-        jpg_path = convert_to_jpg(full_path)
+        # Ensure image is in RGB mode (OpenNSFW2 expects RGB)
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
         
-        # Get NSFW probability using OpenNSFW2
-        result = n2.predict_image(jpg_path)
+        # Get NSFW probability using OpenNSFW2 directly with PIL Image
+        # No file I/O needed - OpenNSFW2 accepts PIL Images directly!
+        nsfw_probability = n2.predict_image(image)
         
         # Handle different return types from OpenNSFW2
-        if isinstance(result, dict):
-            nsfw_probability = result["nsfw"]
-        elif isinstance(result, (float, int)):
-            nsfw_probability = result
-        else:
-            raise ValueError(f"Unexpected result type from OpenNSFW2: {type(result)}")
+        if isinstance(nsfw_probability, dict):
+            nsfw_probability = nsfw_probability["nsfw"]
+        elif not isinstance(nsfw_probability, (float, int)):
+            raise ValueError(f"Unexpected result type from OpenNSFW2: {type(nsfw_probability)}")
         
         # Convert to percentage
         probability_percent = round(nsfw_probability * 100, 3)
@@ -147,53 +120,51 @@ def detect_nsfw_opennsfw2(image_path: str, cleanup: bool = True) -> Dict[str, An
             # If safe, confidence is 1 - NSFW probability (confidence it's safe)
             prediction_confidence = round(1.0 - nsfw_probability, 3)
         
-        is_shiny, shiny_roll = check_shiny()
-        
-        prediction = {
-            "confidence": prediction_confidence,
-            "emoji": emoji,
-            "nsfw": is_nsfw
+        return {
+            "success": True,
+            "data": {
+                "confidence": prediction_confidence,
+                "emoji": emoji,
+                "nsfw": is_nsfw,
+                "probability_percent": probability_percent,
+                "raw_probability": nsfw_probability
+            },
+            "processing_time": detection_time
         }
-        
-        # Add shiny flag only for shiny detections
-        if is_shiny:
-            prediction["shiny"] = True
-            print(f"✨ SHINY NSFW2 MODERATION DETECTED! Roll: {shiny_roll} ✨")
-        
-        response = {
-            "service": "nsfw2",
-            "status": "success",
-            "predictions": [prediction],
-            "metadata": {
-                "processing_time": detection_time,
-                "model_info": {
-                    "framework": "TensorFlow"
-                }
-            }
-        }
-        
-        # Cleanup files
-        if cleanup:
-            cleanup_file(full_path)
-            if jpg_path != full_path:
-                cleanup_file(jpg_path)  # Clean up converted JPG if different
-        
-        return response
         
     except Exception as e:
-        if cleanup:
-            cleanup_file(full_path)
-            if 'jpg_path' in locals() and jpg_path != full_path:
-                cleanup_file(jpg_path)
         return {
-            "service": "nsfw2",
-            "status": "error",
-            "predictions": [],
-            "error": {"message": f"NSFW detection failed: {str(e)}"},
-            "metadata": {
-                "processing_time": round(time.time() - start_time, 3)
+            "success": False,
+            "error": f"NSFW detection failed: {str(e)}",
+            "processing_time": round(time.time() - start_time, 3)
+        }
+
+def create_nsfw_response(data: Dict[str, Any], processing_time: float) -> Dict[str, Any]:
+    """Create standardized NSFW detection response"""
+    is_shiny, shiny_roll = check_shiny()
+    
+    prediction = {
+        "confidence": data["confidence"],
+        "emoji": data["emoji"],
+        "nsfw": data["nsfw"]
+    }
+    
+    # Add shiny flag only for shiny detections
+    if is_shiny:
+        prediction["shiny"] = True
+        print(f"✨ SHINY NSFW2 MODERATION DETECTED! Roll: {shiny_roll} ✨")
+    
+    return {
+        "service": "nsfw2",
+        "status": "success",
+        "predictions": [prediction],
+        "metadata": {
+            "processing_time": round(processing_time, 3),
+            "model_info": {
+                "framework": "TensorFlow"
             }
         }
+    }
 
 app = Flask(__name__)
 
@@ -204,191 +175,164 @@ print("NSFW2 service: CORS enabled for direct browser communication")
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
+    # Test if OpenNSFW2 is working by creating a small test image
+    try:
+        import opennsfw2 as n2
+        test_image = Image.new('RGB', (10, 10), color='red')
+        n2.predict_image(test_image)  # This will fail if model can't load
+        model_status = "loaded"
+        status = "healthy"
+    except Exception as e:
+        model_status = f"error: {str(e)}"
+        status = "unhealthy"
+        return jsonify({
+            "status": status,
+            "reason": f"OpenNSFW2 model error: {str(e)}",
+            "service": "NSFW2 Detection"
+        }), 503
+    
     return jsonify({
-        "status": "healthy",
+        "status": status,
         "service": "NSFW2 Detection",
         "model": {
-            "status": "loaded",
+            "status": model_status,
             "framework": "Keras/TensorFlow",
             "model_type": "OpenNSFW2",
             "threshold": NSFW_THRESHOLD
         },
         "endpoints": [
             "GET /health - Health check",
-            "GET /v3/analyze?url=<image_url> - Analyze image from URL",
-            "GET /v3/analyze?file=<file_path> - Analyze image from file",
-            "GET /v2/analyze?image_url=<url> - V2 compatibility (deprecated)",
-            "GET /v2/analyze_file?file_path=<file_path> - V2 compatibility (deprecated)"
+            "GET,POST /analyze - Unified endpoint (URL/file/upload)",
+            "GET /v3/analyze - V3 compatibility",
+            "GET /v2/analyze - V2 compatibility (deprecated)",
+            "GET /v2/analyze_file - V2 compatibility (deprecated)"
         ]
     })
 
-@app.route('/v3/analyze', methods=['GET'])
-def analyze_v3():
-    """Unified V3 API endpoint for both URL and file path analysis"""
+@app.route('/analyze', methods=['GET', 'POST'])
+def analyze():
+    """Unified analyze endpoint - orchestrates input handling and processing"""
     start_time = time.time()
     
-    try:
-        # Get parameters from query string
-        url = request.args.get('url')
-        file_path = request.args.get('file')
-        
-        # Validate input - exactly one parameter required
-        if not url and not file_path:
-            return jsonify({
-                "service": "nsfw2",
-                "status": "error", 
-                "predictions": [],
-                "error": {"message": "Must provide either 'url' or 'file' parameter"},
-                "metadata": {
-                    "processing_time": round(time.time() - start_time, 3),
-                    "model_info": {
-                        "framework": "TensorFlow"
-                    }
-                }
-            }), 400
-        
-        if url and file_path:
-            return jsonify({
-                "service": "nsfw2",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": "Cannot provide both 'url' and 'file' parameters - choose one"},
-                "metadata": {
-                    "processing_time": round(time.time() - start_time, 3),
-                    "model_info": {
-                        "framework": "TensorFlow"
-                    }
-                }
-            }), 400
-        
-        # Handle URL input
-        if url:
-            try:
-                filename = uuid.uuid4().hex + ".jpg"
-                filepath = os.path.join(FOLDER, filename)
-                response = requests.get(url, timeout=10)
-                response.raise_for_status()
-                
-                if len(response.content) > MAX_FILE_SIZE:
-                    return jsonify({
-                        "service": "nsfw2",
-                        "status": "error",
-                        "predictions": [],
-                        "error": {"message": f"Image too large. Maximum size: {MAX_FILE_SIZE // 1024 // 1024}MB"},
-                        "metadata": {
-                            "processing_time": round(time.time() - start_time, 3),
-                            "model_info": {
-                                "framework": "TensorFlow"
-                            }
-                        }
-                    }), 400
-                
-                with open(filepath, "wb") as file:
-                    file.write(response.content)
-                
-                # Analyze using OpenNSFW2
-                result = detect_nsfw_opennsfw2(filename)
-                return jsonify(result)
-                
-            except requests.exceptions.RequestException as e:
-                return jsonify({
-                    "service": "nsfw2",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": f"Failed to download image: {str(e)}"},
-                    "metadata": {
-                        "processing_time": round(time.time() - start_time, 3),
-                        "model_info": {
-                            "framework": "TensorFlow"
-                        }
-                    }
-                }), 400
-        
-        # Handle file path input
-        elif file_path:
-            # Validate file path exists
-            if not os.path.exists(file_path):
-                return jsonify({
-                    "service": "nsfw2",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": f"File not found: {file_path}"},
-                    "metadata": {
-                        "processing_time": round(time.time() - start_time, 3),
-                        "model_info": {
-                            "framework": "TensorFlow"
-                        }
-                    }
-                }), 404
-            
-            # Extract filename from path for processing
-            filename = os.path.basename(file_path)
-            
-            # Copy to uploads folder temporarily
-            temp_filename = uuid.uuid4().hex + "_" + filename
-            temp_filepath = os.path.join(FOLDER, temp_filename)
-            
-            try:
-                shutil.copy2(file_path, temp_filepath)
-                
-                result = detect_nsfw_opennsfw2(temp_filename)
-                return jsonify(result)
-                
-            except Exception as e:
-                return jsonify({
-                    "service": "nsfw2",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": f"Failed to process file: {str(e)}"},
-                    "metadata": {
-                        "processing_time": round(time.time() - start_time, 3),
-                        "model_info": {
-                            "framework": "TensorFlow"
-                        }
-                    }
-                }), 500
-        
-    except Exception as e:
+    def error_response(message: str, status_code: int = 400):
         return jsonify({
             "service": "nsfw2",
             "status": "error",
             "predictions": [],
-            "error": {"message": f"Internal error: {str(e)}"},
-            "metadata": {
-                "processing_time": round(time.time() - start_time, 3),
-                "model_info": {
-                    "framework": "TensorFlow"
-                }
-            }
-        }), 500
+            "error": {"message": message},
+            "metadata": {"processing_time": round(time.time() - start_time, 3)}
+        }), status_code
+    
+    try:
+        # Step 1: Get image into memory from any source
+        if request.method == 'POST' and 'file' in request.files:
+            # Handle file upload
+            uploaded_file = request.files['file']
+            if uploaded_file.filename == '':
+                return error_response("No file selected")
+            
+            # Validate file size
+            uploaded_file.seek(0, 2)  # Seek to end
+            file_size = uploaded_file.tell()
+            uploaded_file.seek(0)     # Seek back to beginning
+            
+            if file_size > MAX_FILE_SIZE:
+                return error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB")
+            
+            try:
+                from io import BytesIO
+                file_data = uploaded_file.read()
+                image = Image.open(BytesIO(file_data)).convert('RGB')
+            except Exception as e:
+                return error_response(f"Failed to process uploaded image: {str(e)}", 500)
+        
+        else:
+            # Handle URL or file parameter
+            url = request.args.get('url')
+            file_path = request.args.get('file')
+            
+            if not url and not file_path:
+                return error_response("Must provide either 'url' or 'file' parameter, or POST a file")
+            
+            if url and file_path:
+                return error_response("Cannot provide both 'url' and 'file' parameters")
+            
+            if url:
+                # Download from URL directly into memory
+                try:
+                    response = requests.get(url, timeout=10)
+                    response.raise_for_status()
+                    
+                    if len(response.content) > MAX_FILE_SIZE:
+                        return error_response("Downloaded file too large")
+                    
+                    from io import BytesIO
+                    image = Image.open(BytesIO(response.content)).convert('RGB')
+                    
+                except Exception as e:
+                    return error_response(f"Failed to download/process image: {str(e)}")
+            else:  # file_path
+                # Load file directly into memory
+                if not os.path.exists(file_path):
+                    return error_response(f"File not found: {file_path}")
+                
+                try:
+                    image = Image.open(file_path).convert('RGB')
+                except Exception as e:
+                    return error_response(f"Failed to load image file: {str(e)}", 500)
+        
+        # Step 2: Process the image (unified processing path)
+        processing_result = process_image_for_nsfw(image)
+        
+        # Step 3: Handle processing result
+        if not processing_result["success"]:
+            return error_response(processing_result["error"], 500)
+        
+        # Step 4: Create response
+        response = create_nsfw_response(
+            processing_result["data"],
+            processing_result["processing_time"]
+        )
+        
+        return jsonify(response)
+        
+    except ValueError as e:
+        return error_response(str(e))
+    except Exception as e:
+        return error_response(f"Internal error: {str(e)}", 500)
+
+@app.route('/v3/analyze', methods=['GET', 'POST'])
+def analyze_v3_compat():
+    """V3 compatibility - calls new analyze function directly"""
+    return analyze()
 
 @app.route('/v2/analyze_file', methods=['GET'])
 def analyze_file_v2_compat():
-    """V2 file compatibility - translate parameters to V3 format"""
+    """V2 file compatibility - translate parameters to new analyze format"""
     file_path = request.args.get('file_path')
     
     if file_path:
         new_args = {'file': file_path}
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        with app.test_request_context('/analyze'):
+            return analyze()
 
 @app.route('/v2/analyze', methods=['GET'])
 def analyze_v2_compat():
-    """V2 compatibility - translate parameters to V3 format"""
+    """V2 compatibility - translate parameters to new analyze format"""
     image_url = request.args.get('image_url')
     
     if image_url:
         # Parameter translation: image_url -> url
         new_args = {'url': image_url}
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        # Let V3 handle validation errors
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        # Let new analyze handle validation errors
+        with app.test_request_context('/analyze'):
+            return analyze()
 
 
 if __name__ == '__main__':

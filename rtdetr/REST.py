@@ -388,66 +388,69 @@ def lookup_emoji(class_name: str) -> Optional[str]:
         logger.warning(f"Local emoji service lookup failed for '{clean_name}': {e}")
         return None
 
-def download_image(url: str) -> Optional[str]:
-    """Download image from URL and return local path"""
-    filepath = None
+def create_rtdetr_response(data: Dict[str, Any], processing_time: float) -> Dict[str, Any]:
+    """Create standardized RT-DETR response with object detections"""
+    objects = data.get('objects', [])
     
-    try:
-        parsed_url = urlparse(url)
-        if not parsed_url.scheme:
-            return None
-            
-        response = requests.get(url, timeout=10, stream=True)
-        response.raise_for_status()
+    # Create unified prediction format
+    predictions = []
+    for obj in objects:
+        bbox = obj.get('bbox', [])
+        is_shiny, shiny_roll = check_shiny()
         
-        # Check content type
-        content_type = response.headers.get('content-type', '').lower()
-        if not content_type.startswith('image/'):
-            logger.warning(f"URL does not contain an image: {content_type}")
-            return None
+        prediction = {
+            "label": obj.get('object', ''),
+            "confidence": round(float(obj.get('confidence', 0)), 3)
+        }
         
-        # Check file size
-        content_length = response.headers.get('content-length')
-        if content_length and int(content_length) > MAX_FILE_SIZE:
-            logger.warning(f"Image too large: {content_length} bytes")
-            return None
+        # Add shiny flag only for shiny detections
+        if is_shiny:
+            prediction["shiny"] = True
+            logger.info(f"✨ SHINY {obj.get('object', '').upper()} DETECTED! Roll: {shiny_roll} ✨")
         
-        # Save to file
-        filename = f"{uuid.uuid4().hex}.jpg"
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        # Add bbox if present
+        if len(bbox) >= 4:
+            prediction["bbox"] = {
+                "x": int(bbox[0]),
+                "y": int(bbox[1]),
+                "width": int(bbox[2] - bbox[0]),
+                "height": int(bbox[3] - bbox[1])
+            }
         
-        with open(filepath, 'wb') as f:
-            downloaded_size = 0
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-                    downloaded_size += len(chunk)
-                    if downloaded_size > MAX_FILE_SIZE:
-                        logger.warning("Image too large during download")
-                        return None
+        # Add emoji if present
+        if obj.get('emoji'):
+            prediction["emoji"] = obj['emoji']
         
-        return filepath
-    except Exception as e:
-        logger.error(f"Error downloading image from {url}: {e}")
-        return None
-    finally:
-        # Cleanup on error (success case returns filepath for caller to manage)
-        if filepath and not os.path.exists(filepath):
-            # File was partially created but removed during error - ensure cleanup
-            try:
-                if os.path.exists(filepath):
-                    os.remove(filepath)
-            except:
-                pass
+        predictions.append(prediction)
+    
+    return {
+        "service": "rtdetr",
+        "status": "success",
+        "predictions": predictions,
+        "metadata": {
+            "processing_time": round(processing_time, 3),
+            "model_info": {
+                "framework": "RT-DETR PyTorch"
+            }
+        }
+    }
 
-def detect_objects(image_path: str, cleanup: bool = True) -> Dict[str, Any]:
-    """Perform object detection on image"""
+def process_image_for_rtdetr(image: Image.Image) -> Dict[str, Any]:
+    """
+    Main processing function - takes PIL Image, returns RT-DETR detection data
+    This is the core business logic, separated from HTTP concerns
+    Uses pure in-memory processing with PIL Image support
+    """
+    start_time = time.time()
+    
     try:
         if model is None:
             raise ValueError("Model not loaded")
         
-        # Load and preprocess image
-        image = Image.open(image_path).convert('RGB')
+        # Ensure image is in RGB mode
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+            
         w, h = image.size
         
         # Transform image
@@ -558,294 +561,211 @@ def detect_objects(image_path: str, cleanup: bool = True) -> Dict[str, Any]:
                 logger.debug(f"Emoji lookup failed: {e}")
                 # Objects already have empty emoji strings, so this is graceful
         
-        result = {
+        processing_time = round(time.time() - start_time, 3)
+        
+        return {
             'success': True,
-            'objects': objects,
-            'image_size': {'width': w, 'height': h},
-            'model': 'RT-DETR',
-            'total_detections': len(objects)
+            'data': {
+                'objects': objects,
+                'image_size': {'width': w, 'height': h},
+                'model': 'RT-DETR',
+                'total_detections': len(objects)
+            },
+            'processing_time': processing_time
         }
         
-        # Cleanup (only for temporary files)
-        if cleanup:
-            try:
-                if os.path.exists(image_path) and image_path.startswith(UPLOAD_FOLDER):
-                    os.remove(image_path)
-            except Exception as e:
-                logger.warning(f"Failed to cleanup file {image_path}: {e}")
-        
-        return result
-        
     except Exception as e:
+        processing_time = round(time.time() - start_time, 3)
         logger.error(f"Error during object detection: {e}")
-        
-        # Cleanup on error (only for temporary files)
-        if cleanup:
-            try:
-                if os.path.exists(image_path) and image_path.startswith(UPLOAD_FOLDER):
-                    os.remove(image_path)
-            except Exception as e:
-                logger.warning(f"Failed to cleanup file {image_path}: {e}")
-        
         return {
             'success': False,
             'error': str(e),
-            'objects': []
+            'processing_time': processing_time
         }
 
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    health_data = {
-        'status': 'healthy',
-        'model': 'RT-DETR R50',
-        'device': str(device) if device else 'unknown',
-        'model_loaded': model is not None,
-        'emoji_service': 'local_file'
-    }
+    # Test if RT-DETR model is actually working
+    try:
+        if model is None:
+            raise ValueError("Model not loaded")
+        
+        # Test with a small dummy image
+        test_image = Image.new('RGB', (100, 100), color='red')
+        test_result = process_image_for_rtdetr(test_image)
+        
+        if not test_result.get('success'):
+            raise ValueError(f"Model test failed: {test_result.get('error')}")
+        
+        model_status = "loaded"
+        status = "healthy"
+        
+    except Exception as e:
+        model_status = f"error: {str(e)}"
+        status = "unhealthy"
+        
+        return jsonify({
+            "status": status,
+            "reason": f"RT-DETR model error: {str(e)}",
+            "service": "RT-DETR Object Detection"
+        }), 503
     
-    
-    return jsonify(health_data)
+    return jsonify({
+        "status": status,
+        "service": "RT-DETR Object Detection",
+        "model": {
+            "name": "RT-DETR R50",
+            "status": model_status,
+            "device": str(device) if device else "unknown"
+        },
+        "emoji_service": "local_file",
+        "endpoints": [
+            "GET /health - Health check",
+            "GET,POST /analyze - Unified endpoint (URL/file/upload)",
+            "GET /v3/analyze - V3 compatibility",
+            "GET /v2/analyze - V2 compatibility (deprecated)",
+            "GET /v2/analyze_file - V2 compatibility (deprecated)"
+        ]
+    })
 
 # V2 Compatibility Routes - Translate parameters and call V3
 @app.route('/v2/analyze', methods=['GET'])
 def analyze_v2_compat():
-    """V2 compatibility - translate parameters to V3 format"""
-    import time
-    from flask import request
-    
-    # Get V2 parameter
+    """V2 compatibility - translate parameters to new analyze format"""
     image_url = request.args.get('image_url')
     
     if image_url:
-        # Create new request args with V3 parameter name
-        new_args = request.args.copy()
-        new_args = new_args.to_dict()
-        new_args['url'] = image_url
-        del new_args['image_url']
-        
-        # Create a mock request object for V3
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        # Parameter translation: image_url -> url
+        new_args = {'url': image_url}
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        # No parameters - let V3 handle the error
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        # Let new analyze handle validation errors
+        with app.test_request_context('/analyze'):
+            return analyze()
 
 @app.route('/v2/analyze_file', methods=['GET'])
 def analyze_file_v2_compat():
-    """V2 file compatibility - translate parameters to V3 format"""
-    import time
-    from flask import request
-    
-    # Get V2 parameter
+    """V2 file compatibility - translate parameters to new analyze format"""
     file_path = request.args.get('file_path')
     
     if file_path:
-        # Create new request args with V3 parameter name
-        new_args = request.args.copy().to_dict()
-        new_args['file'] = file_path
-        del new_args['file_path']
-        
-        # Create a mock request object for V3
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        # Parameter translation: file_path -> file
+        new_args = {'file': file_path}
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        # No parameters - let V3 handle the error
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        with app.test_request_context('/analyze'):
+            return analyze()
 
-@app.route('/v3/analyze', methods=['GET'])
-def analyze_v3():
-    """Unified V3 API endpoint for both URL and file path analysis"""
-    import time
+@app.route('/analyze', methods=['GET', 'POST'])
+def analyze():
+    """Unified analyze endpoint - orchestrates input handling and processing"""
     start_time = time.time()
     
-    try:
-        # Get input parameters - support both url and file
-        url = request.args.get('url')
-        file = request.args.get('file')
-        
-        # Validate input - exactly one parameter must be provided
-        if not url and not file:
-            return jsonify({
-                "service": "rtdetr",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": "Must provide either url or file parameter"},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 400
-        
-        if url and file:
-            return jsonify({
-                "service": "rtdetr",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": "Cannot provide both url and file parameters"},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 400
-        
-        # Handle URL input
-        if url:
-            filepath = None
-            try:
-                # Validate URL
-                parsed_url = urlparse(url)
-                if not parsed_url.scheme or not parsed_url.netloc:
-                    return jsonify({
-                        "service": "rtdetr",
-                        "status": "error",
-                        "predictions": [],
-                        "error": {"message": "Invalid URL format"},
-                        "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                    }), 400
-                
-                # Download image
-                filename = uuid.uuid4().hex + ".jpg"
-                filepath = os.path.join(UPLOAD_FOLDER, filename)
-                
-                response = requests.get(url, timeout=10, stream=True)
-                response.raise_for_status()
-                
-                content_type = response.headers.get('content-type', '')
-                if not content_type.startswith('image/'):
-                    return jsonify({
-                        "service": "rtdetr",
-                        "status": "error",
-                        "predictions": [],
-                        "error": {"message": "URL does not point to an image"},
-                        "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                    }), 400
-                
-                with open(filepath, 'wb') as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                
-                if os.path.getsize(filepath) > MAX_FILE_SIZE:
-                    os.remove(filepath)
-                    return jsonify({
-                        "service": "rtdetr",
-                        "status": "error",
-                        "predictions": [],
-                        "error": {"message": "Downloaded file too large"},
-                        "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                    }), 400
-                
-                # Detect objects using existing function
-                result = detect_objects(filepath)
-                filepath = None  # detect_objects handles cleanup
-                
-            except requests.exceptions.RequestException as e:
-                if filepath and os.path.exists(filepath):
-                    os.remove(filepath)
-                return jsonify({
-                    "service": "rtdetr",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": "Failed to download image"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 400
-            except Exception as e:
-                if filepath and os.path.exists(filepath):
-                    os.remove(filepath)
-                return jsonify({
-                    "service": "rtdetr",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": "Error processing image"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 500
-        
-        # Handle file input
-        if file:
-            # Validate file path
-            if not os.path.exists(file):
-                return jsonify({
-                    "service": "rtdetr",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": f"File not found: {file}"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 404
-            
-            if not allowed_file(file):
-                return jsonify({
-                    "service": "rtdetr",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": "File type not allowed"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 400
-            
-            # Detect objects directly from file (no cleanup needed - we don't own the file)
-            result = detect_objects(file, cleanup=False)
-        
-        # Process results (common for both URL and file)
-        if not result.get('success', False):
-            return jsonify({
-                "service": "rtdetr",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": result.get('error', 'Detection failed')},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 500
-        
-        # Convert to v3 format - extract objects and create predictions
-        objects = result.get('objects', [])
-        
-        # Create unified prediction format
-        predictions = []
-        for obj in objects:
-            bbox = obj.get('bbox', [])
-            is_shiny, shiny_roll = check_shiny()
-            
-            prediction = {
-                "label": obj.get('object', ''),
-                "confidence": round(float(obj.get('confidence', 0)), 3)
-            }
-            
-            # Add shiny flag only for shiny detections
-            if is_shiny:
-                prediction["shiny"] = True
-                logger.info(f"✨ SHINY {obj.get('object', '').upper()} DETECTED! Roll: {shiny_roll} ✨")
-            
-            # Add bbox if present
-            if len(bbox) >= 4:
-                prediction["bbox"] = {
-                    "x": int(bbox[0]),
-                    "y": int(bbox[1]),
-                    "width": int(bbox[2] - bbox[0]),
-                    "height": int(bbox[3] - bbox[1])
-                }
-            
-            # Add emoji if present
-            if obj.get('emoji'):
-                prediction["emoji"] = obj['emoji']
-            
-            predictions.append(prediction)
-        
-        # Return unified v3 format
-        return jsonify({
-            "service": "rtdetr",
-            "status": "success",
-            "predictions": predictions,
-            "metadata": {
-                "processing_time": round(time.time() - start_time, 3),
-                "model_info": {
-                    "framework": "RT-DETR PyTorch"
-                }
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"V3 API error: {e}")
+    def error_response(message: str, status_code: int = 400):
         return jsonify({
             "service": "rtdetr",
             "status": "error",
             "predictions": [],
-            "error": {"message": f"Internal error: {str(e)}"},
+            "error": {"message": message},
             "metadata": {"processing_time": round(time.time() - start_time, 3)}
-        }), 500
+        }), status_code
+    
+    try:
+        # Step 1: Get image into memory from any source
+        if request.method == 'POST' and 'file' in request.files:
+            # Handle file upload
+            uploaded_file = request.files['file']
+            if uploaded_file.filename == '':
+                return error_response("No file selected")
+            
+            # Validate file size
+            uploaded_file.seek(0, 2)  # Seek to end
+            file_size = uploaded_file.tell()
+            uploaded_file.seek(0)     # Seek back to beginning
+            
+            if file_size > MAX_FILE_SIZE:
+                return error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB")
+            
+            try:
+                from io import BytesIO
+                file_data = uploaded_file.read()
+                image = Image.open(BytesIO(file_data)).convert('RGB')
+            except Exception as e:
+                return error_response(f"Failed to process uploaded image: {str(e)}", 500)
+        
+        else:
+            # Handle URL or file parameter
+            url = request.args.get('url')
+            file_path = request.args.get('file')
+            
+            if not url and not file_path:
+                return error_response("Must provide either 'url' or 'file' parameter, or POST a file")
+            
+            if url and file_path:
+                return error_response("Cannot provide both 'url' and 'file' parameters")
+            
+            if url:
+                # Download from URL directly into memory
+                try:
+                    parsed_url = urlparse(url)
+                    if not parsed_url.scheme or not parsed_url.netloc:
+                        return error_response("Invalid URL format")
+                    
+                    response = requests.get(url, timeout=10)
+                    response.raise_for_status()
+                    
+                    content_type = response.headers.get('content-type', '')
+                    if not content_type.startswith('image/'):
+                        return error_response("URL does not point to an image")
+                    
+                    if len(response.content) > MAX_FILE_SIZE:
+                        return error_response("Downloaded file too large")
+                    
+                    from io import BytesIO
+                    image = Image.open(BytesIO(response.content)).convert('RGB')
+                    
+                except Exception as e:
+                    return error_response(f"Failed to download/process image: {str(e)}")
+            else:  # file_path
+                # Load file directly into memory
+                if not os.path.exists(file_path):
+                    return error_response(f"File not found: {file_path}")
+                
+                if not allowed_file(file_path):
+                    return error_response("File type not allowed")
+                
+                try:
+                    image = Image.open(file_path).convert('RGB')
+                except Exception as e:
+                    return error_response(f"Failed to load image file: {str(e)}", 500)
+        
+        # Step 2: Process the image (unified processing path)
+        processing_result = process_image_for_rtdetr(image)
+        
+        # Step 3: Handle processing result
+        if not processing_result["success"]:
+            return error_response(processing_result["error"], 500)
+        
+        # Step 4: Create response
+        response = create_rtdetr_response(
+            processing_result["data"],
+            processing_result["processing_time"]
+        )
+        
+        return jsonify(response)
+        
+    except ValueError as e:
+        return error_response(str(e))
+    except Exception as e:
+        return error_response(f"Internal error: {str(e)}", 500)
+
+@app.route('/v3/analyze', methods=['GET', 'POST'])
+def analyze_v3_compat():
+    """V3 compatibility - calls new analyze function directly"""
+    return analyze()
 
 
 if __name__ == '__main__':

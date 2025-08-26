@@ -162,8 +162,8 @@ GET /models
 
 ### V3 Unified Analysis (Recommended)
 ```bash
-GET /v3/analyze?url=<image_url>
-GET /v3/analyze?file=<file_path>
+GET /analyze?url=<image_url>
+GET /analyze?file=<file_path>
 ```
 
 **Parameters:**
@@ -332,7 +332,7 @@ sudo systemctl status ollama-api.service
 import requests
 
 # Vision analysis
-response = requests.get('http://localhost:7782/v3/analyze', 
+response = requests.get('http://localhost:7782/analyze', 
                        params={
                            'url': 'https://example.com/image.jpg',
                            'prompt': 'Describe this image in detail',
@@ -353,7 +353,7 @@ result = response.json()
 ### JavaScript
 ```javascript
 // Vision analysis
-const visionResponse = await fetch('http://localhost:7782/v3/analyze', {
+const visionResponse = await fetch('http://localhost:7782/analyze', {
     method: 'GET',
     headers: {'Content-Type': 'application/json'},
     params: new URLSearchParams({

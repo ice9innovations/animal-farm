@@ -68,13 +68,50 @@ print("Initializing PaddleOCR...")
 ocr_engine = PaddleOCR(lang='en')
 print("PaddleOCR initialized successfully")
 
-def cleanup_file(filepath: str) -> None:
-    """Safely remove temporary file"""
-    try:
-        if os.path.exists(filepath):
-            os.remove(filepath)
-    except Exception as e:
-        print(f"Warning: Could not remove file {filepath}: {e}")
+def create_ocr_response(data: Dict[str, Any], processing_time: float) -> Dict[str, Any]:
+    """Create standardized OCR response with emoji mappings"""
+    text = data.get('text', '')
+    has_text = data.get('has_text', False)
+    confidence = data.get('confidence', 0.0)
+    text_regions = data.get('text_regions', [])
+    
+    # Get emoji mappings for meaningful words in the text
+    emoji_mappings_list = []
+    if has_text and text:
+        print(f"OCR: Extracted text: '{text[:100]}...'")
+        meaningful_words = extract_meaningful_words(text)
+        print(f"OCR: Found {len(meaningful_words)} meaningful words: {meaningful_words[:10]}")
+        
+        if meaningful_words:
+            emoji_mappings_list = get_emojis_for_words(meaningful_words)
+            print(f"OCR: Generated {len(emoji_mappings_list)} emoji mappings from text content")
+    
+    is_shiny, shiny_roll = check_shiny()
+    
+    text_prediction = {
+        "text": text,
+        "emoji": (get_emoji("ocr") or "💬") if has_text else "",
+        "has_text": has_text,
+        "text_regions": text_regions,
+        "emoji_mappings": emoji_mappings_list
+    }
+    
+    # Add shiny flag only for shiny detections
+    if is_shiny:
+        text_prediction["shiny"] = True
+        print(f"✨ SHINY TEXT DETECTION! Roll: {shiny_roll} ✨")
+    
+    return {
+        "service": "ocr",
+        "status": "success",
+        "predictions": [text_prediction],
+        "metadata": {
+            "processing_time": round(processing_time, 3),
+            "model_info": {
+                "framework": "PaddleOCR"
+            }
+        }
+    }
 
 def load_mwe_mappings():
     """Load fresh MWE mappings from central API and convert to tuples"""
@@ -192,13 +229,20 @@ def extract_meaningful_words(text: str) -> List[str]:
         words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
         return list(dict.fromkeys(words))[:20]  # Remove duplicates
 
-def extract_text_paddleocr(image_path: str, cleanup: bool = True) -> Dict[str, Any]:
-    """Extract text from image using PaddleOCR"""
+def process_image_for_ocr(image: Image.Image) -> Dict[str, Any]:
+    """
+    Main processing function - takes PIL Image, returns OCR data
+    This is the core business logic, separated from HTTP concerns
+    Uses pure in-memory processing with PaddleOCR PIL Image support
+    """
     start_time = time.time()
     
     try:
-        # Load image
-        image = Image.open(image_path)
+        # Ensure image is in RGB mode
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        # Convert PIL Image to numpy array for PaddleOCR
         image_array = np.array(image)
         
         # Run PaddleOCR
@@ -266,34 +310,25 @@ def extract_text_paddleocr(image_path: str, cleanup: bool = True) -> Dict[str, A
         
         processing_time = round(time.time() - start_time, 3)
         
-        result = {
-            "text": cleaned_text,
-            "raw_text": raw_text,
-            "has_text": has_text,
-            "confidence": avg_confidence,
-            "processing_time": processing_time,
-            "engine": "PaddleOCR",
-            "status": "success",
-            "text_regions": text_regions
+        return {
+            "success": True,
+            "data": {
+                "text": cleaned_text,
+                "raw_text": raw_text,
+                "has_text": has_text,
+                "confidence": avg_confidence,
+                "engine": "PaddleOCR",
+                "text_regions": text_regions
+            },
+            "processing_time": processing_time
         }
-        
-        # Cleanup (only for temporary files)
-        if cleanup:
-            cleanup_file(image_path)
-        
-        return result
         
     except Exception as e:
         processing_time = round(time.time() - start_time, 3)
-        
-        # Cleanup on error (only for temporary files)  
-        if cleanup:
-            cleanup_file(image_path)
-        
         return {
+            "success": False,
             "error": f"OCR processing failed: {str(e)}",
-            "processing_time": processing_time,
-            "status": "error"
+            "processing_time": processing_time
         }
 
 app = Flask(__name__)
@@ -305,11 +340,27 @@ print("PaddleOCR service: CORS enabled for direct browser communication")
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
+    # Test if PaddleOCR is working by creating a small test image
+    try:
+        test_image = Image.new('RGB', (10, 10), color='white')
+        test_array = np.array(test_image)
+        ocr_engine.ocr(test_array, cls=True)  # This will fail if OCR can't work
+        ocr_status = "loaded"
+        status = "healthy"
+    except Exception as e:
+        ocr_status = f"error: {str(e)}"
+        status = "unhealthy"
+        return jsonify({
+            "status": status,
+            "reason": f"PaddleOCR engine error: {str(e)}",
+            "service": "OCR Text Recognition"
+        }), 503
+    
     return jsonify({
-        "status": "healthy",
-        "service": "PaddleOCR",
+        "status": status,
+        "service": "OCR Text Recognition",
         "ocr_engine": {
-            "available": True,
+            "status": ocr_status,
             "version": "PaddleOCR 2.x",
             "languages": ["English", "Chinese", "80+ others"],
             "gpu_enabled": True
@@ -322,224 +373,142 @@ def health_check():
         },
         "endpoints": [
             "GET /health - Health check",
-            "GET /v3/analyze?url=<image_url> - Analyze image from URL",
-            "GET /v3/analyze?file=<file_path> - Analyze image from file",
-            "GET /v2/analyze?image_url=<url> - V2 compatibility (deprecated)",
-            "GET /v2/analyze_file?file_path=<file_path> - V2 compatibility (deprecated)"
+            "GET,POST /analyze - Unified endpoint (URL/file/upload)",
+            "GET /v3/analyze - V3 compatibility",
+            "GET /v2/analyze - V2 compatibility (deprecated)",
+            "GET /v2/analyze_file - V2 compatibility (deprecated)"
         ]
     })
 
-@app.route('/v3/analyze', methods=['GET'])
-def analyze_v3():
-    """Unified V3 API endpoint for both URL and file path analysis"""
+@app.route('/analyze', methods=['GET', 'POST'])
+def analyze():
+    """Unified analyze endpoint - orchestrates input handling and processing"""
     start_time = time.time()
     
-    try:
-        # Get parameters from query string
-        url = request.args.get('url')
-        file_path = request.args.get('file')
-        
-        # Validate input - exactly one parameter required
-        if not url and not file_path:
-            return jsonify({
-                "service": "ocr",
-                "status": "error", 
-                "predictions": [],
-                "error": {"message": "Must provide either 'url' or 'file' parameter"},
-                "metadata": {
-                    "processing_time": round(time.time() - start_time, 3),
-                    "model_info": {
-                        "framework": "PaddleOCR"
-                    }
-                }
-            }), 400
-        
-        if url and file_path:
-            return jsonify({
-                "service": "ocr",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": "Cannot provide both 'url' and 'file' parameters - choose one"},
-                "metadata": {
-                    "processing_time": round(time.time() - start_time, 3),
-                    "model_info": {
-                        "framework": "PaddleOCR"
-                    }
-                }
-            }), 400
-        
-        # Handle URL input
-        if url:
-            try:
-                filename = uuid.uuid4().hex + ".jpg"
-                filepath = os.path.join(FOLDER, filename)
-                response = requests.get(url, timeout=10)
-                response.raise_for_status()
-                
-                if len(response.content) > MAX_FILE_SIZE:
-                    return jsonify({
-                        "service": "ocr",
-                        "status": "error",
-                        "predictions": [],
-                        "error": {"message": f"Image too large. Maximum size: {MAX_FILE_SIZE // 1024 // 1024}MB"},
-                        "metadata": {
-                            "processing_time": round(time.time() - start_time, 3),
-                            "model_info": {
-                                "framework": "PaddleOCR"
-                            }
-                        }
-                    }), 400
-                
-                with open(filepath, "wb") as file:
-                    file.write(response.content)
-                
-                # Extract text using PaddleOCR (cleanup=True will handle file removal)
-                result = extract_text_paddleocr(filepath)
-                
-            except requests.exceptions.RequestException as e:
-                return jsonify({
-                    "service": "ocr",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": f"Failed to download image: {str(e)}"},
-                    "metadata": {
-                        "processing_time": round(time.time() - start_time, 3),
-                        "model_info": {
-                            "framework": "PaddleOCR"
-                        }
-                    }
-                }), 400
-        
-        # Handle file path input
-        elif file_path:
-            # Validate file path exists
-            if not os.path.exists(file_path):
-                return jsonify({
-                    "service": "ocr",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": f"File not found: {file_path}"},
-                    "metadata": {
-                        "processing_time": round(time.time() - start_time, 3),
-                        "model_info": {
-                            "framework": "PaddleOCR"
-                        }
-                    }
-                }), 404
-            
-            # Extract text directly from file (no cleanup needed - we don't own the file)
-            result = extract_text_paddleocr(file_path, cleanup=False)
-        
-        # Process result for both URL and file path cases
-        if result.get('status') == 'error':
-            return jsonify({
-                "service": "ocr",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": result.get('error', 'OCR processing failed')},
-                "metadata": {
-                    "processing_time": round(time.time() - start_time, 3),
-                    "model_info": {
-                        "framework": "PaddleOCR"
-                    }
-                }
-            }), 500
-        
-        # Create unified prediction format
-        predictions = []
-        
-        text = result.get('text', '')
-        raw_text = result.get('raw_text', '')
-        has_text = result.get('has_text', False)
-        confidence = result.get('confidence', 0.0)
-        
-        # Text extraction prediction (main OCR result with text regions and emoji mappings)
-        text_regions = result.get('text_regions', [])
-        
-        # Get emoji mappings for meaningful words in the text
-        emoji_mappings_list = []
-        if has_text and text:
-            print(f"OCR: Extracted text: '{text[:100]}...'")
-            meaningful_words = extract_meaningful_words(text)
-            print(f"OCR: Found {len(meaningful_words)} meaningful words: {meaningful_words[:10]}")
-            
-            if meaningful_words:
-                emoji_mappings_list = get_emojis_for_words(meaningful_words)
-                print(f"OCR: Generated {len(emoji_mappings_list)} emoji mappings from text content")
-        
-        is_shiny, shiny_roll = check_shiny()
-        
-        text_prediction = {
-            "text": text,
-            "emoji": (get_emoji("ocr") or "💬") if has_text else "",
-            "confidence": round(confidence, 3),
-            "has_text": has_text,
-            "text_regions": text_regions,
-            "emoji_mappings": emoji_mappings_list
-        }
-        
-        # Add shiny flag only for shiny detections
-        if is_shiny:
-            text_prediction["shiny"] = True
-            print(f"✨ SHINY TEXT DETECTION! Roll: {shiny_roll} ✨")
-        
-        predictions.append(text_prediction)
-        
-        return jsonify({
-            "service": "ocr",
-            "status": "success",
-            "predictions": predictions,
-            "metadata": {
-                "processing_time": round(time.time() - start_time, 3),
-                "model_info": {
-                    "framework": "PaddleOCR"
-                }
-            }
-        })
-        
-    except Exception as e:
+    def error_response(message: str, status_code: int = 400):
         return jsonify({
             "service": "ocr",
             "status": "error",
             "predictions": [],
-            "error": {"message": f"Internal error: {str(e)}"},
-            "metadata": {
-                "processing_time": round(time.time() - start_time, 3),
-                "model_info": {
-                    "framework": "PaddleOCR"
-                }
-            }
-        }), 500
+            "error": {"message": message},
+            "metadata": {"processing_time": round(time.time() - start_time, 3)}
+        }), status_code
+    
+    try:
+        # Step 1: Get image into memory from any source
+        if request.method == 'POST' and 'file' in request.files:
+            # Handle file upload
+            uploaded_file = request.files['file']
+            if uploaded_file.filename == '':
+                return error_response("No file selected")
+            
+            # Validate file size
+            uploaded_file.seek(0, 2)  # Seek to end
+            file_size = uploaded_file.tell()
+            uploaded_file.seek(0)     # Seek back to beginning
+            
+            if file_size > MAX_FILE_SIZE:
+                return error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB")
+            
+            try:
+                from io import BytesIO
+                file_data = uploaded_file.read()
+                image = Image.open(BytesIO(file_data)).convert('RGB')
+            except Exception as e:
+                return error_response(f"Failed to process uploaded image: {str(e)}", 500)
+        
+        else:
+            # Handle URL or file parameter
+            url = request.args.get('url')
+            file_path = request.args.get('file')
+            
+            if not url and not file_path:
+                return error_response("Must provide either 'url' or 'file' parameter, or POST a file")
+            
+            if url and file_path:
+                return error_response("Cannot provide both 'url' and 'file' parameters")
+            
+            if url:
+                # Download from URL directly into memory
+                try:
+                    response = requests.get(url, timeout=10)
+                    response.raise_for_status()
+                    
+                    if len(response.content) > MAX_FILE_SIZE:
+                        return error_response("Downloaded file too large")
+                    
+                    from io import BytesIO
+                    image = Image.open(BytesIO(response.content)).convert('RGB')
+                    
+                except Exception as e:
+                    return error_response(f"Failed to download/process image: {str(e)}")
+            else:  # file_path
+                # Load file directly into memory
+                if not os.path.exists(file_path):
+                    return error_response(f"File not found: {file_path}")
+                
+                try:
+                    image = Image.open(file_path).convert('RGB')
+                except Exception as e:
+                    return error_response(f"Failed to load image file: {str(e)}", 500)
+        
+        # Step 2: Process the image (unified processing path)
+        processing_result = process_image_for_ocr(image)
+        
+        # Step 3: Handle processing result
+        if not processing_result["success"]:
+            return error_response(processing_result["error"], 500)
+        
+        # Step 4: Create response
+        response = create_ocr_response(
+            processing_result["data"],
+            processing_result["processing_time"]
+        )
+        
+        return jsonify(response)
+        
+    except ValueError as e:
+        return error_response(str(e))
+    except Exception as e:
+        return error_response(f"Internal error: {str(e)}", 500)
+
+@app.route('/v3/analyze', methods=['GET', 'POST'])
+def analyze_v3_compat():
+    """V3 compatibility - calls new analyze function directly"""
+    return analyze()
+
+@app.route('/v3/analyze_old', methods=['GET'])
+def analyze_v3():
+    """Old V3 endpoint - kept for reference but unused"""
+    pass  # This function is now unused but kept to prevent import errors
 
 @app.route('/v2/analyze_file', methods=['GET'])
 def analyze_file_v2_compat():
-    """V2 file compatibility - translate parameters to V3 format"""
+    """V2 file compatibility - translate parameters to new analyze format"""
     file_path = request.args.get('file_path')
     
     if file_path:
-        # Parameter translation: file_path -> file
         new_args = {'file': file_path}
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        # Let V3 handle validation errors
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        with app.test_request_context('/analyze'):
+            return analyze()
 
 @app.route('/v2/analyze', methods=['GET'])
 def analyze_v2_compat():
-    """V2 compatibility - translate parameters to V3 format"""
+    """V2 compatibility - translate parameters to new analyze format"""
     image_url = request.args.get('image_url')
     
     if image_url:
         # Parameter translation: image_url -> url
         new_args = {'url': image_url}
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        # Let V3 handle validation errors
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        # Let new analyze handle validation errors
+        with app.test_request_context('/analyze'):
+            return analyze()
 
 if __name__ == '__main__':
     # Load emoji mappings and MWE patterns on startup

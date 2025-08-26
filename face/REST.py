@@ -18,7 +18,6 @@ from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from PIL import Image
 import numpy as np
-import cv2
 import mediapipe as mp
 import requests
 from datetime import datetime
@@ -170,21 +169,19 @@ def convert_to_jpg(image_bytes):
     except Exception as e:
         raise Exception(f"Failed to convert image: {str(e)}")
 
-def detect_faces_mediapipe(image_path):
-    """Detect faces using MediaPipe"""
+def detect_faces_mediapipe_from_image(image: Image.Image):
+    """Detect faces using MediaPipe directly from PIL Image (no temp files)"""
     global face_detection_model
     
     try:
-        # Read image
-        image = cv2.imread(image_path)
-        if image is None:
-            raise Exception(f"Could not load image from {image_path}")
+        # Convert PIL Image to numpy array
+        img_array = np.array(image)
         
-        height, width, _ = image.shape
-        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # MediaPipe expects RGB format (PIL Images are already RGB)
+        height, width, _ = img_array.shape
         
-        # Process with MediaPipe
-        results = face_detection_model.process(image_rgb)
+        # Process with MediaPipe (no CV2 conversion needed - PIL is already RGB!)
+        results = face_detection_model.process(img_array)
         
         faces = []
         if results.detections:
@@ -243,6 +240,84 @@ def detect_faces_mediapipe(image_path):
     except Exception as e:
         logger.error(f"MediaPipe face detection error: {str(e)}")
         return [], {'width': 0, 'height': 0}
+
+def process_image_for_faces(image: Image.Image) -> dict:
+    """
+    Main processing function - takes PIL Image, returns face detection data
+    This is the core business logic, separated from HTTP concerns
+    Uses pure in-memory processing
+    """
+    start_time = time.time()
+    
+    if not face_detection_model:
+        return {
+            "success": False,
+            "error": "MediaPipe face detection model not loaded"
+        }
+    
+    try:
+        # Ensure image is in RGB mode
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        # Perform face detection analysis
+        faces, dimensions = detect_faces_mediapipe_from_image(image)
+        
+        processing_time = time.time() - start_time
+        
+        return {
+            "success": True,
+            "data": {
+                'faces': faces,
+                'dimensions': dimensions
+            },
+            "processing_time": processing_time
+        }
+        
+    except Exception as e:
+        logger.error(f"Face processing error: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Face detection failed: {str(e)}",
+            "processing_time": time.time() - start_time
+        }
+
+def create_face_response(data: dict, processing_time: float) -> dict:
+    """Create standardized face detection response"""
+    faces = data.get('faces', [])
+    
+    # Build V3 predictions
+    predictions = []
+    for face in faces:
+        is_shiny, shiny_roll = check_shiny()
+        
+        prediction = {
+            "label": "face",
+            "emoji": get_emoji("face"),
+            "confidence": round(float(face['confidence']), CONFIDENCE_DECIMAL_PLACES),
+            "bbox": face['bbox'],
+            "properties": {
+                "keypoints": face.get('keypoints', {}),
+                "method": face['method']
+            }
+        }
+        
+        # Add shiny flag only for shiny detections
+        if is_shiny:
+            prediction["shiny"] = True
+            logger.info(f"✨ SHINY FACE DETECTED! Roll: {shiny_roll} ✨")
+        
+        predictions.append(prediction)
+    
+    return {
+        "service": "face",
+        "status": "success",
+        "predictions": predictions,
+        "metadata": {
+            "processing_time": round(processing_time, 3),
+            "model_info": {"framework": "MediaPipe"}
+        }
+    }
 
 
 def process_image(image_source, is_url=False, is_file_path=False):
@@ -409,7 +484,117 @@ def build_v3_response(raw_data):
         }
     })
 
+@app.route('/analyze', methods=['GET', 'POST'])
+def analyze():
+    """Unified analyze endpoint - orchestrates input handling and processing"""
+    start_time = time.time()
+    
+    def error_response(message: str, status_code: int = 400):
+        return jsonify({
+            "service": "face",
+            "status": "error",
+            "predictions": [],
+            "error": {"message": message},
+            "metadata": {"processing_time": round(time.time() - start_time, 3)}
+        }), status_code
+    
+    try:
+        # Step 1: Get image into memory from any source
+        if request.method == 'POST' and 'file' in request.files:
+            # Handle file upload
+            uploaded_file = request.files['file']
+            if uploaded_file.filename == '':
+                return error_response("No file selected")
+            
+            # Validate file size
+            uploaded_file.seek(0, 2)  # Seek to end
+            file_size = uploaded_file.tell()
+            uploaded_file.seek(0)     # Seek back to beginning
+            
+            if file_size > MAX_FILE_SIZE:
+                return error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB")
+            
+            # Validate file type
+            if not allowed_file(uploaded_file.filename):
+                return error_response("File type not allowed")
+            
+            try:
+                from io import BytesIO
+                file_data = uploaded_file.read()
+                image = Image.open(BytesIO(file_data)).convert('RGB')
+            except Exception as e:
+                return error_response(f"Failed to process uploaded image: {str(e)}", 500)
+        
+        else:
+            # Handle URL or file parameter
+            url = request.args.get('url')
+            file_path = request.args.get('file')
+            
+            if not url and not file_path:
+                return error_response("Must provide either 'url' or 'file' parameter, or POST a file")
+            
+            if url and file_path:
+                return error_response("Cannot provide both 'url' and 'file' parameters")
+            
+            if url:
+                # Download from URL directly into memory
+                try:
+                    parsed_url = urlparse(url)
+                    if not parsed_url.scheme or not parsed_url.netloc:
+                        return error_response("Invalid URL format")
+                    
+                    headers = {'User-Agent': 'MediaPipe Face Analysis Service'}
+                    response = requests.get(url, headers=headers, timeout=10)
+                    response.raise_for_status()
+                    
+                    if len(response.content) > MAX_FILE_SIZE:
+                        return error_response("Downloaded file too large")
+                    
+                    from io import BytesIO
+                    image = Image.open(BytesIO(response.content)).convert('RGB')
+                    
+                except Exception as e:
+                    return error_response(f"Failed to download/process image: {str(e)}")
+            else:  # file_path
+                # Load file directly into memory
+                if not os.path.exists(file_path):
+                    return error_response(f"File not found: {file_path}")
+                
+                if not allowed_file(file_path):
+                    return error_response("File type not allowed")
+                
+                try:
+                    image = Image.open(file_path).convert('RGB')
+                except Exception as e:
+                    return error_response(f"Failed to load image file: {str(e)}", 500)
+        
+        # Step 2: Process the image (unified processing path)
+        processing_result = process_image_for_faces(image)
+        
+        # Step 3: Handle processing result
+        if not processing_result["success"]:
+            return error_response(processing_result["error"], 500)
+        
+        # Step 4: Create response
+        response = create_face_response(
+            processing_result["data"],
+            processing_result["processing_time"]
+        )
+        
+        return jsonify(response)
+        
+    except ValueError as e:
+        return error_response(str(e))
+    except Exception as e:
+        logger.error(f"Analyze API error: {e}")
+        return error_response(f"Internal error: {str(e)}", 500)
+
 @app.route('/v3/analyze', methods=['GET', 'POST'])
+def analyze_v3_compat():
+    """V3 compatibility - calls new analyze function directly"""
+    return analyze()
+
+@app.route('/v3/analyze_old', methods=['GET', 'POST'])
 def analyze_v3():
     """Unified V3 API endpoint for both URL and file path analysis"""
     start_time = time.time()
@@ -490,35 +675,36 @@ def analyze_v3():
 
 @app.route('/v2/analyze_file', methods=['GET'])
 def analyze_file_v2_compat():
-    """V2 file compatibility - translate parameters to V3 format"""
+    """V2 file compatibility - translate parameters to new analyze format"""
     file_path = request.args.get('file_path')
     
     if file_path:
         new_args = {'file': file_path}
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        with app.test_request_context('/analyze'):
+            return analyze()
 
 @app.route('/v2/analyze', methods=['GET'])
 def analyze_v2_compat():
-    """V2 compatibility - translate parameters to V3 format"""
+    """V2 compatibility - translate parameters to new analyze format"""
     image_url = request.args.get('image_url')
     
     if image_url:
         # Parameter translation
         new_args = request.args.copy().to_dict()
         new_args['url'] = image_url
-        del new_args['image_url']
+        if 'image_url' in new_args:
+            del new_args['image_url']
         
-        # Call V3 with translated parameters
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        # Call new analyze with translated parameters
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        # Let V3 handle validation errors
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        # Let new analyze handle validation errors
+        with app.test_request_context('/analyze'):
+            return analyze()
 
 if __name__ == '__main__':
     # Initialize MediaPipe face detection model at startup

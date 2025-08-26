@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/sd/face
+cd "$(dirname "$0")"
 source face_venv/bin/activate
 source .env
-python REST.py
+python3 REST.py

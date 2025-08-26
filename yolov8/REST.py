@@ -14,6 +14,7 @@ import os
 import uuid
 import logging
 import random
+import time
 from typing import List, Dict, Any, Optional, Tuple
 from urllib.parse import urlparse
 from PIL import Image, ImageDraw
@@ -289,12 +290,49 @@ def is_allowed_file(filename: str) -> bool:
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def validate_file_size(file_path: str) -> bool:
-    """Validate file size"""
-    try:
-        return os.path.getsize(file_path) <= MAX_FILE_SIZE
-    except OSError:
-        return False
+def create_yolo_response(data: Dict[str, Any], processing_time: float) -> Dict[str, Any]:
+    """Create standardized YOLO response with object detections"""
+    detections = data.get('detections', [])
+    
+    # Create unified prediction format
+    predictions = []
+    for detection in detections:
+        bbox = detection.get('bbox', {})
+        is_shiny, shiny_roll = check_shiny()
+        
+        prediction = {
+            "label": detection.get('class_name', ''),
+            "confidence": float(detection.get('confidence', 0)),
+            "bbox": {
+                "x": bbox.get('x', 0),
+                "y": bbox.get('y', 0),
+                "width": bbox.get('width', 0),
+                "height": bbox.get('height', 0)
+            }
+        }
+        
+        # Add shiny flag only for shiny detections
+        if is_shiny:
+            prediction["shiny"] = True
+            logger.info(f"✨ SHINY {detection.get('class_name', '').upper()} DETECTED! Roll: {shiny_roll} ✨")
+        
+        # Add emoji if present
+        if detection.get('emoji'):
+            prediction["emoji"] = detection['emoji']
+        
+        predictions.append(prediction)
+    
+    return {
+        "service": "yolo",
+        "status": "success",
+        "predictions": predictions,
+        "metadata": {
+            "processing_time": round(processing_time, 3),
+            "model_info": {
+                "framework": "Ultralytics YOLOv8"
+            }
+        }
+    }
 
 def process_yolo_results(results) -> List[Dict[str, Any]]:
     """Process YOLO model results into structured format"""
@@ -357,25 +395,35 @@ def process_yolo_results(results) -> List[Dict[str, Any]]:
     # Limit number of detections
     return filtered_detections[:MAX_DETECTIONS]
 
-def detect_objects(image_path: str, cleanup: bool = True) -> Dict[str, Any]:
-    """Detect objects in image using YOLOv8"""
-    if not model:
-        return {"error": "Model not loaded", "status": "error"}
-        
+def process_image_for_yolo(image: Image.Image) -> Dict[str, Any]:
+    """
+    Main processing function - takes PIL Image, returns YOLOv8 detection data
+    This is the core business logic, separated from HTTP concerns
+    Uses pure in-memory processing with PIL Image support
+    """
+    start_time = time.time()
+    
     try:
-        # Validate file
-        if not os.path.exists(image_path):
-            return {"error": "Image file not found", "status": "error"}
+        if not model:
+            raise ValueError("Model not loaded")
+        
+        # Ensure image is in RGB mode
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
             
-        if not validate_file_size(image_path):
-            return {"error": "File too large", "status": "error"}
+        # Get image dimensions
+        image_width, image_height = image.size
             
-        # Run YOLO detection with FP16 optimization
-        logger.info(f"Running YOLO detection on: {image_path}")
+        # Run YOLO detection on PIL Image directly
+        logger.debug(f"Running YOLO detection on PIL Image ({image_width}x{image_height})")
+        
+        # Convert PIL Image to numpy array for YOLO
+        import numpy as np
+        image_array = np.array(image)
         
         # Use standard FP32 inference for stability
         results = model.predict(
-            image_path,
+            image_array,
             conf=CONFIDENCE_THRESHOLD,
             iou=IOU_THRESHOLD,
             verbose=False,
@@ -385,46 +433,36 @@ def detect_objects(image_path: str, cleanup: bool = True) -> Dict[str, Any]:
         # Process results
         detections = process_yolo_results(results)
         
-        logger.info(f"Detected {len(detections)} objects")
+        logger.debug(f"Detected {len(detections)} objects")
         
-        # Get image dimensions for context
-        try:
-            with Image.open(image_path) as img:
-                image_width, image_height = img.size
-        except Exception:
-            image_width = image_height = None
-            
-        # Build response
-        response = {
-            "YOLO": {
+        processing_time = round(time.time() - start_time, 3)
+        
+        return {
+            "success": True,
+            "data": {
                 "detections": detections,
                 "total_detections": len(detections),
                 "image_dimensions": {
                     "width": image_width,
                     "height": image_height
-                } if image_width and image_height else None,
+                },
                 "model_info": {
                     "confidence_threshold": CONFIDENCE_THRESHOLD,
                     "iou_threshold": IOU_THRESHOLD,
                     "device": str(model.device) if hasattr(model, 'device') else device
-                },
-                "status": "success"
-            }
+                }
+            },
+            "processing_time": processing_time
         }
         
-        # Cleanup (only for temporary files)
-        if cleanup:
-            try:
-                if os.path.exists(image_path) and image_path.startswith(UPLOAD_FOLDER):
-                    os.remove(image_path)
-            except Exception as e:
-                logger.warning(f"Failed to cleanup file {image_path}: {e}")
-            
-        return response
-        
     except Exception as e:
-        logger.error(f"Error detecting objects in {image_path}: {e}")
-        return {"error": f"Detection failed: {str(e)}", "status": "error"}
+        processing_time = round(time.time() - start_time, 3)
+        logger.error(f"Error during YOLO detection: {e}")
+        return {
+            "success": False,
+            "error": f"Detection failed: {str(e)}",
+            "processing_time": processing_time
+        }
 
 # Flask app setup
 app = Flask(__name__)
@@ -449,9 +487,32 @@ def internal_error(e):
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    model_status = "loaded" if model else "not_loaded"
-    model_info = {}
+    # Test if YOLOv8 model is actually working
+    try:
+        if not model:
+            raise ValueError("Model not loaded")
+        
+        # Test with a small dummy image
+        test_image = Image.new('RGB', (100, 100), color='blue')
+        test_result = process_image_for_yolo(test_image)
+        
+        if not test_result.get('success'):
+            raise ValueError(f"Model test failed: {test_result.get('error')}")
+        
+        model_status = "loaded"
+        status = "healthy"
+        
+    except Exception as e:
+        model_status = f"error: {str(e)}"
+        status = "unhealthy"
+        
+        return jsonify({
+            "status": status,
+            "reason": f"YOLOv8 model error: {str(e)}",
+            "service": "YOLOv8 Object Detection"
+        }), 503
     
+    model_info = {}
     if model:
         try:
             model_info = {
@@ -460,14 +521,25 @@ def health_check():
             }
         except Exception:
             pass
-            
+    
     return jsonify({
-        "status": "healthy",
-        "model_status": model_status,
-        "model_info": model_info,
+        "status": status,
+        "service": "YOLOv8 Object Detection",
+        "model": {
+            "status": model_status,
+            **model_info
+        },
         "confidence_threshold": CONFIDENCE_THRESHOLD,
         "iou_threshold": IOU_THRESHOLD,
-        "supported_classes": len(COCO_CLASSES)
+        "supported_classes": len(COCO_CLASSES),
+        "endpoints": [
+            "GET /health - Health check",
+            "GET,POST /analyze - Unified endpoint (URL/file/upload)",
+            "GET /v3/analyze - V3 compatibility",
+            "GET /classes - Get supported classes",
+            "GET /v2/analyze - V2 compatibility (deprecated)",
+            "GET /v2/analyze_file - V2 compatibility (deprecated)"
+        ]
     })
 
 @app.route('/classes', methods=['GET'])
@@ -483,240 +555,141 @@ def get_classes():
 # V2 Compatibility Routes - Translate parameters and call V3
 @app.route('/v2/analyze', methods=['GET'])
 def analyze_v2_compat():
-    """V2 compatibility - translate parameters to V3 format"""
-    import time
-    from flask import request
-    
-    # Get V2 parameter
+    """V2 compatibility - translate parameters to new analyze format"""
     image_url = request.args.get('image_url')
     
     if image_url:
-        # Create new request args with V3 parameter name
-        new_args = request.args.copy()
-        new_args = new_args.to_dict()
-        new_args['url'] = image_url
-        del new_args['image_url']
-        
-        # Create a mock request object for V3
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        # Parameter translation: image_url -> url
+        new_args = {'url': image_url}
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        # No parameters - let V3 handle the error
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        # Let new analyze handle validation errors
+        with app.test_request_context('/analyze'):
+            return analyze()
 
 @app.route('/v2/analyze_file', methods=['GET'])
 def analyze_file_v2_compat():
-    """V2 file compatibility - translate parameters to V3 format"""
-    import time
-    from flask import request
-    
-    # Get V2 parameter
+    """V2 file compatibility - translate parameters to new analyze format"""
     file_path = request.args.get('file_path')
     
     if file_path:
-        # Create new request args with V3 parameter name
-        new_args = request.args.copy().to_dict()
-        new_args['file'] = file_path
-        del new_args['file_path']
-        
-        # Create a mock request object for V3
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        # Parameter translation: file_path -> file
+        new_args = {'file': file_path}
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        # No parameters - let V3 handle the error
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        with app.test_request_context('/analyze'):
+            return analyze()
 
-@app.route('/v3/analyze', methods=['GET'])
-def analyze_v3():
-    """Unified V3 API endpoint for both URL and file path analysis"""
-    import time
+@app.route('/analyze', methods=['GET', 'POST'])
+def analyze():
+    """Unified analyze endpoint - orchestrates input handling and processing"""
     start_time = time.time()
     
-    try:
-        # Get input parameters - support both url and file
-        url = request.args.get('url')
-        file = request.args.get('file')
-        
-        # Validate input - exactly one parameter must be provided
-        if not url and not file:
-            return jsonify({
-                "service": "yolo",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": "Must provide either url or file parameter"},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 400
-        
-        if url and file:
-            return jsonify({
-                "service": "yolo",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": "Cannot provide both url and file parameters"},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 400
-        
-        # Handle URL input
-        if url:
-            filepath = None
-            try:
-                # Validate URL
-                parsed_url = urlparse(url)
-                if not parsed_url.scheme or not parsed_url.netloc:
-                    return jsonify({
-                        "service": "yolo",
-                        "status": "error",
-                        "predictions": [],
-                        "error": {"message": "Invalid URL format"},
-                        "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                    }), 400
-                
-                # Download image
-                filename = uuid.uuid4().hex + ".jpg"
-                filepath = os.path.join(UPLOAD_FOLDER, filename)
-                
-                response = requests.get(url, timeout=10, stream=True)
-                response.raise_for_status()
-                
-                content_type = response.headers.get('content-type', '')
-                if not content_type.startswith('image/'):
-                    return jsonify({
-                        "service": "yolo",
-                        "status": "error",
-                        "predictions": [],
-                        "error": {"message": "URL does not point to an image"},
-                        "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                    }), 400
-                
-                with open(filepath, 'wb') as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                
-                if not validate_file_size(filepath):
-                    os.remove(filepath)
-                    return jsonify({
-                        "service": "yolo",
-                        "status": "error",
-                        "predictions": [],
-                        "error": {"message": "Downloaded file too large"},
-                        "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                    }), 400
-                
-                # Detect objects using existing function
-                result = detect_objects(filepath)
-                filepath = None  # detect_objects handles cleanup
-                
-            except requests.exceptions.RequestException as e:
-                if filepath and os.path.exists(filepath):
-                    os.remove(filepath)
-                return jsonify({
-                    "service": "yolo",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": "Failed to download image"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 400
-            except Exception as e:
-                if filepath and os.path.exists(filepath):
-                    os.remove(filepath)
-                return jsonify({
-                    "service": "yolo",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": "Error processing image"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 500
-        
-        # Handle file input
-        if file:
-            # Validate file path
-            if not os.path.exists(file):
-                return jsonify({
-                    "service": "yolo",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": f"File not found: {file}"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 404
-            
-            if not is_allowed_file(file):
-                return jsonify({
-                    "service": "yolo",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": "File type not allowed"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 400
-            
-            # Detect objects directly from file (no cleanup needed - we don't own the file)
-            result = detect_objects(file, cleanup=False)
-        
-        # Process results (common for both URL and file)
-        if result.get('status') == 'error':
-            return jsonify({
-                "service": "yolo",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": result.get('error', 'Detection failed')},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 500
-        
-        # Convert to v3 format - extract YOLO data and create predictions
-        yolo_data = result.get('YOLO', {})
-        detections = yolo_data.get('detections', [])
-        
-        # Create unified prediction format
-        predictions = []
-        for detection in detections:
-            bbox = detection.get('bbox', {})
-            is_shiny, shiny_roll = check_shiny()
-            
-            prediction = {
-                "label": detection.get('class_name', ''),
-                "confidence": float(detection.get('confidence', 0)),
-                "bbox": {
-                    "x": bbox.get('x', 0),
-                    "y": bbox.get('y', 0),
-                    "width": bbox.get('width', 0),
-                    "height": bbox.get('height', 0)
-                }
-            }
-            
-            # Add shiny flag only for shiny detections
-            if is_shiny:
-                prediction["shiny"] = True
-                logger.info(f"✨ SHINY {detection.get('class_name', '').upper()} DETECTED! Roll: {shiny_roll} ✨")
-            
-            # Add emoji if present
-            if detection.get('emoji'):
-                prediction["emoji"] = detection['emoji']
-            
-            predictions.append(prediction)
-        
-        # Return unified v3 format
-        return jsonify({
-            "service": "yolo",
-            "status": "success",
-            "predictions": predictions,
-            "metadata": {
-                "processing_time": round(time.time() - start_time, 3),
-                "model_info": {
-                    "framework": "Ultralytics YOLOv8"
-                }
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"V3 API error: {e}")
+    def error_response(message: str, status_code: int = 400):
         return jsonify({
             "service": "yolo",
             "status": "error",
             "predictions": [],
-            "error": {"message": f"Internal error: {str(e)}"},
+            "error": {"message": message},
             "metadata": {"processing_time": round(time.time() - start_time, 3)}
-        }), 500
+        }), status_code
+    
+    try:
+        # Step 1: Get image into memory from any source
+        if request.method == 'POST' and 'file' in request.files:
+            # Handle file upload
+            uploaded_file = request.files['file']
+            if uploaded_file.filename == '':
+                return error_response("No file selected")
+            
+            # Validate file size
+            uploaded_file.seek(0, 2)  # Seek to end
+            file_size = uploaded_file.tell()
+            uploaded_file.seek(0)     # Seek back to beginning
+            
+            if file_size > MAX_FILE_SIZE:
+                return error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB")
+            
+            try:
+                from io import BytesIO
+                file_data = uploaded_file.read()
+                image = Image.open(BytesIO(file_data)).convert('RGB')
+            except Exception as e:
+                return error_response(f"Failed to process uploaded image: {str(e)}", 500)
+        
+        else:
+            # Handle URL or file parameter
+            url = request.args.get('url')
+            file_path = request.args.get('file')
+            
+            if not url and not file_path:
+                return error_response("Must provide either 'url' or 'file' parameter, or POST a file")
+            
+            if url and file_path:
+                return error_response("Cannot provide both 'url' and 'file' parameters")
+            
+            if url:
+                # Download from URL directly into memory
+                try:
+                    parsed_url = urlparse(url)
+                    if not parsed_url.scheme or not parsed_url.netloc:
+                        return error_response("Invalid URL format")
+                    
+                    response = requests.get(url, timeout=10)
+                    response.raise_for_status()
+                    
+                    content_type = response.headers.get('content-type', '')
+                    if not content_type.startswith('image/'):
+                        return error_response("URL does not point to an image")
+                    
+                    if len(response.content) > MAX_FILE_SIZE:
+                        return error_response("Downloaded file too large")
+                    
+                    from io import BytesIO
+                    image = Image.open(BytesIO(response.content)).convert('RGB')
+                    
+                except Exception as e:
+                    return error_response(f"Failed to download/process image: {str(e)}")
+            else:  # file_path
+                # Load file directly into memory
+                if not os.path.exists(file_path):
+                    return error_response(f"File not found: {file_path}")
+                
+                if not is_allowed_file(file_path):
+                    return error_response("File type not allowed")
+                
+                try:
+                    image = Image.open(file_path).convert('RGB')
+                except Exception as e:
+                    return error_response(f"Failed to load image file: {str(e)}", 500)
+        
+        # Step 2: Process the image (unified processing path)
+        processing_result = process_image_for_yolo(image)
+        
+        # Step 3: Handle processing result
+        if not processing_result["success"]:
+            return error_response(processing_result["error"], 500)
+        
+        # Step 4: Create response
+        response = create_yolo_response(
+            processing_result["data"],
+            processing_result["processing_time"]
+        )
+        
+        return jsonify(response)
+        
+    except ValueError as e:
+        return error_response(str(e))
+    except Exception as e:
+        return error_response(f"Internal error: {str(e)}", 500)
+
+@app.route('/v3/analyze', methods=['GET', 'POST'])
+def analyze_v3_compat():
+    """V3 compatibility - calls new analyze function directly"""
+    return analyze()
+
 
 if __name__ == '__main__':
     # Initialize model

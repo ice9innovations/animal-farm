@@ -311,17 +311,19 @@ def lookup_emoji(tag: str, score: float) -> List[Dict[str, Any]]:
         logger.warning(f"Local emoji service lookup failed for '{original_tag}': {e}")
         return []
 
-def preprocess_image(image_path: str) -> Optional[torch.Tensor]:
-    """Preprocess image for CLIP model"""
+def preprocess_image(image: Image.Image) -> Optional[torch.Tensor]:
+    """Preprocess PIL Image for CLIP model"""
     try:
-        image = Image.open(image_path).convert("RGB")
+        # Ensure RGB format
+        if image.mode != 'RGB':
+            image = image.convert("RGB")
         return preprocess(image).unsqueeze(0).to(device)
     except Exception as e:
-        logger.error(f"Error preprocessing image {image_path}: {e}")
+        logger.error(f"Error preprocessing image: {e}")
         return None
 
-def compute_similarity(image_path: str) -> Optional[torch.Tensor]:
-    """Compute similarity between image and text labels"""
+def compute_similarity(image: Image.Image) -> Optional[torch.Tensor]:
+    """Compute similarity between PIL Image and text labels"""
     logger.info("Checking model and label features...")
     if model is None:
         logger.error("Model not initialized")
@@ -333,7 +335,7 @@ def compute_similarity(image_path: str) -> Optional[torch.Tensor]:
     try:
         with torch.no_grad():
             logger.info("Preprocessing image...")
-            image_tensor = preprocess_image(image_path)
+            image_tensor = preprocess_image(image)
             if image_tensor is None:
                 return None
                 
@@ -454,6 +456,79 @@ def validate_file_size(file_path: str) -> bool:
     except OSError:
         return False
 
+def process_image_for_classification(image: Image.Image) -> Dict[str, Any]:
+    """
+    Main processing function - takes PIL Image, returns classification data
+    This is the core business logic, separated from HTTP concerns
+    """
+    try:
+        # Classify using existing function
+        result = classify_image(image)
+        
+        if result.get('status') == 'error':
+            return {
+                "success": False,
+                "error": result.get('error', 'Classification failed')
+            }
+        
+        # Extract predictions and emoji matches
+        predictions = result.get('predictions', [])
+        emoji_matches = result.get('emoji_matches', [])
+        
+        return {
+            "success": True,
+            "predictions": predictions,
+            "emoji_matches": emoji_matches
+        }
+        
+    except Exception as e:
+        logger.error(f"Error processing image for classification: {e}")
+        return {
+            "success": False,
+            "error": f"Processing failed: {str(e)}"
+        }
+
+def create_clip_response(predictions: List[Dict], emoji_matches: List[Dict], processing_time: float) -> Dict[str, Any]:
+    """Create standardized CLIP response with emoji mappings"""
+    # Create emoji map for quick lookup
+    emoji_map = {}
+    for match in emoji_matches:
+        emoji_map[match["keyword"]] = match["emoji"]
+    
+    # Create unified prediction format
+    formatted_predictions = []
+    for item in predictions:
+        is_shiny, shiny_roll = check_shiny()
+        
+        prediction = {
+            "label": item.get('label', ''),
+            "confidence": round(float(item.get('confidence', 0)), 3)
+        }
+        
+        # Add shiny flag only for shiny detections
+        if is_shiny:
+            prediction["shiny"] = True
+            logger.info(f"✨ SHINY {item.get('label', '').upper()} DETECTED! Roll: {shiny_roll} ✨")
+        
+        # Add emoji if found
+        label = item.get('label', '')
+        if label in emoji_map:
+            prediction["emoji"] = emoji_map[label]
+        
+        formatted_predictions.append(prediction)
+    
+    return {
+        "service": "clip",
+        "status": "success",
+        "predictions": formatted_predictions,
+        "metadata": {
+            "processing_time": round(processing_time, 3),
+            "model_info": {
+                "framework": "OpenAI"
+            }
+        }
+    }
+
 def handle_image_input(url: str = None, file: str = None) -> Dict[str, Any]:
     """
     Handle image input from either URL or file path
@@ -521,22 +596,15 @@ def handle_image_input(url: str = None, file: str = None) -> Dict[str, Any]:
         return {"success": True, "filepath": file, "cleanup": False, "error": None}
 
 
-def classify_image(image_path: str, cleanup: bool = True) -> Dict[str, Any]:
-    """Classify image using CLIP model - simplified to match working version"""
+def classify_image(image: Image.Image) -> Dict[str, Any]:
+    """Classify PIL Image using CLIP model"""
     if not model or not labels:
         return {"error": "Model not initialized", "status": "error"}
         
     try:
-        # Validate file
-        if not os.path.exists(image_path):
-            return {"error": "Image file not found", "status": "error"}
-            
-        if not validate_file_size(image_path):
-            return {"error": "File too large", "status": "error"}
-            
         # Use the exact same logic as the working version
         logger.info("Computing similarities...")
-        similarity_scores = compute_similarity(image_path)
+        similarity_scores = compute_similarity(image)
         if similarity_scores is None:
             return {"error": "Failed to compute similarities", "status": "error"}
             
@@ -580,18 +648,10 @@ def classify_image(image_path: str, cleanup: bool = True) -> Dict[str, Any]:
         # Return simple format for V2 processing
         response = {"predictions": predictions, "emoji_matches": all_emoji_matches, "status": "success"}
         
-        # Cleanup (only for temporary files)
-        if cleanup:
-            try:
-                if os.path.exists(image_path) and image_path.startswith(UPLOAD_FOLDER):
-                    os.remove(image_path)
-            except Exception as e:
-                logger.warning(f"Failed to cleanup file {image_path}: {e}")
-            
         return response
         
     except Exception as e:
-        logger.error(f"Error classifying image {image_path}: {e}")
+        logger.error(f"Error classifying image: {e}")
         return {"error": f"Classification failed: {str(e)}", "status": "error"}
 
 # Flask app setup
@@ -625,116 +685,107 @@ def health_check():
         "num_labels": len(labels) if labels else 0
     })
 
-@app.route('/v3/analyze', methods=['GET'])
-def analyze_v3():
-    """Unified V3 API endpoint for both URL and file path analysis"""
+@app.route('/analyze', methods=['GET', 'POST'])
+def analyze():
+    """Unified analyze endpoint - orchestrates input handling and processing"""
     import time
+    from io import BytesIO
     start_time = time.time()
     
-    try:
-        # Get input parameters - support both url and file
-        url = request.args.get('url')
-        file = request.args.get('file')
-        
-        # Handle image input using shared helper
-        image_result = handle_image_input(url=url, file=file)
-        
-        if not image_result["success"]:
-            return jsonify({
-                "service": "clip",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": image_result["error"]},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 400
-        
-        filepath = image_result["filepath"]
-        cleanup = image_result["cleanup"]
-        
-        try:
-            # Classify using existing function
-            result = classify_image(filepath, cleanup=cleanup)
-            
-        except Exception as e:
-            logger.error(f"Error classifying image {filepath}: {e}")
-            return jsonify({
-                "service": "clip",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": f"Classification failed: {str(e)}"},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 500
-        finally:
-            # Ensure cleanup of temporary file if needed
-            if cleanup and filepath and os.path.exists(filepath):
-                try:
-                    os.remove(filepath)
-                    logger.debug(f"Cleaned up temporary file: {filepath}")
-                except Exception as e:
-                    logger.warning(f"Failed to cleanup file {filepath}: {e}")
-        
-        # Common processing for both input types
-        if result.get('status') == 'error':
-            return jsonify({
-                "service": "clip",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": result.get('error', 'Classification failed')},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 500
-        
-        # Convert to v3 format (same as v2 format for CLIP)
-        raw_predictions = result.get('predictions', [])
-        emoji_matches = result.get('emoji_matches', [])
-        
-        # Create emoji map for quick lookup
-        emoji_map = {}
-        for match in emoji_matches:
-            emoji_map[match["keyword"]] = match["emoji"]
-        
-        # Create unified prediction format
-        predictions = []
-        for item in raw_predictions:
-            is_shiny, shiny_roll = check_shiny()
-            
-            prediction = {
-                "label": item.get('label', ''),
-                "confidence": round(float(item.get('confidence', 0)), 3)
-            }
-            
-            # Add shiny flag only for shiny detections
-            if is_shiny:
-                prediction["shiny"] = True
-                logger.info(f"✨ SHINY {item.get('label', '').upper()} DETECTED! Roll: {shiny_roll} ✨")
-            
-            # Add emoji if found
-            label = item.get('label', '')
-            if label in emoji_map:
-                prediction["emoji"] = emoji_map[label]
-            
-            predictions.append(prediction)
-        
-        return jsonify({
-            "service": "clip",
-            "status": "success",
-            "predictions": predictions,
-            "metadata": {
-                "processing_time": round(time.time() - start_time, 3),
-                "model_info": {
-                    "framework": "OpenAI"
-                }
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"V3 unified API error: {e}")
+    def error_response(message: str, status_code: int = 400):
         return jsonify({
             "service": "clip",
             "status": "error",
             "predictions": [],
-            "error": {"message": f"Internal error: {str(e)}"},
+            "error": {"message": message},
             "metadata": {"processing_time": round(time.time() - start_time, 3)}
-        }), 500
+        }), status_code
+    
+    try:
+        image = None
+        
+        # Step 1: Get image into memory from any source
+        if request.method == 'POST' and 'file' in request.files:
+            # Handle file upload - direct to memory
+            uploaded_file = request.files['file']
+            if uploaded_file.filename == '':
+                return error_response("No file selected")
+            
+            if not is_allowed_file(uploaded_file.filename):
+                return error_response("File type not allowed")
+            
+            # Read directly into memory
+            file_data = uploaded_file.read()
+            if len(file_data) > MAX_FILE_SIZE:
+                return error_response("File too large")
+            
+            image = Image.open(BytesIO(file_data)).convert('RGB')
+        
+        else:
+            # Handle URL or file parameter
+            url = request.args.get('url')
+            file = request.args.get('file')
+            
+            if not url and not file:
+                return error_response("Must provide either url or file parameter, or POST a file")
+            
+            if url and file:
+                return error_response("Cannot provide both url and file parameters")
+            
+            if url:
+                # Download directly to memory
+                response = requests.get(url, timeout=10)
+                response.raise_for_status()
+                
+                content_type = response.headers.get('content-type', '')
+                if not content_type.startswith('image/'):
+                    return error_response("URL does not point to an image")
+                
+                if len(response.content) > MAX_FILE_SIZE:
+                    return error_response("Downloaded file too large")
+                
+                image = Image.open(BytesIO(response.content)).convert('RGB')
+                
+            else:  # file parameter
+                # Read file directly to memory
+                if not os.path.exists(file):
+                    return error_response(f"File not found: {file}")
+                
+                if not is_allowed_file(file):
+                    return error_response("File type not allowed")
+                
+                if not validate_file_size(file):
+                    return error_response("File too large")
+                
+                image = Image.open(file).convert('RGB')
+        
+        # Step 2: Process the image (unified processing path)
+        processing_result = process_image_for_classification(image)
+        
+        # Step 3: Handle processing result
+        if not processing_result["success"]:
+            return error_response(processing_result["error"], 500)
+        
+        # Step 4: Create response
+        response = create_clip_response(
+            processing_result["predictions"],
+            processing_result["emoji_matches"],
+            time.time() - start_time
+        )
+        
+        return jsonify(response)
+        
+    except ValueError as e:
+        return error_response(str(e))
+    except Exception as e:
+        logger.error(f"Analyze API error: {e}")
+        return error_response(f"Internal error: {str(e)}", 500)
+
+@app.route('/v3/analyze', methods=['GET'])
+def analyze_v3_compat():
+    """V3 compatibility - redirect to new analyze endpoint"""
+    with app.test_request_context('/analyze', query_string=request.args):
+        return analyze()
 
 @app.route('/v3/score', methods=['GET'])
 def score_caption_v3():
@@ -856,13 +907,13 @@ def analyze_file_v2_compat():
         # Create new request args with V3 parameter name
         new_args = {'file': file_path}
         
-        # Create a mock request object for V3
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        # Create a mock request object for new analyze endpoint
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        # No parameters - let V3 handle the error
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        # No parameters - let analyze handle the error
+        with app.test_request_context('/analyze'):
+            return analyze()
 
 @app.route('/v2/analyze/', methods=['GET'])
 @app.route('/v2/analyze', methods=['GET'])
@@ -878,13 +929,13 @@ def analyze_v2_compat():
         new_args['url'] = image_url
         del new_args['image_url']
         
-        # Create a mock request object for V3
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        # Create a mock request object for new analyze endpoint
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        # No parameters - let V3 handle the error
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        # No parameters - let analyze handle the error
+        with app.test_request_context('/analyze'):
+            return analyze()
 
 
 if __name__ == '__main__':

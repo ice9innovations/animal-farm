@@ -163,13 +163,13 @@ def initialize_inception_model() -> bool:
         logger.error(f"Failed to load Inception v3 model: {e}")
         return False
 
-def preprocess_image(image_path: str) -> Optional[tf.Tensor]:
-    """Preprocess image for Inception v3"""
+def preprocess_image_from_pil(image: Image.Image) -> Optional[tf.Tensor]:
+    """Preprocess PIL Image for Inception v3 (no file required)"""
     try:
-        # Load and preprocess image
-        image = tf.keras.preprocessing.image.load_img(
-            image_path, target_size=(299, 299)
-        )
+        # Resize PIL Image directly
+        image = image.resize((299, 299), Image.Resampling.LANCZOS)
+        
+        # Convert PIL Image to array
         img_array = tf.keras.preprocessing.image.img_to_array(image)
         img_array = tf.expand_dims(img_array, axis=0)
         img_array = tf.keras.applications.inception_v3.preprocess_input(img_array)
@@ -177,8 +177,146 @@ def preprocess_image(image_path: str) -> Optional[tf.Tensor]:
         return img_array
         
     except Exception as e:
-        logger.error(f"Error preprocessing image {image_path}: {e}")
+        logger.error(f"Error preprocessing PIL image: {e}")
         return None
+
+def process_image_for_classification(image: Image.Image) -> dict:
+    """
+    Main processing function - takes PIL Image, returns classification data
+    This is the core business logic, separated from HTTP concerns
+    Uses pure in-memory processing
+    """
+    start_time = time.time()
+    
+    if not model:
+        return {
+            "success": False,
+            "error": "Inception v3 model not loaded"
+        }
+    
+    try:
+        # Ensure image is in RGB mode
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        # Preprocess image
+        img_array = preprocess_image_from_pil(image)
+        if img_array is None:
+            return {
+                "success": False,
+                "error": "Failed to preprocess image"
+            }
+        
+        # Run classification
+        classification_start = time.time()
+        predictions = model.predict(img_array, verbose=0)
+        classification_time = time.time() - classification_start
+        
+        # Decode predictions with higher top count for better coverage
+        decoded_predictions = tf.keras.applications.inception_v3.decode_predictions(
+            predictions, top=100
+        )[0]
+        
+        # Process results with deduplication by both emoji and class name
+        classifications = []
+        seen_emojis = set()
+        seen_classes = set()
+        
+        for i, (class_id, class_name, confidence) in enumerate(decoded_predictions):
+            if confidence >= CONFIDENCE_THRESHOLD:
+                # Skip if we've already seen this class
+                if class_name in seen_classes:
+                    continue
+                    
+                try:
+                    emoji = lookup_emoji(class_name)
+                    
+                    # Only include if we haven't seen this emoji before
+                    if emoji not in seen_emojis:
+                        classification = {
+                            "class_id": class_id,
+                            "class_name": class_name,
+                            "confidence": round(float(confidence), 3),
+                            "rank": i + 1,
+                            "emoji": emoji
+                        }
+                        classifications.append(classification)
+                        seen_emojis.add(emoji)
+                        seen_classes.add(class_name)
+                except RuntimeError as e:
+                    return {
+                        "success": False,
+                        "error": f"Classification failed due to emoji lookup failure: {e}"
+                    }
+        
+        logger.info(f"Found {len(classifications)} classifications in {classification_time:.2f}s")
+        
+        # Get image dimensions from PIL Image
+        image_width, image_height = image.size
+        
+        return {
+            "success": True,
+            "data": {
+                "classifications": classifications,
+                "total_classifications": len(classifications),
+                "image_dimensions": {
+                    "width": image_width,
+                    "height": image_height
+                },
+                "model_info": {
+                    "confidence_threshold": CONFIDENCE_THRESHOLD,
+                    "classification_time": round(classification_time, 3),
+                    "framework": "TensorFlow",
+                    "model": "Inception v3"
+                }
+            },
+            "processing_time": time.time() - start_time
+        }
+        
+    except Exception as e:
+        logger.error(f"Classification processing error: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Classification failed: {str(e)}",
+            "processing_time": time.time() - start_time
+        }
+
+def create_inception_response(data: dict, processing_time: float) -> dict:
+    """Create standardized inception v3 response"""
+    classifications = data.get('classifications', [])
+    
+    # Create unified prediction format
+    predictions = []
+    for classification in classifications:
+        is_shiny, shiny_roll = check_shiny()
+        
+        prediction = {
+            "confidence": round(float(classification.get('confidence', 0)), 3),
+            "label": classification.get('class_name', '')
+        }
+        
+        # Add shiny flag only for shiny detections
+        if is_shiny:
+            prediction["shiny"] = True
+            logger.info(f"✨ SHINY {classification.get('class_name', '').upper()} DETECTED! Roll: {shiny_roll} ✨")
+        
+        # Add emoji if present
+        if classification.get('emoji'):
+            prediction["emoji"] = classification['emoji']
+        
+        predictions.append(prediction)
+    
+    return {
+        "service": "inception",
+        "status": "success",
+        "predictions": predictions,
+        "metadata": {
+            "processing_time": round(processing_time, 3),
+            "model_info": {
+                "framework": "TensorFlow"
+            }
+        }
+    }
 
 def is_allowed_file(filename: str) -> bool:
     """Check if file extension is allowed"""
@@ -317,11 +455,16 @@ def internal_error(e):
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    model_status = "loaded" if model else "not_loaded"
+    if not model:
+        return jsonify({
+            "status": "unhealthy",
+            "reason": "Inception v3 model not loaded",
+            "framework": "TensorFlow"
+        }), 503
     
     return jsonify({
         "status": "healthy",
-        "model_status": model_status,
+        "model_status": "loaded",
         "confidence_threshold": CONFIDENCE_THRESHOLD,
         "imagenet_classes_loaded": "handled_by_tensorflow",
         "framework": "TensorFlow",
@@ -338,200 +481,161 @@ def get_classes():
         "model": "Inception v3"
     })
 
+@app.route('/analyze', methods=['GET', 'POST'])
+def analyze():
+    """Unified analyze endpoint - orchestrates input handling and processing"""
+    start_time = time.time()
+    
+    def error_response(message: str, status_code: int = 400):
+        return jsonify({
+            "service": "inception",
+            "status": "error",
+            "predictions": [],
+            "error": {"message": message},
+            "metadata": {"processing_time": round(time.time() - start_time, 3)}
+        }), status_code
+    
+    try:
+        # Step 1: Get image into memory from any source
+        if request.method == 'POST' and 'file' in request.files:
+            # Handle file upload
+            uploaded_file = request.files['file']
+            if uploaded_file.filename == '':
+                return error_response("No file selected")
+            
+            # Validate file size
+            uploaded_file.seek(0, 2)  # Seek to end
+            file_size = uploaded_file.tell()
+            uploaded_file.seek(0)     # Seek back to beginning
+            
+            if file_size > MAX_FILE_SIZE:
+                return error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB")
+            
+            # Validate file type
+            if not is_allowed_file(uploaded_file.filename):
+                return error_response("File type not allowed")
+            
+            try:
+                from io import BytesIO
+                file_data = uploaded_file.read()
+                image = Image.open(BytesIO(file_data)).convert('RGB')
+            except Exception as e:
+                return error_response(f"Failed to process uploaded image: {str(e)}", 500)
+        
+        else:
+            # Handle URL or file parameter
+            url = request.args.get('url')
+            file_path = request.args.get('file')
+            
+            if not url and not file_path:
+                return error_response("Must provide either 'url' or 'file' parameter, or POST a file")
+            
+            if url and file_path:
+                return error_response("Cannot provide both 'url' and 'file' parameters")
+            
+            if url:
+                # Download from URL directly into memory
+                try:
+                    parsed_url = urlparse(url)
+                    if not parsed_url.scheme or not parsed_url.netloc:
+                        return error_response("Invalid URL format")
+                    
+                    response = requests.get(url, timeout=10, stream=True)
+                    response.raise_for_status()
+                    
+                    content_type = response.headers.get('content-type', '')
+                    if not content_type.startswith('image/'):
+                        return error_response("URL does not point to an image")
+                    
+                    # Check content length if provided
+                    content_length = response.headers.get('content-length')
+                    if content_length and int(content_length) > MAX_FILE_SIZE:
+                        return error_response("Downloaded file too large")
+                    
+                    from io import BytesIO
+                    image_data = BytesIO()
+                    for chunk in response.iter_content(chunk_size=8192):
+                        image_data.write(chunk)
+                        if image_data.tell() > MAX_FILE_SIZE:
+                            return error_response("Downloaded file too large")
+                    
+                    image_data.seek(0)
+                    image = Image.open(image_data).convert('RGB')
+                    
+                except Exception as e:
+                    return error_response(f"Failed to download/process image: {str(e)}")
+            else:  # file_path
+                # Load file directly into memory
+                if not os.path.exists(file_path):
+                    return error_response(f"File not found: {file_path}")
+                
+                if not is_allowed_file(file_path):
+                    return error_response("File type not allowed")
+                
+                if not validate_file_size(file_path):
+                    return error_response("File too large")
+                
+                try:
+                    image = Image.open(file_path).convert('RGB')
+                except Exception as e:
+                    return error_response(f"Failed to load image file: {str(e)}", 500)
+        
+        # Step 2: Process the image (unified processing path)
+        processing_result = process_image_for_classification(image)
+        
+        # Step 3: Handle processing result
+        if not processing_result["success"]:
+            return error_response(processing_result["error"], 500)
+        
+        # Step 4: Create response
+        response = create_inception_response(
+            processing_result["data"],
+            processing_result["processing_time"]
+        )
+        
+        return jsonify(response)
+        
+    except ValueError as e:
+        return error_response(str(e))
+    except Exception as e:
+        logger.error(f"Analyze API error: {e}")
+        return error_response(f"Internal error: {str(e)}", 500)
+
+@app.route('/v3/analyze', methods=['GET', 'POST'])
+def analyze_v3_compat():
+    """V3 compatibility - calls new analyze function directly"""
+    return analyze()
+
 @app.route('/v2/analyze_file', methods=['GET'])
 def analyze_file_v2():
     """V2 API compatibility endpoint - translates file_path to file parameter"""
-    # Get file_path parameter and translate to file parameter for V3
     file_path = request.args.get('file_path')
-    if not file_path:
-        return jsonify({
-            "metadata": {"processing_time": 0.001},
-            "predictions": [],
-            "service": "inception",
-            "status": "error",
-            "error": {"message": "Missing file_path parameter"}
-        }), 400
     
-    # Use Flask's test_request_context to call V3 endpoint internally
-    with app.test_request_context(f'/v3/analyze?file={file_path}'):
-        return analyze_v3()
+    if file_path:
+        new_args = {'file': file_path}
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
+    else:
+        with app.test_request_context('/analyze'):
+            return analyze()
 
 @app.route('/v2/analyze', methods=['GET'])
 def analyze_v2():
     """V2 API compatibility endpoint - translates image_url to url parameter"""
-    # Get image_url parameter and translate to url parameter for V3
     image_url = request.args.get('image_url')
-    if not image_url:
-        return jsonify({
-            "metadata": {"processing_time": 0.001},
-            "predictions": [],
-            "service": "inception",
-            "status": "error",
-            "error": {"message": "Missing image_url parameter"}
-        }), 400
     
-    # Use Flask's test_request_context to call V3 endpoint internally
-    with app.test_request_context(f'/v3/analyze?url={image_url}'):
-        return analyze_v3()
+    if image_url:
+        new_args = request.args.copy().to_dict()
+        new_args['url'] = image_url
+        if 'image_url' in new_args:
+            del new_args['image_url']
+        
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
+    else:
+        with app.test_request_context('/analyze'):
+            return analyze()
 
-@app.route('/v3/analyze', methods=['GET'])
-def analyze_v3():
-    """V3 API unified endpoint - accepts both URL and file path"""
-    import time
-    start_time = time.time()
-    
-    try:
-        # Get parameters
-        image_url = request.args.get('url')
-        file_path = request.args.get('file')
-        
-        # Validate input parameters
-        if not image_url and not file_path:
-            return jsonify({
-                "metadata": {"processing_time": round(time.time() - start_time, 3)},
-                "predictions": [],
-                "service": "inception",
-                "status": "error",
-                "error": {"message": "Either 'url' or 'file' parameter is required"}
-            }), 400
-            
-        if image_url and file_path:
-            return jsonify({
-                "metadata": {"processing_time": round(time.time() - start_time, 3)},
-                "predictions": [],
-                "service": "inception", 
-                "status": "error",
-                "error": {"message": "Cannot provide both 'url' and 'file' parameters"}
-            }), 400
-        
-        # Handle URL input
-        if image_url:
-            filepath = None
-            try:
-                parsed_url = urlparse(image_url)
-                if not parsed_url.scheme or not parsed_url.netloc:
-                    raise ValueError("Invalid URL format")
-                
-                # Download image
-                filename = uuid.uuid4().hex + ".jpg"
-                filepath = os.path.join(UPLOAD_FOLDER, filename)
-                
-                response = requests.get(image_url, timeout=10, stream=True)
-                response.raise_for_status()
-                
-                content_type = response.headers.get('content-type', '')
-                if not content_type.startswith('image/'):
-                    raise ValueError("URL does not point to an image")
-                
-                with open(filepath, 'wb') as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                
-                # Validate file size
-                if os.path.getsize(filepath) > MAX_FILE_SIZE:
-                    os.remove(filepath)
-                    raise ValueError("Downloaded file too large")
-                
-                # Classify using existing function
-                result = classify_image(filepath)
-                filepath = None  # classify_image handles cleanup
-                
-            except Exception as e:
-                logger.error(f"Error processing image URL {image_url}: {e}")
-                if filepath and os.path.exists(filepath):
-                    try:
-                        os.remove(filepath)
-                    except Exception:
-                        pass
-                return jsonify({
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)},
-                    "predictions": [],
-                    "service": "inception",
-                    "status": "error",
-                    "error": {"message": f"Failed to process image: {str(e)}"}
-                }), 500
-        
-        # Handle file path input
-        else:  # file_path
-            # Validate file path
-            if not os.path.exists(file_path):
-                return jsonify({
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)},
-                    "predictions": [],
-                    "service": "inception",
-                    "status": "error",
-                    "error": {"message": f"File not found: {file_path}"}
-                }), 404
-            
-            if not is_allowed_file(file_path):
-                return jsonify({
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)},
-                    "predictions": [],
-                    "service": "inception",
-                    "status": "error",
-                    "error": {"message": "File type not allowed"}
-                }), 400
-            
-            # Classify directly from file (no cleanup needed - we don't own the file)
-            result = classify_image(file_path, cleanup=False)
-        
-        # Handle classification errors
-        if result.get('status') == 'error':
-            return jsonify({
-                "metadata": {"processing_time": round(time.time() - start_time, 3)},
-                "predictions": [],
-                "service": "inception",
-                "status": "error",
-                "error": {"message": result.get('error', 'Classification failed')}
-            }), 500
-        
-        # Convert to V3 format
-        inception_data = result.get('INCEPTION', {})
-        classifications = inception_data.get('classifications', [])
-        image_dims = inception_data.get('image_dimensions', {})
-        
-        # Create unified prediction format
-        predictions = []
-        for classification in classifications:
-            is_shiny, shiny_roll = check_shiny()
-            
-            prediction = {
-                "confidence": round(float(classification.get('confidence', 0)), 3),
-                "label": classification.get('class_name', '')
-            }
-            
-            # Add shiny flag only for shiny detections
-            if is_shiny:
-                prediction["shiny"] = True
-                logger.info(f"✨ SHINY {classification.get('class_name', '').upper()} DETECTED! Roll: {shiny_roll} ✨")
-            
-            # Add emoji if present
-            if classification.get('emoji'):
-                prediction["emoji"] = classification['emoji']
-            
-            predictions.append(prediction)
-        
-        return jsonify({
-            "metadata": {
-                "model_info": {
-                    "framework": "TensorFlow"
-                },
-                "processing_time": round(time.time() - start_time, 3)
-            },
-            "predictions": predictions,
-            "service": "inception",
-            "status": "success"
-        })
-        
-    except Exception as e:
-        logger.error(f"V3 API error: {e}")
-        return jsonify({
-            "metadata": {"processing_time": round(time.time() - start_time, 3)},
-            "predictions": [],
-            "service": "inception",
-            "status": "error",
-            "error": {"message": f"Internal error: {str(e)}"}
-        }), 500
 
 
 if __name__ == '__main__':
@@ -540,12 +644,11 @@ if __name__ == '__main__':
     
     model_loaded = initialize_inception_model()
     
-    
     if not model_loaded:
-        logger.error("Failed to load Inception v3 model. Service will run but classification will fail.")
+        logger.error("Failed to load Inception v3 model.")
         logger.error("Please ensure TensorFlow is installed with ImageNet weights.")
-        
-        
+        logger.error("Service cannot function without model. Exiting.")
+        exit(1)
     
     # Determine host based on private mode
     host = "127.0.0.1" if PRIVATE else "0.0.0.0"

@@ -128,26 +128,37 @@ GET /health
 
 ### Analyze Image (Unified Endpoint)
 
-The unified `/v3/analyze` endpoint accepts either URL or file path input:
+The unified `/analyze` endpoint accepts either URL or file path input:
 
 #### Analyze Image from URL
 ```bash
-GET /v3/analyze?url=<image_url>
+GET /analyze?url=<image_url>
 ```
 
 **Example:**
 ```bash
-curl "http://localhost:7777/v3/analyze?url=https://example.com/image.jpg"
+curl "http://localhost:7777/analyze?url=https://example.com/image.jpg"
 ```
 
 #### Analyze Image from File Path
 ```bash
-GET /v3/analyze?file=<file_path>
+GET /analyze?file=<file_path>
 ```
 
 **Example:**
 ```bash
-curl "http://localhost:7777/v3/analyze?file=/path/to/image.jpg"
+curl "http://localhost:7777/analyze?file=/path/to/image.jpg"
+```
+
+#### POST Request (File Upload)
+```bash
+POST /analyze
+Content-Type: multipart/form-data
+```
+
+**Example:**
+```bash
+curl -X POST -F "file=@/path/to/image.jpg" http://localhost:7777/analyze
 ```
 
 **Input Validation:**
@@ -286,15 +297,22 @@ import requests
 
 # URL input
 response = requests.get(
-    "http://localhost:7777/v3/analyze",
+    "http://localhost:7777/analyze",
     params={"url": "https://example.com/image.jpg"}
 )
 
 # File input
 response = requests.get(
-    "http://localhost:7777/v3/analyze",
+    "http://localhost:7777/analyze",
     params={"file": "/path/to/image.jpg"}
 )
+
+# POST file upload
+with open('/path/to/image.jpg', 'rb') as f:
+    response = requests.post(
+        "http://localhost:7777/analyze",
+        files={'file': f}
+    )
 
 result = response.json()
 if result["status"] == "success":
@@ -309,13 +327,21 @@ if result["status"] == "success":
 ```javascript
 // URL input
 const response = await fetch(
-  'http://localhost:7777/v3/analyze?url=https://example.com/image.jpg'
+  'http://localhost:7777/analyze?url=https://example.com/image.jpg'
 );
 
 // File input
 const response = await fetch(
-  'http://localhost:7777/v3/analyze?file=/path/to/image.jpg'
+  'http://localhost:7777/analyze?file=/path/to/image.jpg'
 );
+
+// POST file upload
+const formData = new FormData();
+formData.append('file', fileInput.files[0]);
+const response = await fetch('http://localhost:7777/analyze', {
+  method: 'POST',
+  body: formData
+});
 
 const result = await response.json();
 if (result.status === 'success') {

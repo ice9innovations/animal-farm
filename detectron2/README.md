@@ -118,10 +118,11 @@ GET /health
 }
 ```
 
-### V3 Unified Analysis (Recommended)
+### Unified Analysis (Recommended)
 ```bash
-GET /v3/analyze?url=<image_url>
-GET /v3/analyze?file=<file_path>
+GET /analyze?url=<image_url>
+GET /analyze?file=<file_path>
+POST /analyze (with file upload)
 ```
 
 **Parameters:**
@@ -266,14 +267,20 @@ The service includes several optimizations:
 import requests
 
 # URL analysis
-response = requests.get('http://localhost:7771/v3/analyze', 
+response = requests.get('http://localhost:7771/analyze', 
                        params={'url': 'https://example.com/image.jpg'})
 data = response.json()
 
 # File analysis
-response = requests.get('http://localhost:7771/v3/analyze',
+response = requests.get('http://localhost:7771/analyze',
                        params={'file': '/path/to/image.jpg'})
 data = response.json()
+
+# POST file upload
+with open('/path/to/image.jpg', 'rb') as f:
+    response = requests.post('http://localhost:7771/analyze',
+                           files={'file': f})
+    data = response.json()
 
 # Process detections
 for prediction in data['predictions']:
@@ -285,8 +292,16 @@ for prediction in data['predictions']:
 ### JavaScript
 ```javascript
 // URL analysis
-const response = await fetch('http://localhost:7771/v3/analyze?url=' + 
+const response = await fetch('http://localhost:7771/analyze?url=' + 
                             encodeURIComponent('https://example.com/image.jpg'));
+
+// POST file upload
+const formData = new FormData();
+formData.append('file', fileInput.files[0]);
+const response = await fetch('http://localhost:7771/analyze', {
+    method: 'POST',
+    body: formData
+});
 const data = await response.json();
 
 // Process detections

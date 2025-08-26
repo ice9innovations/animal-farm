@@ -1,3 +1,5 @@
 #!/bin/bash
-source /home/sd/detectron2/detectron2_venv/bin/activate
-python REST.py
+cd "$(dirname "$0")"
+source detectron2_venv/bin/activate
+source .env
+python3 REST.py

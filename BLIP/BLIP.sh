@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/sd/BLIP
+cd "$(dirname "$0")"
 source blip_venv/bin/activate
 source .env
-python REST.py
+python3 REST.py

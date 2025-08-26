@@ -21,7 +21,7 @@ Animal Farm consists of multiple specialized AI services that work together in a
 | **face** | 7772 | ✅ Active | Face detection and analysis |
 | **inception_v3** | 7779 | ✅ Active | ImageNet classification (Google Inception v3) |
 | **metadata** | 7781 | ✅ Active | Image metadata extraction (EXIF, GPS, camera info) |
-| **nsfw** | 7774 | ✅ Active | Content safety detection (Bumble private-detector) |
+| **nsfw2** | 7774 | ✅ Active | Content safety detection (OpenNSFW2) |
 | **ocr** | 7775 | ✅ Active | Optical character recognition (PaddleOCR) |
 | **ollama-api** | 7782 | ✅ Active | Large language model analysis (Ollama/LLaMA integration) |
 | **rtdetr** | 7780 | ✅ Active | Real-time object detection (RT-DETR transformer) |
@@ -95,33 +95,34 @@ This creates an intelligent democracy where consensus amplifies evidence rather 
 Services are designed to work together through a centralized API architecture:
 
 - **Central API (port 8080)**: Provides emoji mappings, voting coordination, and system-wide configuration
-- **Service APIs**: Each AI service exposes REST endpoints for analysis
-- **Unified Response Format**: All services follow consistent JSON response schemas for easy integration
+- **Service APIs**: Each AI service exposes unified `/analyze` endpoints supporting URL, file, and POST inputs
+- **Unified Response Format**: All services follow consistent JSON response schemas with metadata, predictions, and processing times
+- **In-Memory Processing**: Services process images entirely in RAM using PIL Images for security and performance
 
 ### Example API Usage
 
-#### V3 Unified Endpoints (Recommended)
+All services follow the same unified endpoint pattern with three input methods:
+- **URL Parameter**: `GET /analyze?url=<image_url>`
+- **File Parameter**: `GET /analyze?file=<file_path>`  
+- **POST Upload**: `POST /analyze` with multipart/form-data
+
+Services process images entirely in memory using PIL Images, eliminating temporary file creation for improved security and performance.
+
+#### Service Endpoints
+
+All services now use the standardized `/analyze` endpoint with support for URL, file path, and POST file upload:
 
 ```bash
 # Local file path
-curl "http://192.168.0.101:7777/v3/analyze?file=/path/to/image/file" | jq
+curl "http://192.168.0.101:7777/analyze?file=/path/to/image/file" | jq
 
 # Image URL
-curl "http://192.168.0.101:7777/v3/analyze?url=https://example.com/image.jpg" | jq
+curl "http://192.168.0.101:7777/analyze?url=https://example.com/image.jpg" | jq
+
+# POST file upload
+curl -X POST -F "file=@/path/to/image.jpg" http://192.168.0.101:7777/analyze | jq
 ```
 
-#### Legacy V2 Endpoints (Backward Compatibility)
-
-```bash
-# Object detection
-curl "http://localhost:7771/v2/analyze?image_url=https://example.com/image.jpg"
-
-# Image captioning  
-curl "http://localhost:7777/v2/analyze?image_url=https://example.com/image.jpg"
-
-# NSFW detection
-curl "http://localhost:7774/?url=https://example.com/image.jpg"
-```
 
 ## Features
 

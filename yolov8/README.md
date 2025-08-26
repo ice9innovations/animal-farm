@@ -130,8 +130,8 @@ GET /classes
 
 ### V3 Unified Analysis (Recommended)
 ```bash
-GET /v3/analyze?url=<image_url>
-GET /v3/analyze?file=<file_path>
+GET /analyze?url=<image_url>
+GET /analyze?file=<file_path>
 ```
 
 **Parameters:**
@@ -285,12 +285,12 @@ sudo systemctl status yolo-api.service
 import requests
 
 # Object detection from URL
-response = requests.get('http://localhost:7773/v3/analyze', 
+response = requests.get('http://localhost:7773/analyze', 
                        params={'url': 'https://example.com/image.jpg'})
 data = response.json()
 
 # Object detection from file
-response = requests.get('http://localhost:7773/v3/analyze',
+response = requests.get('http://localhost:7773/analyze',
                        params={'file': '/path/to/image.jpg'})
 result = response.json()
 
@@ -306,7 +306,7 @@ for prediction in result['predictions']:
 ### JavaScript
 ```javascript
 // Object detection from URL
-const response = await fetch('http://localhost:7773/v3/analyze?' + 
+const response = await fetch('http://localhost:7773/analyze?' + 
     new URLSearchParams({url: 'https://example.com/image.jpg'}));
 const data = await response.json();
 

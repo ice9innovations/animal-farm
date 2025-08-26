@@ -11,7 +11,7 @@ MediaPipe Pose provides precise human pose estimation using Google's MediaPipe f
 
 ## Features
 
-- **Modern V3 API**: Clean, unified endpoint with intuitive parameters
+- **Modern Unified API**: Clean `/analyze` endpoint supporting GET and POST methods
 - **33 Body Landmarks**: Full-body pose detection with 3D coordinates and visibility scores
 - **Joint Angle Analysis**: Elbow and knee angle calculations for pose reconstruction
 - **Unified Input Handling**: Single endpoint for both URL and file path analysis
@@ -128,26 +128,36 @@ GET /health
 
 ### Analyze Pose (Unified Endpoint)
 
-The unified `/v3/analyze` endpoint accepts either URL or file path input:
+The unified `/analyze` endpoint accepts URL, file path, or POST file upload:
 
 #### Analyze Pose from URL
 ```bash
-GET /v3/analyze?url=<image_url>
+GET /analyze?url=<image_url>
 ```
 
 **Example:**
 ```bash
-curl "http://localhost:7786/v3/analyze?url=https://example.com/image.jpg"
+curl "http://localhost:7786/analyze?url=https://example.com/image.jpg"
 ```
 
 #### Analyze Pose from File Path
 ```bash
-GET /v3/analyze?file=<file_path>
+GET /analyze?file=<file_path>
 ```
 
 **Example:**
 ```bash
-curl "http://localhost:7786/v3/analyze?file=/path/to/image.jpg"
+curl "http://localhost:7786/analyze?file=/path/to/image.jpg"
+```
+
+#### Analyze Pose from File Upload
+```bash
+POST /analyze
+```
+
+**Example:**
+```bash
+curl -X POST -F "file=@image.jpg" "http://localhost:7786/analyze"
 ```
 
 **Input Validation:**
@@ -322,15 +332,22 @@ import requests
 
 # URL input
 response = requests.get(
-    "http://localhost:7786/v3/analyze",
+    "http://localhost:7786/analyze",
     params={"url": "https://example.com/image.jpg"}
 )
 
 # File input
 response = requests.get(
-    "http://localhost:7786/v3/analyze",
+    "http://localhost:7786/analyze",
     params={"file": "/path/to/image.jpg"}
 )
+
+# File upload
+with open("image.jpg", "rb") as f:
+    response = requests.post(
+        "http://localhost:7786/analyze",
+        files={"file": f}
+    )
 
 result = response.json()
 if result["status"] == "success":
@@ -347,13 +364,21 @@ if result["status"] == "success":
 ```javascript
 // URL input
 const response = await fetch(
-  'http://localhost:7786/v3/analyze?url=https://example.com/image.jpg'
+  'http://localhost:7786/analyze?url=https://example.com/image.jpg'
 );
 
 // File input
 const response = await fetch(
-  'http://localhost:7786/v3/analyze?file=/path/to/image.jpg'
+  'http://localhost:7786/analyze?file=/path/to/image.jpg'
 );
+
+// File upload
+const formData = new FormData();
+formData.append('file', fileInput.files[0]);
+const response = await fetch('http://localhost:7786/analyze', {
+  method: 'POST',
+  body: formData
+});
 
 const result = await response.json();
 if (result.status === 'success') {

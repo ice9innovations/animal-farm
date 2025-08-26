@@ -238,39 +238,39 @@ def get_emojis_for_text(text: str) -> List[Dict[str, str]]:
         logger.error(f"LLaMa: Failed to process emoji mappings: {e}")
         return []
 
-def convert_to_jpg(filepath: str) -> str:
-    """Convert image to JPG format - always convert since Ollama works better with JPG"""
-    try:
-        # Open image with PIL and convert to JPG
-        with Image.open(filepath) as img:
-            # Convert to RGB if necessary (removes alpha channel)
-            if img.mode in ('RGBA', 'LA', 'P'):
-                img = img.convert('RGB')
-            
-            # Try to save next to original file first
-            jpg_filepath = filepath.rsplit('.', 1)[0] + '.jpg'
-            try:
-                img.save(jpg_filepath, 'JPEG', quality=95)
-                return jpg_filepath
-            except PermissionError:
-                # Fall back to temp location if we can't write to original directory
-                import tempfile
-                temp_fd, temp_jpg = tempfile.mkstemp(suffix='.jpg', dir=FOLDER)
-                os.close(temp_fd)  # Close the file descriptor, we just need the path
-                img.save(temp_jpg, 'JPEG', quality=95)
-                return temp_jpg
-            
-    except Exception as e:
-        logger.error(f"Error converting image to JPG: {e}")
-        return filepath  # Return original if conversion fails
-
-def cleanup_file(filepath: str) -> None:
-    """Safely remove temporary file"""
-    try:
-        if os.path.exists(filepath):
-            os.remove(filepath)
-    except Exception as e:
-        logger.warning(f"Failed to cleanup file {filepath}: {e}")
+def create_ollama_response(data: Dict[str, Any], processing_time: float) -> Dict[str, Any]:
+    """Create standardized Ollama response with emoji mappings"""
+    text_response = data.get('response', '')
+    emoji_mappings = data.get('emoji_mappings', [])
+    
+    is_shiny, shiny_roll = check_shiny()
+    
+    prediction = {
+        "text": text_response
+    }
+    
+    # Add emoji mappings if found
+    if emoji_mappings:
+        prediction["emoji_mappings"] = emoji_mappings
+    
+    # Add shiny flag only for shiny detections
+    if is_shiny:
+        prediction["shiny"] = True
+        logger.info(f"✨ SHINY OLLAMA VISION ANALYSIS! Roll: {shiny_roll} ✨")
+    
+    return {
+        "service": "ollama",
+        "status": "success",
+        "predictions": [prediction],
+        "metadata": {
+            "processing_time": round(processing_time, 3),
+            "model_info": {
+                "framework": "Ollama",
+                "model": data.get('model_used', VISION_MODEL),
+                "prompt": data.get('prompt', VISION_PROMPT)
+            }
+        }
+    }
 
 # Removed context lookup function - using simple local lookup now
 
@@ -336,33 +336,50 @@ async def process_text_with_ollama(prompt: str, model: str = None) -> Dict[str, 
             "status": "error"
         }
 
-async def process_image_with_ollama(image_file: str, prompt: str = None, model: str = None, temperature: float = None, cleanup: bool = True) -> Dict[str, Any]:
-    """Process image with vision model"""
+def process_image_for_ollama(image: Image.Image, prompt: str = None, model: str = None, temperature: float = None) -> Dict[str, Any]:
+    """
+    Main processing function - takes PIL Image, returns Ollama vision analysis data
+    This is the core business logic, separated from HTTP concerns
+    Uses pure in-memory processing with direct PIL Image support
+    """
     start_time = time.time()
     model = model or VISION_MODEL
     prompt = prompt or VISION_PROMPT
     temperature = temperature if temperature is not None else TEMPERATURE
-    full_path = os.path.join(FOLDER, image_file)
     
     try:
-        # Read and encode image
-        with open(full_path, 'rb') as image_file:
-            image_data = base64.b64encode(image_file.read()).decode('utf-8')
+        # Ensure image is in RGB mode
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
         
+        # Convert PIL Image to base64 for Ollama (in memory)
+        from io import BytesIO
+        jpg_buffer = BytesIO()
+        image.save(jpg_buffer, 'JPEG', quality=95)
+        jpg_data = jpg_buffer.getvalue()
+        jpg_buffer.close()
+        
+        # Encode for Ollama
+        image_data = base64.b64encode(jpg_data).decode('utf-8')
+        
+        # Process with Ollama (async in sync wrapper)
+        import asyncio
         client = AsyncClient(host=OLLAMA_HOST)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         
-        # Generate single caption with configured temperature
-        response = await client.generate(
+        ollama_response = loop.run_until_complete(client.generate(
             model=model,
             prompt=prompt,
             images=[image_data],
             stream=False,
             options={"temperature": temperature}
-        )
+        ))
+        
+        loop.close()
         
         processing_time = round(time.time() - start_time, 3)
-        
-        output = response["response"]
+        output = ollama_response["response"]
         
         # Truncate if too long
         if len(output) > MAX_RESPONSE_LENGTH:
@@ -371,31 +388,26 @@ async def process_image_with_ollama(image_file: str, prompt: str = None, model: 
         # Extract emojis from response
         emoji_list = get_emojis_for_text(output)
         
-        result = {
-            "llm": {
+        return {
+            "success": True,
+            "data": {
                 "response": output,
                 "model_used": model,
                 "prompt": prompt,
                 "response_length": len(output),
-                "processing_time": processing_time,
                 "emoji_mappings": emoji_list,
                 "type": "vision",
-                "status": "success",
                 "temperature": temperature
-            }
+            },
+            "processing_time": processing_time
         }
         
-        # Cleanup (only for temporary files)
-        if cleanup:
-            cleanup_file(full_path)
-        return result
-        
     except Exception as e:
-        if cleanup:
-            cleanup_file(full_path)
+        processing_time = round(time.time() - start_time, 3)
         return {
+            "success": False,
             "error": f"Image analysis failed: {str(e)}",
-            "status": "error"
+            "processing_time": processing_time
         }
 
 
@@ -409,22 +421,40 @@ print("Ollama service: CORS enabled for direct browser communication")
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    # Test Ollama connectivity
-    ollama_status = "unknown"
-    available_models = {}
-    
+    # Test Ollama connectivity with actual model test
     try:
-        # Simple async call to test Ollama
+        # Test with a simple text generation to ensure Ollama is actually working
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        
+        # Try to get models first
         available_models = loop.run_until_complete(get_available_models())
-        ollama_status = "connected"
+        
+        # Test actual text generation capability
+        client = AsyncClient(host=OLLAMA_HOST)
+        test_response = loop.run_until_complete(client.chat(
+            model=TEXT_MODEL,
+            messages=[{'role': 'user', 'content': 'Hi'}]
+        ))
+        
         loop.close()
+        
+        ollama_status = "connected"
+        status = "healthy"
+        
     except Exception as e:
         ollama_status = f"error: {str(e)}"
+        status = "unhealthy"
+        available_models = {}
+        
+        return jsonify({
+            "status": status,
+            "reason": f"Ollama service error: {str(e)}",
+            "service": "Ollama LLM Integration"
+        }), 503
     
     return jsonify({
-        "status": "healthy" if ollama_status == "connected" else "degraded",
+        "status": status,
         "service": "Ollama LLM Integration",
         "ollama": {
             "host": OLLAMA_HOST,
@@ -442,10 +472,10 @@ def health_check():
         "endpoints": [
             "GET /health - Health check",
             "GET /models - List available models",
+            "GET,POST /analyze - Unified endpoint (URL/file/upload)",
+            "GET /v3/analyze - V3 compatibility",
             "POST /text - Generate text response",
-            "POST /image - Analyze image with text",
-            "GET /?url=<image_url> - Analyze image from URL",
-            "POST / - Upload and analyze image"
+            "POST /image - Analyze image with text"
         ]
     })
 
@@ -475,361 +505,145 @@ def list_models():
 # V2 Compatibility Routes - Translate parameters and call V3
 @app.route('/v2/analyze', methods=['GET'])
 def analyze_v2_compat():
-    """V2 compatibility - translate parameters to V3 format"""
-    import time
-    from flask import request
-    
-    # Get V2 parameter
+    """V2 compatibility - translate parameters to new analyze format"""
     image_url = request.args.get('image_url')
     
     if image_url:
-        # Create new request args with V3 parameter name
-        new_args = request.args.copy()
-        new_args = new_args.to_dict()
-        new_args['url'] = image_url
-        del new_args['image_url']
+        # Parameter translation: image_url -> url
+        new_args = {'url': image_url}
+        # Copy other parameters
+        for key, value in request.args.items():
+            if key != 'image_url':
+                new_args[key] = value
         
-        # Create a mock request object for V3
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        # No parameters - let V3 handle the error
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        # Let new analyze handle validation errors
+        with app.test_request_context('/analyze'):
+            return analyze()
 
 @app.route('/v2/analyze_file', methods=['GET'])
 def analyze_file_v2_compat():
-    """V2 file compatibility - translate parameters to V3 format"""
-    import time
-    from flask import request
-    
-    # Get V2 parameter
+    """V2 file compatibility - translate parameters to new analyze format"""
     file_path = request.args.get('file_path')
     
     if file_path:
-        # Create new request args with V3 parameter name
-        new_args = request.args.copy().to_dict()
-        new_args['file'] = file_path
-        del new_args['file_path']
+        # Parameter translation: file_path -> file
+        new_args = {'file': file_path}
+        # Copy other parameters
+        for key, value in request.args.items():
+            if key != 'file_path':
+                new_args[key] = value
         
-        # Create a mock request object for V3
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        # No parameters - let V3 handle the error
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        with app.test_request_context('/analyze'):
+            return analyze()
 
-@app.route('/v3/analyze', methods=['GET', 'POST'])
-def analyze_v3():
-    """Unified V3 API endpoint for URL, file path, and POST file upload analysis"""
-    import time
+@app.route('/analyze', methods=['GET', 'POST'])
+def analyze():
+    """Unified analyze endpoint - orchestrates input handling and processing"""
     start_time = time.time()
     
-    try:
-        # Handle POST file upload
-        if request.method == 'POST':
-            # Check for file upload
-            if 'file' not in request.files:
-                return jsonify({
-                    "service": "ollama",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": "No file provided in POST request"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 400
-            
-            file_obj = request.files['file']
-            if file_obj.filename == '':
-                return jsonify({
-                    "service": "ollama",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": "No file selected"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 400
-            
-            # Get optional parameters from form data
-            prompt = request.form.get('prompt', VISION_PROMPT)
-            model = request.form.get('model', VISION_MODEL)
-            temperature_param = request.form.get('temperature')
-            temperature = float(temperature_param) if temperature_param else None
-            
-            # Validate file size
-            file_obj.seek(0, 2)  # Seek to end
-            file_size = file_obj.tell()
-            file_obj.seek(0)     # Seek back to beginning
-            
-            if file_size > MAX_FILE_SIZE:
-                return jsonify({
-                    "service": "ollama",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 400
-            
-            # Process directly from memory - no temporary files!
-            try:
-                import base64
-                from io import BytesIO
-                
-                # Read file data into memory
-                file_data = file_obj.read()
-                
-                # Convert to JPG in memory if needed
-                try:
-                    image = Image.open(BytesIO(file_data))
-                    if image.mode in ('RGBA', 'LA', 'P'):
-                        image = image.convert('RGB')
-                    
-                    # Convert to JPG in memory
-                    jpg_buffer = BytesIO()
-                    image.save(jpg_buffer, 'JPEG', quality=95)
-                    jpg_data = jpg_buffer.getvalue()
-                    jpg_buffer.close()
-                    
-                except Exception as e:
-                    # If image conversion fails, try using original data
-                    jpg_data = file_data
-                
-                # Encode for Ollama
-                image_b64 = base64.b64encode(jpg_data).decode('utf-8')
-                
-                # Process with Ollama directly (no file system involved)
-                client = AsyncClient(host=OLLAMA_HOST)
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                ollama_response = loop.run_until_complete(client.generate(
-                    model=model,
-                    prompt=prompt,
-                    images=[image_b64],
-                    stream=False,
-                    options={"temperature": temperature if temperature is not None else TEMPERATURE}
-                ))
-                
-                loop.close()
-                
-                processing_time = round(time.time() - start_time, 3)
-                output = ollama_response["response"]
-                
-                # Truncate if too long
-                if len(output) > MAX_RESPONSE_LENGTH:
-                    output = output[:MAX_RESPONSE_LENGTH] + "... [truncated]"
-                
-                # Extract emojis from response
-                emoji_list = get_emojis_for_text(output)
-                
-                # Create unified prediction format
-                prediction = {
-                    "text": output
-                }
-                
-                # Add emoji mappings if found
-                if emoji_list:
-                    prediction["emoji_mappings"] = emoji_list
-                
-                return jsonify({
-                    "service": "ollama",
-                    "status": "success",
-                    "predictions": [prediction],
-                    "metadata": {
-                        "processing_time": processing_time,
-                        "model_info": {
-                            "framework": "Ollama",
-                            "model": model,
-                            "prompt": prompt
-                        }
-                    }
-                })
-                
-            except Exception as e:
-                return jsonify({
-                    "service": "ollama",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": f"Failed to process uploaded image: {str(e)}"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 500
-        
-        # Handle GET requests
-        # Get input parameters - support both url and file
-        url = request.args.get('url')
-        file = request.args.get('file')
-        
-        # Get optional parameters
-        prompt = request.args.get('prompt', VISION_PROMPT)
-        model = request.args.get('model', VISION_MODEL)
-        temperature_param = request.args.get('temperature')
-        temperature = float(temperature_param) if temperature_param else None
-        
-        # Validate input - exactly one parameter must be provided
-        if not url and not file:
-            return jsonify({
-                "service": "ollama",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": "Must provide either url or file parameter"},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 400
-        
-        if url and file:
-            return jsonify({
-                "service": "ollama",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": "Cannot provide both url and file parameters"},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 400
-        
-        # Handle URL input
-        if url:
-            filepath = None
-            jpg_filepath = None
-            try:
-                filename = str(uuid.uuid4()) + ".jpg"
-                filepath = os.path.join(FOLDER, filename)
-                
-                response = requests.get(url, timeout=15)
-                response.raise_for_status()
-                
-                if len(response.content) > MAX_FILE_SIZE:
-                    raise ValueError("Downloaded file too large")
-                
-                with open(filepath, "wb") as file_obj:
-                    file_obj.write(response.content)
-                
-                # Convert to JPG if needed
-                jpg_filepath = convert_to_jpg(filepath)
-                jpg_filename = os.path.basename(jpg_filepath)
-                
-                # Process using existing async function
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                result = loop.run_until_complete(process_image_with_ollama(jpg_filename, prompt, model, temperature))
-                loop.close()
-                
-            except Exception as e:
-                # Cleanup on error
-                if filepath:
-                    cleanup_file(filepath)
-                if jpg_filepath and jpg_filepath != filepath:
-                    cleanup_file(jpg_filepath)
-                return jsonify({
-                    "service": "ollama",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": f"Failed to process URL: {str(e)}"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 500
-            finally:
-                # Ensure cleanup
-                if filepath:
-                    cleanup_file(filepath)
-                if jpg_filepath and jpg_filepath != filepath:
-                    cleanup_file(jpg_filepath)
-        
-        # Handle file input
-        if file:
-            # Validate file path
-            if not os.path.exists(file):
-                return jsonify({
-                    "service": "ollama",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": f"File not found: {file}"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 404
-            
-            jpg_filepath = None
-            temp_filepath = None
-            try:
-                # Convert to JPG and copy to FOLDER (Ollama expects files in FOLDER)
-                jpg_filepath = convert_to_jpg(file)
-                # Use appropriate extension based on what convert_to_jpg actually returned
-                original_ext = os.path.splitext(jpg_filepath)[1] or '.jpg'
-                temp_filename = str(uuid.uuid4()) + original_ext
-                temp_filepath = os.path.join(FOLDER, temp_filename)
-                
-                # Copy the JPG to temp location
-                import shutil
-                shutil.copy2(jpg_filepath, temp_filepath)
-                
-                # Process using existing async function (no cleanup - we handle it manually)
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                result = loop.run_until_complete(process_image_with_ollama(temp_filename, prompt, model, temperature, cleanup=False))
-                loop.close()
-                
-            except Exception as e:
-                # Clean up temporary files on error and return error response
-                if temp_filepath:
-                    cleanup_file(temp_filepath)
-                if jpg_filepath and jpg_filepath != file:
-                    cleanup_file(jpg_filepath)
-                return jsonify({
-                    "service": "ollama",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": f"Failed to process file: {str(e)}"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 500
-            finally:
-                # Always clean up temporary files
-                if temp_filepath:
-                    cleanup_file(temp_filepath)
-                if jpg_filepath and jpg_filepath != file:
-                    cleanup_file(jpg_filepath)
-        
-        # Process results (common for both URL and file)
-        if result.get('status') == 'error':
-            return jsonify({
-                "service": "ollama",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": result.get('error', 'LLM analysis failed')},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 500
-        
-        # Convert to v3 format - extract the LLM response and emoji mappings
-        llm_data = result.get('llm', {})
-        text_response = llm_data.get('response', '')
-        emoji_mappings = llm_data.get('emoji_mappings', [])
-        
-        # Create unified prediction format
-        prediction = {
-            "text": text_response
-        }
-        
-        # Add emoji mappings if found
-        if emoji_mappings:
-            prediction["emoji_mappings"] = emoji_mappings
-        
-        return jsonify({
-            "service": "ollama",
-            "status": "success",
-            "predictions": [prediction],
-            "metadata": {
-                "processing_time": round(time.time() - start_time, 3),
-                "model_info": {
-                    "framework": "Ollama",
-                    "model": llm_data.get('model_used', model),
-                    "prompt": llm_data.get('prompt', prompt)
-                }
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"V3 API error: {e}")
+    def error_response(message: str, status_code: int = 400):
         return jsonify({
             "service": "ollama",
             "status": "error",
             "predictions": [],
-            "error": {"message": f"Internal error: {str(e)}"},
+            "error": {"message": message},
             "metadata": {"processing_time": round(time.time() - start_time, 3)}
-        }), 500
+        }), status_code
+    
+    try:
+        # Get optional parameters
+        prompt = request.args.get('prompt') or request.form.get('prompt') or VISION_PROMPT
+        model = request.args.get('model') or request.form.get('model') or VISION_MODEL
+        temperature_param = request.args.get('temperature') or request.form.get('temperature')
+        temperature = float(temperature_param) if temperature_param else TEMPERATURE
+        
+        # Step 1: Get image into memory from any source
+        if request.method == 'POST' and 'file' in request.files:
+            # Handle file upload
+            uploaded_file = request.files['file']
+            if uploaded_file.filename == '':
+                return error_response("No file selected")
+            
+            # Validate file size
+            uploaded_file.seek(0, 2)  # Seek to end
+            file_size = uploaded_file.tell()
+            uploaded_file.seek(0)     # Seek back to beginning
+            
+            if file_size > MAX_FILE_SIZE:
+                return error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB")
+            
+            try:
+                from io import BytesIO
+                file_data = uploaded_file.read()
+                image = Image.open(BytesIO(file_data)).convert('RGB')
+            except Exception as e:
+                return error_response(f"Failed to process uploaded image: {str(e)}", 500)
+        
+        else:
+            # Handle URL or file parameter
+            url = request.args.get('url')
+            file_path = request.args.get('file')
+            
+            if not url and not file_path:
+                return error_response("Must provide either 'url' or 'file' parameter, or POST a file")
+            
+            if url and file_path:
+                return error_response("Cannot provide both 'url' and 'file' parameters")
+            
+            if url:
+                # Download from URL directly into memory
+                try:
+                    response = requests.get(url, timeout=15)
+                    response.raise_for_status()
+                    
+                    if len(response.content) > MAX_FILE_SIZE:
+                        return error_response("Downloaded file too large")
+                    
+                    from io import BytesIO
+                    image = Image.open(BytesIO(response.content)).convert('RGB')
+                    
+                except Exception as e:
+                    return error_response(f"Failed to download/process image: {str(e)}")
+            else:  # file_path
+                # Load file directly into memory
+                if not os.path.exists(file_path):
+                    return error_response(f"File not found: {file_path}")
+                
+                try:
+                    image = Image.open(file_path).convert('RGB')
+                except Exception as e:
+                    return error_response(f"Failed to load image file: {str(e)}", 500)
+        
+        # Step 2: Process the image (unified processing path)
+        processing_result = process_image_for_ollama(image, prompt, model, temperature)
+        
+        # Step 3: Handle processing result
+        if not processing_result["success"]:
+            return error_response(processing_result["error"], 500)
+        
+        # Step 4: Create response
+        response = create_ollama_response(
+            processing_result["data"],
+            processing_result["processing_time"]
+        )
+        
+        return jsonify(response)
+        
+    except ValueError as e:
+        return error_response(str(e))
+    except Exception as e:
+        return error_response(f"Internal error: {str(e)}", 500)
 
+@app.route('/v3/analyze', methods=['GET', 'POST'])
+def analyze_v3_compat():
+    """V3 compatibility - calls new analyze function directly"""
+    return analyze()
 
 
 @app.route('/text', methods=['POST'])

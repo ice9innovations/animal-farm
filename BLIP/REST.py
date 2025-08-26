@@ -271,21 +271,18 @@ def get_emojis_and_mappings_for_caption(caption: str) -> tuple[List[str], Dict[s
 
 # Removed old mirror-stage lookup function - using local file now
 
-def preprocess_image(image_path: str) -> Optional[torch.Tensor]:
-    """Preprocess image for BLIP model"""
+def preprocess_image(image: Image.Image) -> Optional[torch.Tensor]:
+    """Preprocess PIL Image for BLIP model"""
     try:
-        logger.info(f"Preprocessing image: {image_path}")
-        
-        # Open and validate image
-        raw_image = Image.open(image_path)
+        logger.info("Preprocessing image from memory")
         
         # Ensure RGB format (handle different image modes)
-        if raw_image.mode != 'RGB':
-            logger.info(f"Converting image from {raw_image.mode} to RGB")
-            raw_image = raw_image.convert('RGB')
+        if image.mode != 'RGB':
+            logger.info(f"Converting image from {image.mode} to RGB")
+            image = image.convert('RGB')
         
         # Log original image dimensions
-        logger.info(f"Original image size: {raw_image.size}")
+        logger.info(f"Original image size: {image.size}")
         
         transform = transforms.Compose([
             transforms.Resize((IMAGE_SIZE, IMAGE_SIZE), interpolation=InterpolationMode.BICUBIC),
@@ -293,25 +290,25 @@ def preprocess_image(image_path: str) -> Optional[torch.Tensor]:
             transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711))
         ])
         
-        image = transform(raw_image)
+        image_tensor = transform(image)
         
         # Log tensor shape before adding batch dimension
-        logger.info(f"Image tensor shape after transform: {image.shape}")
+        logger.info(f"Image tensor shape after transform: {image_tensor.shape}")
         
         # Add batch dimension and move to device
-        image = image.unsqueeze(0).to(device)
+        image_tensor = image_tensor.unsqueeze(0).to(device)
         
         # Convert to half precision if model is FP16
         if device.type == 'cuda' and hasattr(model, 'dtype') and model.dtype == torch.float16:
-            image = image.half()
+            image_tensor = image_tensor.half()
         
         # Log final tensor shape
-        logger.info(f"Final image tensor shape: {image.shape}")
+        logger.info(f"Final image tensor shape: {image_tensor.shape}")
         
-        return image
+        return image_tensor
         
     except Exception as e:
-        logger.error(f"Error preprocessing image {image_path}: {e}")
+        logger.error(f"Error preprocessing image: {e}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return None
@@ -329,21 +326,84 @@ def validate_file_size(file_path: str) -> bool:
     except OSError:
         return False
 
-def generate_caption(image_path: str, cleanup: bool = True) -> Dict[str, Any]:
-    """Generate caption for image using BLIP model"""
+
+def process_image_for_caption(image: Image.Image) -> Dict[str, Any]:
+    """
+    Main processing function - takes PIL Image, returns caption data
+    This is the core business logic, separated from HTTP concerns
+    """
+    try:
+        # Generate caption using existing function
+        result = generate_caption(image)
+        
+        if result.get('status') == 'error':
+            return {
+                "success": False,
+                "error": result.get('error', 'Caption generation failed')
+            }
+        
+        # Get caption and emoji mappings
+        caption = result.get('caption', '')
+        emojis, word_mappings = get_emojis_and_mappings_for_caption(caption)
+        
+        return {
+            "success": True,
+            "caption": caption,
+            "word_mappings": word_mappings
+        }
+        
+    except Exception as e:
+        logger.error(f"Error processing image for caption: {e}")
+        return {
+            "success": False,
+            "error": f"Processing failed: {str(e)}"
+        }
+
+def create_blip_response(caption: str, word_mappings: Dict[str, str], processing_time: float) -> Dict[str, Any]:
+    """Create standardized BLIP response with emoji mappings"""
+    predictions = []
+    if caption:
+        emoji_mappings = []
+        if word_mappings:
+            for word, emoji in word_mappings.items():
+                is_shiny, shiny_roll = check_shiny()
+                
+                mapping = {
+                    "word": word,
+                    "emoji": emoji
+                }
+                
+                if is_shiny:
+                    mapping["shiny"] = True
+                    logging.info(f"✨ SHINY {word.upper()} EMOJI DETECTED! Roll: {shiny_roll} ✨")
+                
+                emoji_mappings.append(mapping)
+        
+        predictions.append({
+            "text": caption,
+            "emoji_mappings": emoji_mappings
+        })
+    
+    return {
+        "service": "blip",
+        "status": "success",
+        "predictions": predictions,
+        "metadata": {
+            "processing_time": round(processing_time, 3),
+            "model_info": {
+                "framework": "Salesforce"
+            }
+        }
+    }
+
+def generate_caption(image: Image.Image) -> Dict[str, Any]:
+    """Generate caption for PIL Image using BLIP model"""
     if not model:
         return {"error": "Model not loaded", "status": "error"}
         
     try:
-        # Validate file
-        if not os.path.exists(image_path):
-            return {"error": "Image file not found", "status": "error"}
-            
-        if not validate_file_size(image_path):
-            return {"error": "File too large", "status": "error"}
-            
         # Preprocess image
-        image_tensor = preprocess_image(image_path)
+        image_tensor = preprocess_image(image)
         if image_tensor is None:
             return {"error": "Failed to preprocess image", "status": "error"}
             
@@ -403,21 +463,11 @@ def generate_caption(image_path: str, cleanup: bool = True) -> Dict[str, Any]:
         caption_text = caption[0] if caption else "No caption generated"
         logger.info(f"Generated caption: {caption_text}")
         
-        # Return simple caption for V2 endpoint processing
-        result = {"caption": caption_text, "status": "success"}
-        
-        # Cleanup (only for temporary files)
-        if cleanup:
-            try:
-                if os.path.exists(image_path) and image_path.startswith(UPLOAD_FOLDER):
-                    os.remove(image_path)
-            except Exception as e:
-                logger.warning(f"Failed to cleanup file {image_path}: {e}")
-            
-        return result
+        # Return simple caption
+        return {"caption": caption_text, "status": "success"}
         
     except Exception as e:
-        logger.error(f"Error generating caption for {image_path}: {e}")
+        logger.error(f"Error generating caption: {e}")
         return {"error": f"Caption generation failed: {str(e)}", "status": "error"}
 
 app = Flask(__name__)
@@ -452,7 +502,7 @@ def health_check():
 # V2 Compatibility Routes - Translate parameters and call V3
 @app.route('/v2/analyze', methods=['GET'])
 def analyze_v2_compat():
-    """V2 compatibility - translate parameters to V3 format"""
+    """V2 compatibility - translate parameters to new analyze format"""
     import time
     from flask import request
     
@@ -460,23 +510,23 @@ def analyze_v2_compat():
     image_url = request.args.get('image_url')
     
     if image_url:
-        # Create new request args with V3 parameter name
+        # Create new request args with new parameter name
         new_args = request.args.copy()
         new_args = new_args.to_dict()
         new_args['url'] = image_url
         del new_args['image_url']
         
-        # Create a mock request object for V3
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        # Create a mock request object for new analyze endpoint
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        # No parameters - let V3 handle the error
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        # No parameters - let analyze handle the error
+        with app.test_request_context('/analyze'):
+            return analyze()
 
 @app.route('/v2/analyze_file', methods=['GET']) 
 def analyze_file_v2_compat():
-    """V2 file compatibility - translate parameters to V3 format"""
+    """V2 file compatibility - translate parameters to new analyze format"""
     import time
     from flask import request
     
@@ -484,184 +534,118 @@ def analyze_file_v2_compat():
     file_path = request.args.get('file_path')
     
     if file_path:
-        # Create new request args with V3 parameter name
+        # Create new request args with new parameter name
         new_args = {'file': file_path}
         
-        # Create a mock request object for V3
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        # Create a mock request object for new analyze endpoint
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        # No parameters - let V3 handle the error
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        # No parameters - let analyze handle the error
+        with app.test_request_context('/analyze'):
+            return analyze()
 
 @app.route('/v3/analyze', methods=['GET'])
-def analyze_v3():
-    """Unified V3 API endpoint for both URL and file path analysis"""
+def analyze_v3_compat():
+    """V3 compatibility - redirect to new analyze endpoint"""
+    with app.test_request_context('/analyze', query_string=request.args):
+        return analyze()
+
+@app.route('/analyze', methods=['GET', 'POST'])
+def analyze():
+    """Unified analyze endpoint - orchestrates input handling and processing"""
     import time
+    from io import BytesIO
     start_time = time.time()
     
-    try:
-        # Get input parameters - support both url and file
-        url = request.args.get('url')
-        file = request.args.get('file')
-        
-        # Validate input - exactly one parameter must be provided
-        if not url and not file:
-            return jsonify({
-                "service": "blip",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": "Must provide either url or file parameter"},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 400
-        
-        if url and file:
-            return jsonify({
-                "service": "blip",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": "Cannot provide both url and file parameters"},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 400
-        
-        # Handle URL input
-        if url:
-            filepath = None
-            try:
-                parsed_url = urlparse(url)
-                if not parsed_url.scheme or not parsed_url.netloc:
-                    raise ValueError("Invalid URL format")
-                
-                # Download image
-                filename = uuid.uuid4().hex + ".jpg"
-                filepath = os.path.join(UPLOAD_FOLDER, filename)
-                
-                response = requests.get(url, timeout=10, stream=True)
-                response.raise_for_status()
-                
-                content_type = response.headers.get('content-type', '')
-                if not content_type.startswith('image/'):
-                    raise ValueError("URL does not point to an image")
-                
-                with open(filepath, 'wb') as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                
-                if not validate_file_size(filepath):
-                    os.remove(filepath)
-                    filepath = None  # Mark as already removed
-                    raise ValueError("Downloaded file too large")
-                
-                # Generate caption using existing function (with cleanup)
-                result = generate_caption(filepath, cleanup=True)
-                filepath = None  # generate_caption handles cleanup
-                
-            except Exception as e:
-                logger.error(f"Error processing image URL {url}: {e}")
-                return jsonify({
-                    "service": "blip",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": f"Failed to process image URL: {str(e)}"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 500
-            finally:
-                # Ensure cleanup of temporary file
-                if filepath and os.path.exists(filepath):
-                    try:
-                        os.remove(filepath)
-                        logger.debug(f"Cleaned up temporary file: {filepath}")
-                    except Exception as e:
-                        logger.warning(f"Failed to cleanup file {filepath}: {e}")
-        
-        # Handle file path input
-        elif file:
-            # Validate file path
-            if not os.path.exists(file):
-                return jsonify({
-                    "service": "blip",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": f"File not found: {file}"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 404
-            
-            if not is_allowed_file(file):
-                return jsonify({
-                    "service": "blip",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": "File type not allowed"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 400
-            
-            # Generate caption directly from file (no cleanup - we don't own the file)
-            result = generate_caption(file, cleanup=False)
-        
-        # Common processing for both input types
-        if result.get('status') == 'error':
-            return jsonify({
-                "service": "blip",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": result.get('error', 'Caption generation failed')},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 500
-        
-        # Convert to v2 format
-        caption = result.get('caption', '')
-        
-        # Get proper emoji mappings
-        emojis, word_mappings = get_emojis_and_mappings_for_caption(caption)
-        
-        # Create unified prediction format
-        predictions = []
-        if caption:
-            # Build emoji mappings from word mappings
-            emoji_mappings = []
-            if word_mappings:
-                for word, emoji in word_mappings.items():
-                    is_shiny, shiny_roll = check_shiny()
-                    
-                    mapping = {
-                        "word": word,
-                        "emoji": emoji
-                    }
-                    
-                    # Add shiny flag only for shiny detections
-                    if is_shiny:
-                        mapping["shiny"] = True
-                        logging.info(f"✨ SHINY {word.upper()} EMOJI DETECTED! Roll: {shiny_roll} ✨")
-                    
-                    emoji_mappings.append(mapping)
-            
-            predictions.append({
-                "text": caption,
-                "emoji_mappings": emoji_mappings
-            })
-        
-        return jsonify({
-            "service": "blip",
-            "status": "success",
-            "predictions": predictions,
-            "metadata": {
-                "processing_time": round(time.time() - start_time, 3),
-                "model_info": {
-                    "framework": "Salesforce"
-                }
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"V2 unified API error: {e}")
+    def error_response(message: str, status_code: int = 400):
         return jsonify({
             "service": "blip",
             "status": "error",
             "predictions": [],
-            "error": {"message": f"Internal error: {str(e)}"},
+            "error": {"message": message},
             "metadata": {"processing_time": round(time.time() - start_time, 3)}
-        }), 500
+        }), status_code
+    
+    try:
+        image = None
+        
+        # Step 1: Get image into memory from any source
+        if request.method == 'POST' and 'file' in request.files:
+            # Handle file upload - direct to memory
+            uploaded_file = request.files['file']
+            if uploaded_file.filename == '':
+                return error_response("No file selected")
+            
+            if not is_allowed_file(uploaded_file.filename):
+                return error_response("File type not allowed")
+            
+            # Read directly into memory
+            file_data = uploaded_file.read()
+            if len(file_data) > MAX_FILE_SIZE:
+                return error_response("File too large")
+            
+            image = Image.open(BytesIO(file_data)).convert('RGB')
+        
+        else:
+            # Handle URL or file parameter
+            url = request.args.get('url')
+            file = request.args.get('file')
+            
+            if not url and not file:
+                return error_response("Must provide either url or file parameter, or POST a file")
+            
+            if url and file:
+                return error_response("Cannot provide both url and file parameters")
+            
+            if url:
+                # Download directly to memory
+                response = requests.get(url, timeout=10)
+                response.raise_for_status()
+                
+                content_type = response.headers.get('content-type', '')
+                if not content_type.startswith('image/'):
+                    return error_response("URL does not point to an image")
+                
+                if len(response.content) > MAX_FILE_SIZE:
+                    return error_response("Downloaded file too large")
+                
+                image = Image.open(BytesIO(response.content)).convert('RGB')
+                
+            else:  # file parameter
+                # Read file directly to memory
+                if not os.path.exists(file):
+                    return error_response(f"File not found: {file}")
+                
+                if not is_allowed_file(file):
+                    return error_response("File type not allowed")
+                
+                if not validate_file_size(file):
+                    return error_response("File too large")
+                
+                image = Image.open(file).convert('RGB')
+        
+        # Step 2: Process the image (unified processing path)
+        processing_result = process_image_for_caption(image)
+        
+        # Step 3: Handle processing result
+        if not processing_result["success"]:
+            return error_response(processing_result["error"], 500)
+        
+        # Step 4: Create response
+        response = create_blip_response(
+            processing_result["caption"],
+            processing_result["word_mappings"],
+            time.time() - start_time
+        )
+        
+        return jsonify(response)
+        
+    except ValueError as e:
+        return error_response(str(e))
+    except Exception as e:
+        logger.error(f"Analyze API error: {e}")
+        return error_response(f"Internal error: {str(e)}", 500)
 
 
 if __name__ == '__main__':

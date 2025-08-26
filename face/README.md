@@ -120,8 +120,9 @@ GET /health
   },
   "endpoints": [
     "GET /health - Health check",
-    "GET /v3/analyze?url=<image_url> - Analyze image from URL", 
-    "GET /v3/analyze?file=<file_path> - Analyze image from file",
+    "GET /analyze?url=<image_url> - Analyze image from URL", 
+    "GET /analyze?file=<file_path> - Analyze image from file",
+    "POST /analyze - Analyze uploaded image file",
     "GET /v2/analyze?image_url=<image_url> - V2 compatibility (deprecated)",
     "GET /v2/analyze_file?file_path=<file_path> - V2 compatibility (deprecated)"
   ]
@@ -130,26 +131,37 @@ GET /health
 
 ### Analyze Image (Unified Endpoint)
 
-The unified `/v3/analyze` endpoint accepts either URL or file path input:
+The unified `/analyze` endpoint accepts either URL or file path input:
 
 #### Analyze Image from URL
 ```bash
-GET /v3/analyze?url=<image_url>
+GET /analyze?url=<image_url>
 ```
 
 **Example:**
 ```bash
-curl "http://localhost:7772/v3/analyze?url=https://example.com/image.jpg"
+curl "http://localhost:7772/analyze?url=https://example.com/image.jpg"
 ```
 
 #### Analyze Image from File Path
 ```bash
-GET /v3/analyze?file=<file_path>
+GET /analyze?file=<file_path>
 ```
 
 **Example:**
 ```bash
-curl "http://localhost:7772/v3/analyze?file=/path/to/image.jpg"
+curl "http://localhost:7772/analyze?file=/path/to/image.jpg"
+```
+
+#### POST Request (File Upload)
+```bash
+POST /analyze
+Content-Type: multipart/form-data
+```
+
+**Example:**
+```bash
+curl -X POST -F "file=@/path/to/image.jpg" http://localhost:7772/analyze
 ```
 
 **Input Validation:**
@@ -294,9 +306,16 @@ import requests
 
 # Analyze image from URL
 response = requests.get(
-    'http://localhost:7772/v3/analyze',
+    'http://localhost:7772/analyze',
     params={'url': 'https://example.com/image.jpg'}
 )
+
+# POST file upload
+with open('/path/to/image.jpg', 'rb') as f:
+    response = requests.post(
+        'http://localhost:7772/analyze',
+        files={'file': f}
+    )
 result = response.json()
 
 # Process face detections
@@ -321,7 +340,7 @@ for prediction in result['predictions']:
 ```javascript
 // Analyze image from URL
 async function analyzeFaces(imageUrl) {
-    const response = await fetch(`http://localhost:7772/v3/analyze?url=${encodeURIComponent(imageUrl)}`);
+    const response = await fetch(`http://localhost:7772/analyze?url=${encodeURIComponent(imageUrl)}`);
     const result = await response.json();
     
     if (result.status === 'success') {
@@ -346,10 +365,13 @@ analyzeFaces('https://example.com/image.jpg');
 
 ```bash
 # Basic face and pose analysis
-curl "http://localhost:7772/v3/analyze?url=https://example.com/image.jpg"
+curl "http://localhost:7772/analyze?url=https://example.com/image.jpg"
 
 # File analysis
-curl "http://localhost:7772/v3/analyze?file=/path/to/image.jpg"
+curl "http://localhost:7772/analyze?file=/path/to/image.jpg"
+
+# POST file upload
+curl -X POST -F "file=@/path/to/image.jpg" http://localhost:7772/analyze
 
 # Health check
 curl "http://localhost:7772/health"

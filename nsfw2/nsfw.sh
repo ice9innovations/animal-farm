@@ -13,4 +13,5 @@ export LD_LIBRARY_PATH="$CUDNN_PATH:/usr/local/cuda-12.2/lib64:$LD_LIBRARY_PATH"
 export TF_CPP_MIN_LOG_LEVEL=2
 
 source nsfw2/bin/activate
+source .env
 python REST.py

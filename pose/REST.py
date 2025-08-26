@@ -9,7 +9,6 @@ import os
 import io
 import time
 import logging
-import tempfile
 import uuid
 import json
 import random
@@ -18,7 +17,6 @@ from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from PIL import Image
 import numpy as np
-import cv2
 import mediapipe as mp
 import requests
 from datetime import datetime
@@ -157,8 +155,8 @@ def allowed_file(filename):
     """Check if file extension is allowed"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def download_image(url):
-    """Download image from URL and return as bytes"""
+def download_image_from_url(url: str) -> Image.Image:
+    """Download image from URL and return as PIL Image"""
     try:
         headers = {'User-Agent': 'MediaPipe Pose Analysis Service'}
         response = requests.get(url, headers=headers, timeout=10)
@@ -167,101 +165,124 @@ def download_image(url):
         if len(response.content) > MAX_FILE_SIZE:
             raise ValueError(f"Image too large. Max size: {MAX_FILE_SIZE/1024/1024}MB")
         
-        return io.BytesIO(response.content)
-    
-    except requests.exceptions.RequestException as e:
-        raise Exception(f"Failed to download image: {str(e)}")
-
-def convert_to_jpg(image_bytes):
-    """Convert any image format to JPG for consistent processing"""
-    try:
-        image = Image.open(image_bytes)
+        # Return PIL Image directly from bytes
+        image = Image.open(io.BytesIO(response.content))
         
         # Convert to RGB if necessary (for PNG with transparency, etc.)
         if image.mode != 'RGB':
             image = image.convert('RGB')
+            
+        return image
         
-        # Save as JPG
-        jpg_bytes = io.BytesIO()
-        image.save(jpg_bytes, format='JPEG', quality=85)
-        jpg_bytes.seek(0)
-        
-        return jpg_bytes
-        
-    except Exception as e:
-        raise Exception(f"Failed to convert image: {str(e)}")
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Failed to download image: {str(e)}")
 
-def process_image(image_source, is_url=False, is_file_path=False):
-    """Process image and perform pose analysis - returns structured data"""
-    start_time = time.time()
-    temp_path = None
+def validate_image_file(file_path: str) -> Image.Image:
+    """Validate and load image file as PIL Image"""
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
+    
+    if not allowed_file(file_path):
+        raise ValueError("File type not allowed")
     
     try:
-        # Handle image source
-        if is_url:
-            image_bytes = download_image(image_source)
-        elif is_file_path:
-            # Direct file path - use analyzer directly
-            pose_data = pose_analyzer.analyze_pose(image_source)
-            processing_time = time.time() - start_time
-            return {
-                **pose_data,
-                'processing_time': processing_time,
-                'error': None
-            }
-        else:
-            image_bytes = image_source
+        image = Image.open(file_path)
         
-        # Convert to JPG for consistent processing
-        jpg_bytes = convert_to_jpg(image_bytes)
+        # Convert to RGB if necessary
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+            
+        return image
+    except Exception as e:
+        raise Exception(f"Failed to load image: {str(e)}")
+
+def process_image_for_pose(image: Image.Image) -> dict:
+    """Main processing function - takes PIL Image, returns pose data
+    This is the core business logic, separated from HTTP concerns"""
+    try:
+        # Convert PIL Image to numpy array for MediaPipe (RGB format)
+        image_array = np.array(image)
         
-        # Save to temporary file
-        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp_file:
-            jpg_bytes.seek(0)
-            tmp_file.write(jpg_bytes.read())
-            temp_path = tmp_file.name
-        
-        # Perform pose analysis
-        pose_data = pose_analyzer.analyze_pose(temp_path)
-        
-        # Calculate processing time
-        processing_time = time.time() - start_time
+        # Perform pose analysis using MediaPipe
+        pose_data = pose_analyzer.analyze_pose_from_array(image_array)
         
         return {
-            **pose_data,
-            'processing_time': processing_time,
+            'success': True,
+            'data': pose_data,
             'error': None
         }
-    
+        
     except Exception as e:
-        logger.error(f"Image processing error: {str(e)}")
-        processing_time = time.time() - start_time
+        logger.error(f"Pose processing error: {str(e)}")
         return {
-            'predictions': [],
-            'persons_detected': 0,
-            'image_dimensions': {'width': 0, 'height': 0},
-            'processing_time': processing_time,
+            'success': False,
+            'data': {
+                'predictions': [],
+                'persons_detected': 0,
+                'image_dimensions': {'width': image.width, 'height': image.height}
+            },
             'error': str(e)
         }
+
+def create_pose_response(pose_data: dict, processing_time: float) -> dict:
+    """Create standardized pose response with metadata"""
+    enhanced_predictions = []
     
-    finally:
-        # Clean up temporary file
-        if temp_path and os.path.exists(temp_path):
-            try:
-                os.unlink(temp_path)
-            except Exception as e:
-                logger.warning(f"Could not clean up temp file {temp_path}: {e}")
+    for prediction in pose_data.get('predictions', []):
+        is_shiny, shiny_roll = check_shiny()
+        
+        enhanced_prediction = {
+            "properties": {
+                "landmarks": prediction['landmarks'],
+                "pose_analysis": prediction['pose_analysis']
+            }
+        }
+        
+        # Add shiny flag for rare detections
+        if is_shiny:
+            enhanced_prediction["shiny"] = True
+            logger.info(f"✨ SHINY POSE LANDMARKS DETECTED! Roll: {shiny_roll} ✨")
+        
+        enhanced_predictions.append(enhanced_prediction)
+    
+    return {
+        "service": "pose",
+        "status": "success",
+        "predictions": enhanced_predictions,
+        "metadata": {
+            "processing_time": round(processing_time, 3),
+            "model_info": {"framework": "MediaPipe Pose"}
+        }
+    }
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
+    """Health check endpoint with fail-fast validation"""
     global pose_analyzer
     try:
-        # Check if pose analyzer is initialized
-        pose_status = 'ready' if pose_analyzer is not None else 'not_initialized'
+        # Check if pose analyzer is initialized and functional
+        if pose_analyzer is None:
+            return jsonify({
+                'status': 'unhealthy',
+                'service': 'pose',
+                'error': 'Pose analyzer not initialized'
+            }), 503
+        
+        # Test actual functionality with a small test array
+        try:
+            test_array = np.zeros((100, 100, 3), dtype=np.uint8)
+            pose_analyzer.analyze_pose_from_array(test_array)
+            pose_status = 'ready'
+        except Exception as e:
+            logger.error(f"Health check failed: pose analyzer non-functional: {e}")
+            return jsonify({
+                'status': 'unhealthy', 
+                'service': 'pose',
+                'error': f'Pose analyzer non-functional: {str(e)}'
+            }), 503
         
         return jsonify({
-            'status': 'healthy' if pose_status == 'ready' else 'degraded',
+            'status': 'healthy',
             'service': 'pose',
             'capabilities': ['pose_estimation', 'pose_classification', 'body_segmentation', 'joint_analysis'],
             'models': {
@@ -276,10 +297,11 @@ def health_check():
             'supported_poses': list(POSE_CLASSIFICATIONS.keys()),
             'endpoints': [
                 "GET /health - Health check",
-                "GET /v3/analyze?url=<image_url> - Analyze pose from URL", 
-                "GET /v3/analyze?file=<file_path> - Analyze pose from file",
-                "GET /v2/analyze?image_url=<image_url> - V2 compatibility (deprecated)",
-                "GET /v2/analyze_file?file_path=<file_path> - V2 compatibility (deprecated)"
+                "GET /analyze?url=<image_url> - Analyze pose from URL", 
+                "GET /analyze?file=<file_path> - Analyze pose from file",
+                "POST /analyze - Analyze pose from uploaded file",
+                "GET /v3/analyze?url=<image_url> - V3 compatibility (redirects to /analyze)",
+                "GET /v2/analyze?image_url=<image_url> - V2 compatibility (redirects to /analyze)"
             ],
             'timestamp': datetime.utcnow().isoformat()
         })
@@ -290,15 +312,17 @@ def health_check():
             'error': str(e)
         }), 500
 
-@app.route('/v3/analyze', methods=['GET', 'POST'])
-def analyze_v3():
-    """Unified V3 API endpoint for pose analysis"""
+@app.route('/analyze', methods=['GET', 'POST'])
+def analyze():
+    """Unified analyze endpoint - orchestrates input handling and processing"""
+    import time
+    from io import BytesIO
     start_time = time.time()
     
     try:
-        # Handle POST file upload
+        # Step 1: Get image data (URL/file/POST)
         if request.method == 'POST':
-            # Check for file upload
+            # Handle POST file upload
             if 'file' not in request.files:
                 return jsonify({
                     "service": "pose",
@@ -341,230 +365,128 @@ def analyze_v3():
                     }
                 }), 400
             
-            # Process uploaded file
+            # Load image from POST upload
             try:
-                # Save to temporary file for processing
-                with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
-                    temp_path = temp_file.name
-                    file.save(temp_path)
-                
-                # Process with pose analyzer
-                result_data = process_image(temp_path, is_file_path=True)
-                
-                # Handle processing errors
-                if result_data['error']:
-                    return jsonify({
-                        "service": "pose",
-                        "status": "error",
-                        "predictions": [],
-                        "metadata": {
-                            "processing_time": round(result_data['processing_time'], 3),
-                            "model_info": {"framework": "MediaPipe Pose"}
-                        },
-                        "error": {"message": str(result_data['error'])}
-                    }), 500
-                
-                # Build successful response
-                enhanced_predictions = []
-                for prediction in result_data['predictions']:
-                    is_shiny, shiny_roll = check_shiny()
-                    
-                    enhanced_prediction = {
-                        "properties": {
-                            "landmarks": prediction['landmarks'],
-                            "pose_analysis": prediction['pose_analysis']
-                        }
-                    }
-                    
-                    # Add shiny flag for rare detections
-                    if is_shiny:
-                        enhanced_prediction["shiny"] = True
-                        logger.info(f"✨ SHINY POSE LANDMARKS DETECTED! Roll: {shiny_roll} ✨")
-                    
-                    enhanced_predictions.append(enhanced_prediction)
-                
-                return jsonify({
-                    "service": "pose",
-                    "status": "success",
-                    "predictions": enhanced_predictions,
-                    "metadata": {
-                        "processing_time": round(result_data['processing_time'], 3),
-                        "model_info": {"framework": "MediaPipe Pose"}
-                    }
-                })
-                
+                image = Image.open(file)
+                if image.mode != 'RGB':
+                    image = image.convert('RGB')
             except Exception as e:
                 return jsonify({
                     "service": "pose",
                     "status": "error",
                     "predictions": [],
-                    "error": {"message": f"Failed to process uploaded image: {str(e)}"},
+                    "error": {"message": f"Failed to load uploaded image: {str(e)}"},
                     "metadata": {
                         "processing_time": round(time.time() - start_time, 3),
                         "model_info": {"framework": "MediaPipe Pose"}
                     }
-                }), 500
-            finally:
-                # Clean up temporary file
-                try:
-                    if 'temp_path' in locals() and os.path.exists(temp_path):
-                        os.unlink(temp_path)
-                except Exception as e:
-                    logger.warning(f"Could not clean up temp file: {e}")
+                }), 400
         
-        # Handle GET requests
-        # Get parameters from query string
-        url = request.args.get('url')
-        file_path = request.args.get('file')
-        
-        # Validate input - exactly one parameter required
-        if not url and not file_path:
-            return jsonify({
-                "service": "pose",
-                "status": "error", 
-                "predictions": [],
-                "error": {"message": "Must provide either 'url' or 'file' parameter"},
-                "metadata": {
-                    "processing_time": round(time.time() - start_time, 3),
-                    "model_info": {
-                        "framework": "MediaPipe Pose"
-                    }
-                }
-            }), 400
-        
-        if url and file_path:
-            return jsonify({
-                "service": "pose",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": "Cannot provide both 'url' and 'file' parameters - choose one"},
-                "metadata": {
-                    "processing_time": round(time.time() - start_time, 3),
-                    "model_info": {
-                        "framework": "MediaPipe Pose"
-                    }
-                }
-            }), 400
-        
-        # Handle URL input
-        if url:
-            result_data = process_image(url, is_url=True)
-        
-        # Handle file path input
-        elif file_path:
-            # Validate file path
-            if not os.path.exists(file_path):
-                return jsonify({
-                    "service": "pose",
-                    "status": "error",
-                    "predictions": [],
-                    "error": {"message": f"File not found: {file_path}"},
-                    "metadata": {
-                        "processing_time": round(time.time() - start_time, 3),
-                        "model_info": {
-                            "framework": "MediaPipe Pose"
-                        }
-                    }
-                }), 404
+        else:
+            # Handle GET requests
+            url = request.args.get('url')
+            file_path = request.args.get('file')
             
-            if not allowed_file(file_path):
+            # Validate input - exactly one parameter required
+            if not url and not file_path:
                 return jsonify({
                     "service": "pose",
                     "status": "error",
                     "predictions": [],
-                    "error": {"message": "File type not allowed"},
+                    "error": {"message": "Must provide either 'url' or 'file' parameter"},
                     "metadata": {
                         "processing_time": round(time.time() - start_time, 3),
-                        "model_info": {
-                            "framework": "MediaPipe Pose"
-                        }
+                        "model_info": {"framework": "MediaPipe Pose"}
                     }
                 }), 400
             
-            result_data = process_image(file_path, is_file_path=True)
+            if url and file_path:
+                return jsonify({
+                    "service": "pose",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": "Cannot provide both 'url' and 'file' parameters - choose one"},
+                    "metadata": {
+                        "processing_time": round(time.time() - start_time, 3),
+                        "model_info": {"framework": "MediaPipe Pose"}
+                    }
+                }), 400
+            
+            # Load image from URL or file
+            try:
+                if url:
+                    image = download_image_from_url(url)
+                elif file_path:
+                    image = validate_image_file(file_path)
+            except Exception as e:
+                return jsonify({
+                    "service": "pose",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": str(e)},
+                    "metadata": {
+                        "processing_time": round(time.time() - start_time, 3),
+                        "model_info": {"framework": "MediaPipe Pose"}
+                    }
+                }), 400
         
-        # Handle processing errors
-        if result_data['error']:
+        # Step 2: Call processing function
+        result = process_image_for_pose(image)
+        processing_time = time.time() - start_time
+        
+        # Step 3: Handle processing result
+        if not result['success']:
             return jsonify({
                 "service": "pose",
                 "status": "error",
                 "predictions": [],
+                "error": {"message": result['error']},
                 "metadata": {
-                    "processing_time": round(result_data['processing_time'], 3),
-                    "model_info": {
-                        "framework": "MediaPipe Pose"
-                    }
-                },
-                "error": {
-                    "message": str(result_data['error'])
+                    "processing_time": round(processing_time, 3),
+                    "model_info": {"framework": "MediaPipe Pose"}
                 }
             }), 500
         
-        # Build V3 response with enhanced pose predictions
-        enhanced_predictions = []
-        
-        for prediction in result_data['predictions']:
-            is_shiny, shiny_roll = check_shiny()
-            
-            enhanced_prediction = {
-                "properties": {
-                    "landmarks": prediction['landmarks'],
-                    "pose_analysis": prediction['pose_analysis']
-                }
-            }
-            
-            # Add shiny flag for rare detections
-            if is_shiny:
-                enhanced_prediction["shiny"] = True
-                logger.info(f"✨ SHINY POSE LANDMARKS DETECTED! Roll: {shiny_roll} ✨")
-            
-            enhanced_predictions.append(enhanced_prediction)
-        
-        return jsonify({
-            "service": "pose",
-            "status": "success",
-            "predictions": enhanced_predictions,
-            "metadata": {
-                "processing_time": round(result_data['processing_time'], 3),
-                "model_info": {
-                    "framework": "MediaPipe Pose"
-                }
-            }
-        })
+        # Step 4: Create response
+        return jsonify(create_pose_response(result['data'], processing_time))
         
     except Exception as e:
-        logger.error(f"Error in V3 pose analysis: {str(e)}")
+        logger.error(f"Error in pose analysis: {str(e)}")
         return jsonify({
             'service': 'pose',
             'status': 'error',
             'predictions': [],
             'metadata': {
                 'processing_time': round(time.time() - start_time, 3),
-                'model_info': {
-                    'framework': 'MediaPipe Pose'
-                }
+                'model_info': {'framework': 'MediaPipe Pose'}
             },
-            'error': {
-                'message': str(e)
-            }
+            'error': {'message': str(e)}
         }), 500
 
+# V3 compatibility route
+@app.route('/v3/analyze', methods=['GET'])
+def analyze_v3_compat():
+    """V3 compatibility - redirect to new analyze endpoint"""
+    with app.test_request_context('/analyze', query_string=request.args):
+        return analyze()
+
+# V2 compatibility routes
 @app.route('/v2/analyze_file', methods=['GET'])
 def analyze_file_v2_compat():
-    """V2 file compatibility - translate parameters to V3 format"""
+    """V2 file compatibility - translate parameters to new analyze format"""
     file_path = request.args.get('file_path')
     
     if file_path:
         new_args = {'file': file_path}
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        with app.test_request_context('/analyze'):
+            return analyze()
 
 @app.route('/v2/analyze', methods=['GET'])
 def analyze_v2_compat():
-    """V2 compatibility - translate parameters to V3 format"""
+    """V2 compatibility - translate parameters to new analyze format"""
     image_url = request.args.get('image_url')
     
     if image_url:
@@ -573,19 +495,19 @@ def analyze_v2_compat():
         new_args['url'] = image_url
         del new_args['image_url']
         
-        # Call V3 with translated parameters
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        # Call analyze with translated parameters
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        # Let V3 handle validation errors
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        # Let analyze handle validation errors
+        with app.test_request_context('/analyze'):
+            return analyze()
 
 if __name__ == '__main__':
-    # Initialize pose analyzer at startup
+    # Initialize pose analyzer at startup - fail fast if it doesn't work
     logger.info("Initializing Pose Analysis Service...")
     if not initialize_pose_analyzer():
-        logger.error("Failed to initialize Pose Analyzer. Service will not function properly.")
+        logger.error("Failed to initialize Pose Analyzer. Service cannot function.")
         exit(1)
     
     # Load emoji mappings on startup
@@ -598,5 +520,5 @@ if __name__ == '__main__':
     logger.info(f"Private mode: {PRIVATE_MODE}")
     logger.info(f"Model complexity: {POSE_MODEL_COMPLEXITY}, Segmentation: {ENABLE_SEGMENTATION}")
     logger.info("Dedicated pose estimation service with enhanced pose classification")
-    logger.info("V3 API available at /v3/analyze endpoint with V2 backward compatibility")
+    logger.info("Unified /analyze endpoint with V2/V3 backward compatibility")
     app.run(host=host, port=PORT, debug=False)

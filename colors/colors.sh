@@ -1,5 +1,5 @@
 #!/bin/bash
-cd /home/sd/colors
+cd "$(dirname "$0")"
 source colors_venv/bin/activate
 source .env
-python REST.py
+python3 REST.py

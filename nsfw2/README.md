@@ -110,8 +110,8 @@ GET /health
   },
   "endpoints": [
     "GET /health - Health check",
-    "GET /v3/analyze?url=<image_url> - Analyze image from URL",
-    "GET /v3/analyze?file=<file_path> - Analyze image from file",
+    "GET /analyze?url=<image_url> - Analyze image from URL",
+    "GET /analyze?file=<file_path> - Analyze image from file",
     "GET /v2/analyze?image_url=<url> - V2 compatibility (deprecated)"
   ]
 }
@@ -119,26 +119,26 @@ GET /health
 
 ### Analyze Image (Unified Endpoint)
 
-The unified `/v3/analyze` endpoint accepts either URL or file path input:
+The unified `/analyze` endpoint accepts either URL or file path input:
 
 #### Analyze Image from URL
 ```bash
-GET /v3/analyze?url=<image_url>
+GET /analyze?url=<image_url>
 ```
 
 **Example:**
 ```bash
-curl "http://localhost:7774/v3/analyze?url=https://example.com/image.jpg"
+curl "http://localhost:7774/analyze?url=https://example.com/image.jpg"
 ```
 
 #### Analyze Image from File Path
 ```bash
-GET /v3/analyze?file=<file_path>
+GET /analyze?file=<file_path>
 ```
 
 **Example:**
 ```bash
-curl "http://localhost:7774/v3/analyze?file=/path/to/image.jpg"
+curl "http://localhost:7774/analyze?file=/path/to/image.jpg"
 ```
 
 **Input Validation:**
@@ -296,7 +296,7 @@ import requests
 
 # Analyze image from URL
 response = requests.get(
-    'http://localhost:7774/v3/analyze',
+    'http://localhost:7774/analyze',
     params={'url': 'https://example.com/image.jpg'}
 )
 result = response.json()
@@ -321,7 +321,7 @@ if result['status'] == 'success':
 ```javascript
 // Analyze image from URL
 async function analyzeNSFW(imageUrl) {
-    const response = await fetch(`http://localhost:7774/v3/analyze?url=${encodeURIComponent(imageUrl)}`);
+    const response = await fetch(`http://localhost:7774/analyze?url=${encodeURIComponent(imageUrl)}`);
     const result = await response.json();
     
     if (result.status === 'success') {
@@ -348,10 +348,10 @@ analyzeNSFW('https://example.com/image.jpg');
 
 ```bash
 # Basic NSFW analysis
-curl "http://localhost:7774/v3/analyze?url=https://example.com/image.jpg"
+curl "http://localhost:7774/analyze?url=https://example.com/image.jpg"
 
 # File analysis
-curl "http://localhost:7774/v3/analyze?file=/path/to/image.jpg"
+curl "http://localhost:7774/analyze?file=/path/to/image.jpg"
 
 # Health check
 curl "http://localhost:7774/health"

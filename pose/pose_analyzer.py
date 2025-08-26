@@ -54,6 +54,55 @@ class PoseAnalyzer:
         
         logger.info("✅ PoseAnalyzer initialized with MediaPipe Pose")
     
+    def analyze_pose_from_array(self, image_array: np.ndarray) -> Dict[str, Any]:
+        """
+        Analyze pose from numpy array (in-memory processing)
+        
+        Args:
+            image_array: RGB image as numpy array
+            
+        Returns:
+            Dict containing pose predictions with enhanced analysis
+        """
+        try:
+            # MediaPipe expects RGB format, which PIL Images provide by default
+            results = self.pose_model.process(image_array)
+            
+            # Get image dimensions
+            height, width = image_array.shape[:2]
+            
+            predictions = []
+            persons_detected = 0
+            
+            if results.pose_landmarks:
+                persons_detected = 1
+                
+                # Convert landmarks to our format
+                landmarks = self._extract_landmarks(results.pose_landmarks)
+                
+                # Perform pose analysis
+                pose_analysis = self._analyze_pose_features(landmarks)
+                
+                prediction = {
+                    'landmarks': landmarks,
+                    'pose_analysis': pose_analysis
+                }
+                
+                predictions.append(prediction)
+            
+            return {
+                'predictions': predictions,
+                'persons_detected': persons_detected,
+                'image_dimensions': {
+                    'width': width,
+                    'height': height
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"MediaPipe pose analysis error: {str(e)}")
+            raise
+    
     def analyze_pose(self, image_path: str) -> Dict[str, Any]:
         """
         Analyze pose from image file

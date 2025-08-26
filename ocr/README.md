@@ -130,8 +130,8 @@ GET /health
   },
   "endpoints": [
     "GET /health - Health check",
-    "GET /v3/analyze?url=<image_url> - Analyze image from URL",
-    "GET /v3/analyze?file=<file_path> - Analyze image from file",
+    "GET /analyze?url=<image_url> - Analyze image from URL",
+    "GET /analyze?file=<file_path> - Analyze image from file",
     "GET /v2/analyze?image_url=<url> - V2 compatibility (deprecated)",
     "GET /v2/analyze_file?file_path=<file_path> - V2 compatibility (deprecated)"
   ]
@@ -140,26 +140,26 @@ GET /health
 
 ### Analyze Image (Unified Endpoint)
 
-The unified `/v3/analyze` endpoint accepts either URL or file path input:
+The unified `/analyze` endpoint accepts either URL or file path input:
 
 #### Analyze Image from URL
 ```bash
-GET /v3/analyze?url=<image_url>
+GET /analyze?url=<image_url>
 ```
 
 **Example:**
 ```bash
-curl "http://localhost:7775/v3/analyze?url=https://example.com/image.jpg"
+curl "http://localhost:7775/analyze?url=https://example.com/image.jpg"
 ```
 
 #### Analyze Image from File Path
 ```bash
-GET /v3/analyze?file=<file_path>
+GET /analyze?file=<file_path>
 ```
 
 **Example:**
 ```bash
-curl "http://localhost:7775/v3/analyze?file=/path/to/image.jpg"
+curl "http://localhost:7775/analyze?file=/path/to/image.jpg"
 ```
 
 **Input Validation:**
@@ -174,7 +174,6 @@ curl "http://localhost:7775/v3/analyze?file=/path/to/image.jpg"
   "status": "success",
   "predictions": [
     {
-      "confidence": 0.929,
       "emoji": "💬",
       "emoji_mappings": [
         {
@@ -359,7 +358,7 @@ import requests
 
 # Analyze image from URL
 response = requests.get(
-    'http://localhost:7775/v3/analyze',
+    'http://localhost:7775/analyze',
     params={'url': 'https://example.com/image.jpg'}
 )
 result = response.json()
@@ -368,11 +367,9 @@ result = response.json()
 if result['status'] == 'success':
     for prediction in result['predictions']:
         text = prediction['text']
-        confidence = prediction['confidence']
         has_text = prediction['has_text']
         
         print(f"Text: {text}")
-        print(f"Confidence: {confidence:.3f}")
         print(f"Has text: {has_text}")
         
         # Process text regions with bounding boxes
@@ -396,13 +393,12 @@ if result['status'] == 'success':
 ```javascript
 // Analyze image from URL
 async function analyzeOCR(imageUrl) {
-    const response = await fetch(`http://localhost:7775/v3/analyze?url=${encodeURIComponent(imageUrl)}`);
+    const response = await fetch(`http://localhost:7775/analyze?url=${encodeURIComponent(imageUrl)}`);
     const result = await response.json();
     
     if (result.status === 'success') {
         result.predictions.forEach(prediction => {
             console.log(`Text: ${prediction.text}`);
-            console.log(`Confidence: ${(prediction.confidence * 100).toFixed(1)}%`);
             console.log(`Has text: ${prediction.has_text}`);
             
             // Process text regions
@@ -428,10 +424,10 @@ analyzeOCR('https://example.com/image.jpg');
 
 ```bash
 # Basic text extraction
-curl "http://localhost:7775/v3/analyze?url=https://example.com/image.jpg"
+curl "http://localhost:7775/analyze?url=https://example.com/image.jpg"
 
 # File analysis
-curl "http://localhost:7775/v3/analyze?file=/path/to/image.jpg"
+curl "http://localhost:7775/analyze?file=/path/to/image.jpg"
 
 # Health check
 curl "http://localhost:7775/health"
