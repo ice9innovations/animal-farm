@@ -3,6 +3,7 @@ import requests
 import os
 import uuid
 import time
+import io
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 import hashlib
@@ -593,6 +594,115 @@ def analyze_composition(filepath: str) -> Dict[str, Any]:
     except Exception as e:
         return {"error": f"Composition analysis failed: {str(e)}"}
 
+def download_image_from_url(url: str) -> Image.Image:
+    """Download image from URL and return as PIL Image"""
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        
+        if len(response.content) > MAX_FILE_SIZE:
+            raise ValueError(f"Image too large. Max size: {MAX_FILE_SIZE/1024/1024}MB")
+        
+        # Return PIL Image directly from bytes
+        image = Image.open(io.BytesIO(response.content))
+        
+        # Convert to RGB if necessary
+        if image.mode not in ['RGB', 'RGBA', 'L']:
+            image = image.convert('RGB')
+            
+        return image
+        
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Failed to download image: {str(e)}")
+
+def validate_image_file(file_path: str) -> Image.Image:
+    """Validate and load image file as PIL Image"""
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
+    
+    try:
+        image = Image.open(file_path)
+        
+        # Convert to RGB if necessary (but preserve original mode for metadata)
+        if image.mode not in ['RGB', 'RGBA', 'L']:
+            image = image.convert('RGB')
+            
+        return image
+    except Exception as e:
+        raise Exception(f"Failed to load image: {str(e)}")
+
+def process_image_for_metadata(image: Image.Image) -> dict:
+    """Main processing function - takes PIL Image, returns metadata data
+    This is the core business logic, separated from HTTP concerns"""
+    try:
+        # Save PIL Image to temporary file for metadata extraction
+        import tempfile
+        temp_filename = None
+        
+        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False, dir=FOLDER) as tmp_file:
+            temp_filename = os.path.basename(tmp_file.name)
+            image.save(tmp_file.name, format='JPEG', quality=95)
+        
+        # Extract metadata using existing function
+        result = extract_comprehensive_metadata(temp_filename, cleanup=True)
+        
+        if result.get('status') == 'error':
+            return {
+                'success': False,
+                'data': {},
+                'error': result.get('error', 'Metadata extraction failed')
+            }
+        
+        return {
+            'success': True,
+            'data': result,
+            'error': None
+        }
+        
+    except Exception as e:
+        # Clean up temp file on error if it exists
+        if temp_filename:
+            temp_path = os.path.join(FOLDER, temp_filename)
+            cleanup_file(temp_path)
+        
+        return {
+            'success': False,
+            'data': {},
+            'error': str(e)
+        }
+
+def create_metadata_response(metadata_result: dict, processing_time: float) -> dict:
+    """Create standardized metadata response with formatting"""
+    try:
+        # Use existing formatting function to convert raw analysis to clean API response
+        prediction = format_metadata_response(metadata_result)
+        
+        return {
+            "service": "metadata",
+            "status": "success",
+            "predictions": [prediction],
+            "metadata": {
+                "processing_time": round(processing_time, 3),
+                "model_info": {
+                    "framework": "ExifTool + PIL + OpenCV + NumPy"
+                }
+            }
+        }
+        
+    except Exception as e:
+        return {
+            "service": "metadata",
+            "status": "error",
+            "predictions": [],
+            "error": {"message": f"Failed to format response: {str(e)}"},
+            "metadata": {
+                "processing_time": round(processing_time, 3),
+                "model_info": {
+                    "framework": "ExifTool + PIL + OpenCV + NumPy"
+                }
+            }
+        }
+
 def format_metadata_response(metadata_result: Dict[str, Any]) -> Dict[str, Any]:
     """
     Format metadata extraction results into clean API response.
@@ -766,175 +876,199 @@ def health_check():
         },
         "endpoints": [
             "GET /health - Health check",
-            "GET /v3/analyze?url=<url> - Extract metadata from URL (V3 unified)",
-            "GET /v3/analyze?file=<path> - Extract metadata from local file (V3 unified)",
-            "GET /v2/analyze?image_url=<url> - Extract metadata from URL (V2 compatibility)",
-            "GET /v2/analyze_file?file_path=<path> - Extract metadata from local file (V2 compatibility)"
+            "GET /analyze?url=<url> - Extract metadata from URL",
+            "GET /analyze?file=<path> - Extract metadata from local file", 
+            "POST /analyze - Extract metadata from uploaded file",
+            "GET /v3/analyze?url=<url> - V3 compatibility (redirects to /analyze)",
+            "GET /v2/analyze?image_url=<url> - V2 compatibility (redirects to /analyze)"
         ]
     })
 
-@app.route('/v3/analyze', methods=['GET'])
-def analyze_v3():
-    """Unified V3 API endpoint for both URL and file path analysis"""
+@app.route('/analyze', methods=['GET', 'POST'])
+def analyze():
+    """Unified analyze endpoint - orchestrates input handling and processing"""
     import time
+    from io import BytesIO
     start_time = time.time()
     
     try:
-        # Get input parameters - support both url and file
-        url = request.args.get('url')
-        file = request.args.get('file')
-        
-        # Validate input - exactly one parameter must be provided
-        if not url and not file:
-            return jsonify({
-                "service": "metadata",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": "Must provide either url or file parameter"},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 400
-        
-        if url and file:
-            return jsonify({
-                "service": "metadata",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": "Cannot provide both url and file parameters"},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 400
-        
-        # Process URL input
-        if url:
+        # Step 1: Get image data (URL/file/POST)
+        if request.method == 'POST':
+            # Handle POST file upload
+            if 'file' not in request.files:
+                return jsonify({
+                    "service": "metadata",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": "No file provided in POST request"},
+                    "metadata": {
+                        "processing_time": round(time.time() - start_time, 3),
+                        "model_info": {"framework": "ExifTool + PIL + OpenCV + NumPy"}
+                    }
+                }), 400
+            
+            file = request.files['file']
+            if file.filename == '':
+                return jsonify({
+                    "service": "metadata",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": "No file selected"},
+                    "metadata": {
+                        "processing_time": round(time.time() - start_time, 3),
+                        "model_info": {"framework": "ExifTool + PIL + OpenCV + NumPy"}
+                    }
+                }), 400
+            
+            # Validate file size
+            file.seek(0, 2)  # Seek to end
+            file_size = file.tell()
+            file.seek(0)     # Seek back to beginning
+            
+            if file_size > MAX_FILE_SIZE:
+                return jsonify({
+                    "service": "metadata",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB"},
+                    "metadata": {
+                        "processing_time": round(time.time() - start_time, 3),
+                        "model_info": {"framework": "ExifTool + PIL + OpenCV + NumPy"}
+                    }
+                }), 400
+            
+            # Load image from POST upload
             try:
-                filename = uuid.uuid4().hex + ".jpg"
-                filepath = os.path.join(FOLDER, filename)
-                response = requests.get(url, timeout=10)
-                response.raise_for_status()
-                
-                if len(response.content) > MAX_FILE_SIZE:
-                    raise ValueError("Downloaded file too large")
-                
-                with open(filepath, "wb") as file_handle:
-                    file_handle.write(response.content)
-                
-                # Analyze using existing function
-                result = extract_comprehensive_metadata(filename)
-                
+                image = Image.open(file)
+                if image.mode not in ['RGB', 'RGBA', 'L']:
+                    image = image.convert('RGB')
             except Exception as e:
                 return jsonify({
                     "service": "metadata",
                     "status": "error",
                     "predictions": [],
-                    "error": {"message": f"Failed to process image from URL: {str(e)}"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 500
+                    "error": {"message": f"Failed to load uploaded image: {str(e)}"},
+                    "metadata": {
+                        "processing_time": round(time.time() - start_time, 3),
+                        "model_info": {"framework": "ExifTool + PIL + OpenCV + NumPy"}
+                    }
+                }), 400
         
-        # Process file input
-        elif file:
-            # Validate file path
-            if not os.path.exists(file):
+        else:
+            # Handle GET requests
+            url = request.args.get('url')
+            file_path = request.args.get('file')
+            
+            # Validate input - exactly one parameter required
+            if not url and not file_path:
                 return jsonify({
                     "service": "metadata",
                     "status": "error",
                     "predictions": [],
-                    "error": {"message": f"File not found: {file}"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 404
+                    "error": {"message": "Must provide either 'url' or 'file' parameter"},
+                    "metadata": {
+                        "processing_time": round(time.time() - start_time, 3),
+                        "model_info": {"framework": "ExifTool + PIL + OpenCV + NumPy"}
+                    }
+                }), 400
             
-            # Copy file to temp location for processing
-            temp_filename = uuid.uuid4().hex + ".jpg"
-            temp_filepath = os.path.join(FOLDER, temp_filename)
+            if url and file_path:
+                return jsonify({
+                    "service": "metadata",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": "Cannot provide both 'url' and 'file' parameters - choose one"},
+                    "metadata": {
+                        "processing_time": round(time.time() - start_time, 3),
+                        "model_info": {"framework": "ExifTool + PIL + OpenCV + NumPy"}
+                    }
+                }), 400
             
+            # Load image from URL or file
             try:
-                import shutil
-                shutil.copy2(file, temp_filepath)
-                
-                # Extract metadata using existing function (no cleanup - we handle temp file)
-                result = extract_comprehensive_metadata(temp_filename, cleanup=False)
-                
-                # Clean up temporary file
-                cleanup_file(temp_filepath)
-                
-            except Exception as copy_error:
-                # Clean up temp file on error
-                if os.path.exists(temp_filepath):
-                    cleanup_file(temp_filepath)
-                raise copy_error
+                if url:
+                    image = download_image_from_url(url)
+                elif file_path:
+                    image = validate_image_file(file_path)
+            except Exception as e:
+                return jsonify({
+                    "service": "metadata",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": str(e)},
+                    "metadata": {
+                        "processing_time": round(time.time() - start_time, 3),
+                        "model_info": {"framework": "ExifTool + PIL + OpenCV + NumPy"}
+                    }
+                }), 400
         
-        # Handle extraction errors
-        if result.get('status') == 'error':
+        # Step 2: Call processing function
+        result = process_image_for_metadata(image)
+        processing_time = time.time() - start_time
+        
+        # Step 3: Handle processing result
+        if not result['success']:
             return jsonify({
                 "service": "metadata",
                 "status": "error",
                 "predictions": [],
-                "error": {"message": result.get('error', 'Metadata extraction failed')},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 500
-        
-        # Use formatting function to convert raw analysis to clean API response
-        try:
-            prediction = format_metadata_response(result)
-        except ValueError as e:
-            return jsonify({
-                "service": "metadata",
-                "status": "error",
-                "predictions": [],
-                "error": {"message": str(e)},
-                "metadata": {"processing_time": round(time.time() - start_time, 3)}
-            }), 500
-        
-        predictions = [prediction]
-        
-        return jsonify({
-            "service": "metadata",
-            "status": "success",
-            "predictions": predictions,
-            "metadata": {
-                "processing_time": round(time.time() - start_time, 3),
-                "model_info": {
-                    "framework": "ExifTool + PIL + OpenCV + NumPy"
+                "error": {"message": result['error']},
+                "metadata": {
+                    "processing_time": round(processing_time, 3),
+                    "model_info": {"framework": "ExifTool + PIL + OpenCV + NumPy"}
                 }
-            }
-        })
+            }), 500
+        
+        # Step 4: Create response
+        return jsonify(create_metadata_response(result['data'], processing_time))
         
     except Exception as e:
         return jsonify({
-            "service": "metadata",
-            "status": "error",
-            "predictions": [],
-            "error": {"message": f"Internal error: {str(e)}"},
-            "metadata": {"processing_time": round(time.time() - start_time, 3)}
+            'service': 'metadata',
+            'status': 'error',
+            'predictions': [],
+            'metadata': {
+                'processing_time': round(time.time() - start_time, 3),
+                'model_info': {'framework': 'ExifTool + PIL + OpenCV + NumPy'}
+            },
+            'error': {'message': str(e)}
         }), 500
 
+# V3 compatibility route
+@app.route('/v3/analyze', methods=['GET'])
+def analyze_v3_compat():
+    """V3 compatibility - redirect to new analyze endpoint"""
+    with app.test_request_context('/analyze', query_string=request.args):
+        return analyze()
+
+# V2 compatibility routes
 @app.route('/v2/analyze_file', methods=['GET'])
 def analyze_file_v2_compat():
-    """V2 file compatibility - translate parameters to V3 format"""
+    """V2 file compatibility - translate parameters to new analyze format"""
     file_path = request.args.get('file_path')
     
     if file_path:
-        # Parameter translation: file_path -> file
         new_args = {'file': file_path}
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        # Let V3 handle validation errors
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        with app.test_request_context('/analyze'):
+            return analyze()
 
 @app.route('/v2/analyze', methods=['GET'])
 def analyze_v2_compat():
-    """V2 compatibility - translate parameters to V3 format"""
+    """V2 compatibility - translate parameters to new analyze format"""
     image_url = request.args.get('image_url')
     
     if image_url:
-        # Parameter translation: image_url -> url
+        # Parameter translation
         new_args = {'url': image_url}
-        with app.test_request_context('/v3/analyze', query_string=new_args):
-            return analyze_v3()
+        with app.test_request_context('/analyze', query_string=new_args):
+            return analyze()
     else:
-        # Let V3 handle validation errors
-        with app.test_request_context('/v3/analyze'):
-            return analyze_v3()
+        # Let analyze handle validation errors
+        with app.test_request_context('/analyze'):
+            return analyze()
 
 
 if __name__ == '__main__':
