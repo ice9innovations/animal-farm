@@ -1,11 +1,8 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import torch
-import torchvision.transforms as transforms
 from PIL import Image
-import clip
 import sys
-import numpy as np
 import os
 import os.path
 import requests
@@ -14,12 +11,13 @@ import re
 import uuid
 import logging
 import random
-import pickle
 from typing import List, Dict, Any, Optional, Tuple
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 load_dotenv()
+
+from clip_analyzer import ClipAnalyzer
 
 # API Configuration for emoji downloads (required)
 API_HOST = os.getenv('API_HOST')
@@ -86,8 +84,6 @@ CLIP_MODEL = 'ViT-L/14'  # Larger model for better discrimination (~6-8GB VRAM)
 # Ensure upload directory exists
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Text embedding cache
-text_embedding_cache = {}
 TEXT_EMBEDDINGS_CACHE_FILE = './text_embeddings_cache.pkl'
 
 
@@ -121,29 +117,6 @@ def get_emoji(concept: str) -> Optional[str]:
     concept_clean = concept.lower().strip().replace(' ', '_')
     return emoji_mappings.get(concept_clean)
 
-def load_text_embeddings_cache():
-    """Load text embeddings from cache file if it exists"""
-    global text_embedding_cache
-    
-    if os.path.exists(TEXT_EMBEDDINGS_CACHE_FILE):
-        try:
-            with open(TEXT_EMBEDDINGS_CACHE_FILE, 'rb') as f:
-                text_embedding_cache = pickle.load(f)
-            logger.info(f"Loaded {len(text_embedding_cache)} text embeddings from cache file")
-        except Exception as e:
-            logger.error(f"Failed to load text embeddings cache: {e}")
-            text_embedding_cache = {}
-    else:
-        logger.info("No text embeddings cache file found, will create one after first computation")
-
-def save_text_embeddings_cache():
-    """Save text embeddings to cache file"""
-    try:
-        with open(TEXT_EMBEDDINGS_CACHE_FILE, 'wb') as f:
-            pickle.dump(text_embedding_cache, f)
-        logger.info(f"Saved {len(text_embedding_cache)} text embeddings to cache file")
-    except Exception as e:
-        logger.error(f"Failed to save text embeddings cache: {e}")
 
 def check_shiny():
     """Check if this detection should be shiny (1/2500 chance)"""
@@ -154,138 +127,22 @@ def check_shiny():
 # Load emoji mappings on startup
 load_emoji_mappings()
 
-def load_labels_from_files() -> List[str]:
-    """Load classification labels from all .txt files in the labels/ folder"""
-    all_labels = []
-    
-    # Automatically discover all .txt files in the labels folder
-    try:
-        txt_files = [f for f in os.listdir(LABELS_FOLDER) if f.endswith('.txt')]
-        txt_files.sort()  # Consistent ordering
-        logger.info(f"Found {len(txt_files)} label files: {txt_files}")
-    except OSError as e:
-        logger.error(f"Could not read labels folder {LABELS_FOLDER}: {e}")
-        return []
-    
-    for filename in txt_files:
-        filepath = os.path.join(LABELS_FOLDER, filename)
-        try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                # Read lines, strip whitespace, ignore empty lines and comments
-                file_labels = [
-                    line.strip() 
-                    for line in f.readlines() 
-                    if line.strip() and not line.strip().startswith('#')
-                ]
-                all_labels.extend(file_labels)
-                logger.info(f"Loaded {len(file_labels)} labels from {filepath}")
-        except Exception as e:
-            logger.error(f"Error loading labels from {filepath}: {e}")
-    
-    # Remove duplicates while preserving order
-    seen = set()
-    unique_labels = []
-    for label in all_labels:
-        if label.lower() not in seen:
-            seen.add(label.lower())
-            unique_labels.append(label)
-    
-    logger.info(f"Total unique labels loaded: {len(unique_labels)}")
-    return unique_labels
 
 
-# Global variables for model and data
-model = None
-preprocess = None
-labels = None
-label_tensor = None
-label_features = None  # CACHED TEXT FEATURES
+# Global analyzer instance
+analyzer = None
 
-def initialize_clip_model() -> bool:
-    """Initialize CLIP model and labels with FP16 optimization and text embedding caching"""
-    global model, preprocess, labels, label_tensor, label_features
-    try:
-        logger.info(f"Loading CLIP model: {CLIP_MODEL}...")
-        model, preprocess = clip.load(CLIP_MODEL, device=device)
-        
-        # Apply FP16 optimization for VRAM savings and speed boost
-        if device == "cuda":
-            model = model.half()
-            logger.info(f"Applied FP16 quantization to {CLIP_MODEL} - 50% VRAM reduction achieved!")
-            logger.info(f"Expected VRAM usage: ~4.3GB (down from ~8.7GB)")
-        
-        logger.info(f"CLIP model {CLIP_MODEL} loaded successfully")
-        
-        # Load cached embeddings
-        load_text_embeddings_cache()
-        
-        # Load labels from files
-        labels = load_labels_from_files()
-        
-        if not labels:
-            logger.error("No labels loaded from files!")
-            return False
-        
-        # Create text descriptions
-        labels_desc = [f"a picture of a {label}" for label in labels]
-        
-        # Check which embeddings need to be computed
-        labels_to_compute = []
-        cached_features = []
-        
-        for i, (label, desc) in enumerate(zip(labels, labels_desc)):
-            cache_key = desc.lower()  # Use description as cache key
-            if cache_key in text_embedding_cache:
-                # Convert cached numpy array back to tensor
-                cached_tensor = torch.from_numpy(text_embedding_cache[cache_key]).to(device)
-                if device == "cuda" and hasattr(model, 'dtype') and model.dtype == torch.float16:
-                    cached_tensor = cached_tensor.half()
-                cached_features.append(cached_tensor)
-            else:
-                labels_to_compute.append((i, label, desc))
-                cached_features.append(None)  # Placeholder
-        
-        # Compute missing embeddings if any
-        if labels_to_compute:
-            logger.info(f"Computing embeddings for {len(labels_to_compute)} new labels...")
-            
-            # Tokenize only the missing labels
-            missing_descs = [desc for _, _, desc in labels_to_compute]
-            label_tensor = clip.tokenize(missing_descs).to(device)
-            
-            # Compute text features for missing labels
-            with torch.no_grad():
-                if device == "cuda" and hasattr(model, 'dtype') and model.dtype == torch.float16:
-                    with torch.cuda.amp.autocast():
-                        computed_features = model.encode_text(label_tensor)
-                else:
-                    computed_features = model.encode_text(label_tensor)
-            
-            # Cache the computed features and fill in the placeholders
-            for i, (original_idx, label, desc) in enumerate(labels_to_compute):
-                feature_tensor = computed_features[i]
-                cached_features[original_idx] = feature_tensor
-                
-                # Cache as numpy array for persistence
-                cache_key = desc.lower()
-                text_embedding_cache[cache_key] = feature_tensor.cpu().numpy()
-            
-            # Save updated cache
-            save_text_embeddings_cache()
-        else:
-            logger.info(f"All {len(labels)} label embeddings loaded from cache")
-        
-        # Stack all features into final tensor
-        label_features = torch.stack(cached_features)
-        
-        logger.info(f"Pre-computed text features for {len(labels)} labels with caching - memory leak fixed!")
-        logger.info(f"Initialized {len(labels)} classification labels from files")
-        
-        return True
-        
-    except Exception as e:
-        logger.error(f"Failed to initialize CLIP model: {e}")
-        return False
+def initialize_analyzer() -> bool:
+    """Initialize analyzer once at startup - fail fast"""
+    global analyzer
+    analyzer = ClipAnalyzer(
+        model_name=CLIP_MODEL,
+        confidence_threshold=CONFIDENCE_THRESHOLD,
+        max_predictions=MAX_PREDICTIONS,
+        labels_folder=LABELS_FOLDER,
+        cache_file=TEXT_EMBEDDINGS_CACHE_FILE
+    )
+    return analyzer.initialize()
 
 
 def lookup_emoji(tag: str, score: float) -> List[Dict[str, Any]]:
@@ -311,138 +168,7 @@ def lookup_emoji(tag: str, score: float) -> List[Dict[str, Any]]:
         logger.warning(f"Local emoji service lookup failed for '{original_tag}': {e}")
         return []
 
-def preprocess_image(image: Image.Image) -> Optional[torch.Tensor]:
-    """Preprocess PIL Image for CLIP model"""
-    try:
-        # Ensure RGB format
-        if image.mode != 'RGB':
-            image = image.convert("RGB")
-        return preprocess(image).unsqueeze(0).to(device)
-    except Exception as e:
-        logger.error(f"Error preprocessing image: {e}")
-        return None
 
-def compute_similarity(image: Image.Image) -> Optional[torch.Tensor]:
-    """Compute similarity between PIL Image and text labels"""
-    logger.info("Checking model and label features...")
-    if model is None:
-        logger.error("Model not initialized")
-        return None
-    if label_features is None:
-        logger.error("Label features not initialized")
-        return None
-        
-    try:
-        with torch.no_grad():
-            logger.info("Preprocessing image...")
-            image_tensor = preprocess_image(image)
-            if image_tensor is None:
-                return None
-                
-            # Convert image tensor to half precision if model is FP16
-            if device == "cuda" and hasattr(model, 'dtype') and model.dtype == torch.float16:
-                image_tensor = image_tensor.half()
-                
-            logger.info("Encoding image features...")
-            # Use autocast for FP16 inference stability - ONLY encode image (text features cached)
-            if device == "cuda" and hasattr(model, 'dtype') and model.dtype == torch.float16:
-                with torch.cuda.amp.autocast():
-                    image_features = model.encode_image(image_tensor)
-            else:
-                image_features = model.encode_image(image_tensor)
-            
-            # Use pre-computed cached label_features (no more text encoding per request!)
-                
-            logger.info("Computing similarity...")
-            similarity = (image_features @ label_features.T).softmax(dim=-1)
-            logger.info("Similarity computed successfully")
-            
-            # Clean up GPU memory
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            
-        return similarity
-        
-    except Exception as e:
-        logger.error(f"Error computing similarity for {image_path}: {e}")
-        return None
-
-def compute_caption_similarity(image_path: str, caption: str) -> Optional[float]:
-    """Compute similarity between image and arbitrary caption text with caching"""
-    logger.info(f"Computing caption similarity for: '{caption}'")
-    
-    if model is None:
-        logger.error("Model not initialized")
-        return None
-        
-    try:
-        with torch.no_grad():
-            # Preprocess image
-            logger.info("Preprocessing image...")
-            image_tensor = preprocess_image(image_path)
-            if image_tensor is None:
-                return None
-                
-            # Convert image tensor to half precision if model is FP16
-            if device == "cuda" and hasattr(model, 'dtype') and model.dtype == torch.float16:
-                image_tensor = image_tensor.half()
-                
-            # Check cache for text features first
-            cache_key = caption.lower().strip()
-            if cache_key in text_embedding_cache:
-                logger.info(f"Using cached text features for caption: '{caption}'")
-                text_features = torch.from_numpy(text_embedding_cache[cache_key]).to(device)
-                if device == "cuda" and hasattr(model, 'dtype') and model.dtype == torch.float16:
-                    text_features = text_features.half()
-                # Ensure proper shape (add batch dimension if needed)
-                if len(text_features.shape) == 1:
-                    text_features = text_features.unsqueeze(0)
-            else:
-                # Tokenize caption text - try raw caption for better discrimination
-                logger.info("Tokenizing and encoding caption...")
-                logger.info(f"Using raw caption: '{caption}'")
-                text_tokens = clip.tokenize([caption]).to(device)
-                
-                # Encode text with autocast for FP16 stability
-                if device == "cuda" and hasattr(model, 'dtype') and model.dtype == torch.float16:
-                    with torch.cuda.amp.autocast():
-                        text_features = model.encode_text(text_tokens)
-                else:
-                    text_features = model.encode_text(text_tokens)
-                
-                # Cache the text features
-                text_embedding_cache[cache_key] = text_features.cpu().numpy()
-                # Save cache periodically (but not every single request to avoid I/O overhead)
-                if len(text_embedding_cache) % 10 == 0:  # Save every 10 new entries
-                    save_text_embeddings_cache()
-                
-            logger.info("Encoding image features...")
-            # Encode image with autocast for FP16 stability
-            if device == "cuda" and hasattr(model, 'dtype') and model.dtype == torch.float16:
-                with torch.cuda.amp.autocast():
-                    image_features = model.encode_image(image_tensor)
-            else:
-                image_features = model.encode_image(image_tensor)
-            
-            # Normalize features (important for cosine similarity)
-            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-            
-            # Compute cosine similarity
-            logger.info("Computing similarity...")
-            similarity = (image_features @ text_features.T).item()
-            
-            logger.info(f"Caption similarity computed: {similarity:.3f}")
-            
-            # Clean up GPU memory
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            
-        return similarity
-        
-    except Exception as e:
-        logger.error(f"Error computing caption similarity for {image_path}: {e}")
-        return None
 
 def is_allowed_file(filename: str) -> bool:
     """Check if file extension is allowed"""
@@ -462,23 +188,38 @@ def process_image_for_classification(image: Image.Image) -> Dict[str, Any]:
     This is the core business logic, separated from HTTP concerns
     """
     try:
-        # Classify using existing function
-        result = classify_image(image)
+        # Use analyzer instead of direct ML logic
+        result = analyzer.analyze_similarity_from_array(image)
         
-        if result.get('status') == 'error':
+        if not result.get('success'):
             return {
                 "success": False,
                 "error": result.get('error', 'Classification failed')
             }
         
-        # Extract predictions and emoji matches
+        # Extract predictions and run emoji lookup
         predictions = result.get('predictions', [])
-        emoji_matches = result.get('emoji_matches', [])
+        all_emoji_matches = []
+        
+        # Look up emoji for each prediction (same as original logic)
+        for prediction in predictions:
+            label = prediction.get('label', '')
+            confidence = prediction.get('confidence', 0)
+            
+            try:
+                emoji_match = lookup_emoji(label, confidence)
+                if emoji_match:
+                    all_emoji_matches.extend(emoji_match)
+                else:
+                    logger.debug(f"No emoji found for label '{label}'")
+            except RuntimeError as e:
+                logger.error(f"Mirror Stage service failure for '{label}': {e}")
+                raise RuntimeError(f"Classification failed due to Mirror Stage service failure: {e}")
         
         return {
             "success": True,
             "predictions": predictions,
-            "emoji_matches": emoji_matches
+            "emoji_matches": all_emoji_matches
         }
         
     except Exception as e:
@@ -596,63 +337,6 @@ def handle_image_input(url: str = None, file: str = None) -> Dict[str, Any]:
         return {"success": True, "filepath": file, "cleanup": False, "error": None}
 
 
-def classify_image(image: Image.Image) -> Dict[str, Any]:
-    """Classify PIL Image using CLIP model"""
-    if not model or not labels:
-        return {"error": "Model not initialized", "status": "error"}
-        
-    try:
-        # Use the exact same logic as the working version
-        logger.info("Computing similarities...")
-        similarity_scores = compute_similarity(image)
-        if similarity_scores is None:
-            return {"error": "Failed to compute similarities", "status": "error"}
-            
-        logger.info(f"Getting predictions above threshold {CONFIDENCE_THRESHOLD}...")
-        
-        # Get all scores and indices, sorted by confidence
-        scores_sorted, indices_sorted = similarity_scores[0].sort(descending=True)
-        
-        predictions = []
-        all_emoji_matches = []
-        
-        for i, (score, idx) in enumerate(zip(scores_sorted, indices_sorted)):
-            confidence = score.item()
-            
-            # Stop if below threshold
-            if confidence < CONFIDENCE_THRESHOLD:
-                break
-                
-            # Stop if we've hit the max limit
-            if len(predictions) >= MAX_PREDICTIONS:
-                break
-            
-            label = labels[idx]
-            predictions.append({"label": label, "confidence": round(confidence, 3)})
-            
-            # Look up emoji for each prediction (fails loudly only if Mirror Stage unavailable)
-            try:
-                emoji_match = lookup_emoji(label, confidence)
-                if emoji_match:
-                    all_emoji_matches.extend(emoji_match)
-                else:
-                    logger.debug(f"No emoji found for label '{label}'")
-            except RuntimeError as e:
-                logger.error(f"Mirror Stage service failure for '{label}': {e}")
-                raise RuntimeError(f"Classification failed due to Mirror Stage service failure: {e}")
-            
-            logger.info(f"Prediction {i+1}: {label} ({confidence:.3f})")
-        
-        logger.info(f"Returned {len(predictions)} predictions above threshold {CONFIDENCE_THRESHOLD}")
-        
-        # Return simple format for V2 processing
-        response = {"predictions": predictions, "emoji_matches": all_emoji_matches, "status": "success"}
-        
-        return response
-        
-    except Exception as e:
-        logger.error(f"Error classifying image: {e}")
-        return {"error": f"Classification failed: {str(e)}", "status": "error"}
 
 # Flask app setup
 app = Flask(__name__)
@@ -677,12 +361,12 @@ def internal_error(e):
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    model_status = "loaded" if model else "not_loaded"
+    model_status = "loaded" if analyzer and analyzer.model else "not_loaded"
     return jsonify({
         "status": "healthy",
         "model_status": model_status,
         "device": str(device),
-        "num_labels": len(labels) if labels else 0
+        "num_labels": len(analyzer.labels) if analyzer and analyzer.labels else 0
     })
 
 @app.route('/analyze', methods=['GET', 'POST'])
@@ -787,8 +471,8 @@ def analyze_v3_compat():
     with app.test_request_context('/analyze', query_string=request.args):
         return analyze()
 
-@app.route('/v3/score', methods=['GET'])
-def score_caption_v3():
+@app.route('/score', methods=['GET'])
+def score_caption():
     """Score caption similarity against image using CLIP"""
     import time
     start_time = time.time()
@@ -827,18 +511,19 @@ def score_caption_v3():
         cleanup = image_result["cleanup"]
         
         try:
-            # Check model availability
-            if model is None:
+            # Check analyzer availability
+            if analyzer is None or analyzer.model is None:
                 return jsonify({
                     "service": "clip",
                     "status": "error",
                     "similarity_score": None,
-                    "error": {"message": "CLIP model not initialized"},
+                    "error": {"message": "CLIP analyzer not initialized"},
                     "metadata": {"processing_time": round(time.time() - start_time, 3)}
                 }), 500
             
-            # Compute similarity score
-            similarity_score = compute_caption_similarity(filepath, caption)
+            # Load image and compute similarity score using analyzer
+            image = Image.open(filepath).convert('RGB')
+            similarity_score = analyzer.compute_caption_similarity(image, caption)
             
             if similarity_score is None:
                 return jsonify({
@@ -895,6 +580,12 @@ def score_caption_v3():
             "metadata": {"processing_time": round(time.time() - start_time, 3)}
         }), 500
 
+@app.route('/v3/score', methods=['GET'])
+def score_caption_v3_compat():
+    """V3 compatibility - redirect to new score endpoint"""
+    with app.test_request_context('/score', query_string=request.args):
+        return score_caption()
+
 # V2 Compatibility Routes - Translate parameters and call V3
 @app.route('/v2/analyze_file/', methods=['GET'])
 @app.route('/v2/analyze_file', methods=['GET'])
@@ -939,13 +630,13 @@ def analyze_v2_compat():
 
 
 if __name__ == '__main__':
-    # Initialize model and emoji data
+    # Initialize analyzer and emoji data
     logger.info("Starting CLIP service...")
     
-    model_loaded = initialize_clip_model()
+    analyzer_loaded = initialize_analyzer()
     
-    if not model_loaded:
-        logger.error("Failed to load CLIP model. Service will run but classification will fail.")
+    if not analyzer_loaded:
+        logger.error("Failed to load CLIP analyzer. Service will run but classification will fail.")
         logger.error("Please ensure CLIP is installed: pip install clip-by-openai")
         
     
@@ -955,9 +646,9 @@ if __name__ == '__main__':
     logger.info(f"Starting CLIP service on {host}:{PORT}")
     logger.info(f"Private mode: {PRIVATE}")
     logger.info(f"CLIP model: {CLIP_MODEL}")
-    logger.info(f"Model loaded: {model_loaded}")
-    if labels:
-        logger.info(f"Classification labels: {len(labels)}")
+    logger.info(f"Analyzer loaded: {analyzer_loaded}")
+    if analyzer and analyzer.labels:
+        logger.info(f"Classification labels: {len(analyzer.labels)}")
     
     app.run(
         host=host,
