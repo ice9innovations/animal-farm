@@ -65,7 +65,7 @@ PORT=7770                    # Service port (default: 7770)
 PRIVATE=false               # Access mode (false=public, true=localhost-only)
 
 # Color System Configuration
-COLOR_SYSTEM=copic          # Options: copic, prismacolor, or copic,prismacolor
+COLOR_SYSTEM=copic  # Options: copic, prismacolor, prismacolor_pencils, or any comma-separated combination
 ```
 
 ### Configuration Details
@@ -74,7 +74,7 @@ COLOR_SYSTEM=copic          # Options: copic, prismacolor, or copic,prismacolor
 |----------|----------|---------|-------------|
 | `PORT` | Yes | - | Service listening port |
 | `PRIVATE` | Yes | - | Access control (false=public, true=localhost-only) |
-| `COLOR_SYSTEM` | Yes | - | Color systems to use (copic, prismacolor, or both) |
+| `COLOR_SYSTEM` | Yes | - | Color systems to use (copic, prismacolor, prismacolor_pencils, or combinations) |
 
 ### Color System Options
 

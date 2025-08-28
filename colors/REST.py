@@ -11,9 +11,9 @@ from typing import Dict, Any, Optional
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from PIL import Image
-from haishoku.haishoku import Haishoku
+import logging
 
-from color_names import *
+from colors_analyzer import ColorsAnalyzer
 
 # Load environment variables FIRST
 load_dotenv()
@@ -37,6 +37,10 @@ PORT = int(PORT_STR)
 COLOR_SYSTEM = COLOR_SYSTEM_STR.split(',')
 COLOR_SYSTEM = [system.strip().lower() for system in COLOR_SYSTEM]
 
+# Keep the original COLOR_SYSTEM as configured - don't modify it
+# The analyzer will handle the mapping internally
+pass
+
 FOLDER = './'
 UPLOAD_FOLDER = os.path.join(FOLDER, 'uploads')
 MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
@@ -44,8 +48,9 @@ MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
 # Ensure upload folder exists
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-def rgb2hex(r,g,b):
-    return "#{:02x}{:02x}{:02x}".format(r,g,b)
+# Global analyzer instance
+analyzer = None
+
 
 def hex2rgb(hexcode):
     return tuple(map(ord,hexcode[1:].decode('hex')))
@@ -97,82 +102,13 @@ def get_color_name_for_emojis(rgb):
 #        if color == color_name:
 #            return emoji
 
-def format_copic(name):
-    copic = []
-    copic_name = re.sub('[\(\[].*?[\)\]]', '', str(name)).strip()
-    copic_code = name.replace(copic_name,"").replace("(","").replace(")","").strip()
-
-    copic.append(copic_name)
-    copic.append(copic_code)
-    
-    return copic
 
 def unique(sequence):
     seen = set()
     return [x for x in sequence if not (x in seen or seen.add(x))]
 
-def extract_copic_prefix(copic_name):
-    """Extract the color family prefix from a Copic color name like 'Slate (BV29)' -> 'BV'"""
-    if not copic_name:
-        return None
-    
-    # Extract code from parentheses: "Slate (BV29)" -> "BV29"
-    match = re.search(r'\(([^)]+)\)', copic_name)
-    if not match:
-        return None
-    
-    code = match.group(1)
-    
-    # Extract prefix letters: "BV29" -> "BV"
-    prefix_match = re.match(r'^([A-Z]+)', code)
-    if prefix_match:
-        return prefix_match.group(1)
-    
-    return None
 
-def get_color_temperature(copic_name):
-    """Determine color temperature based on Copic color family prefix"""
-    prefix = extract_copic_prefix(copic_name)
-    if not prefix:
-        return "neutral"
-    
-    # Temperature mapping based on Copic color families
-    cool_prefixes = ['BV', 'B', 'BG', 'G', 'YG', 'C']  # Cool colors + Cool Gray
-    warm_prefixes = ['RV', 'R', 'YR', 'Y', 'W']         # Warm colors + Warm Gray
-    # Everything else (N, T, E, F) is neutral
-    
-    if prefix in cool_prefixes:
-        return "cool"
-    elif prefix in warm_prefixes:
-        return "warm"
-    else:
-        return "neutral"
 
-def calculate_palette_temperature(palette_colors):
-    """Calculate overall palette temperature based on color distribution"""
-    if not palette_colors:
-        return "neutral"
-    
-    cool_count = warm_count = neutral_count = 0
-    
-    for color_info in palette_colors:
-        color_name = color_info.get('color', '')
-        temperature = get_color_temperature(color_name)
-        
-        if temperature == "cool":
-            cool_count += 1
-        elif temperature == "warm":
-            warm_count += 1
-        else:
-            neutral_count += 1
-    
-    # Determine overall temperature
-    if cool_count > warm_count:
-        return "cool"
-    elif warm_count > cool_count:
-        return "warm"
-    else:
-        return "neutral"
 
 def color_names(cnames, style):
     pal_json = '  {\n    "palette": [\n'
@@ -310,188 +246,84 @@ def cleanup_file(filepath: str) -> None:
     except Exception as e:
         print(f"Warning: Could not remove file {filepath}: {e}")
 
-def get_colors_from_image(image: Image.Image):
-    """Extract color groups directly from PIL Image (bypasses Haishoku file requirement)"""
-    import sys
-    sys.path.append('/home/sd/anaconda3/lib/python3.9/site-packages/haishoku')
-    import haillow
-    
-    # Use Haishoku's internal thumbnail function
-    thumbnail = haillow.get_thumbnail(image.copy())
-    
-    # Get colors directly (this is what Haishoku does internally)
-    max_colors = thumbnail.height * thumbnail.width
-    image_colors = thumbnail.getcolors(max_colors)
-    return image_colors
-
-def get_colors_mean_from_image(image: Image.Image):
-    """Implement Haishoku's getColorsMean logic for PIL Images"""
-    import sys
-    sys.path.append('/home/sd/anaconda3/lib/python3.9/site-packages/haishoku')
-    import alg
-    
-    # Get colors using our direct method
-    image_colors = get_colors_from_image(image)
-    
-    # Follow Haishoku's exact algorithm
-    sorted_image_colors = alg.sort_by_rgb(image_colors)
-    grouped_image_colors = alg.group_by_accuracy(sorted_image_colors)
-    
-    # Get weighted mean of all colors
-    colors_mean = []
-    for i in range(3):
-        for j in range(3):
-            for k in range(3):
-                grouped_image_color = grouped_image_colors[i][j][k]
-                if 0 != len(grouped_image_color):
-                    color_mean = alg.get_weighted_mean(grouped_image_color)
-                    colors_mean.append(color_mean)
-    
-    # Return the most 8 colors (following Haishoku's logic)
-    temp_sorted_colors_mean = sorted(colors_mean)
-    if 8 < len(temp_sorted_colors_mean):
-        colors_mean = temp_sorted_colors_mean[len(temp_sorted_colors_mean)-8 : len(temp_sorted_colors_mean)]
-    else:
-        colors_mean = temp_sorted_colors_mean
-    
-    # Sort colors_mean
-    colors_mean = sorted(colors_mean, reverse=True)
-    return colors_mean
-
-def get_dominant_from_image(image: Image.Image):
-    """Get dominant color directly from PIL Image"""
-    colors_mean = get_colors_mean_from_image(image)
-    colors_mean = sorted(colors_mean, reverse=True)
-    dominant_tuple = colors_mean[0]
-    dominant = dominant_tuple[1]
-    return dominant
-
-def get_palette_from_image(image: Image.Image):
-    """Get color palette directly from PIL Image"""
-    colors_mean = get_colors_mean_from_image(image)
-    
-    # Calculate percentages (following Haishoku's logic)
-    palette_tmp = []
-    count_sum = 0
-    for c_m in colors_mean:
-        count_sum += c_m[0]
-        palette_tmp.append(c_m)
-    
-    # Calculate the percentage
-    palette = []
-    for p in palette_tmp:
-        pp = '%.2f' % (p[0] / count_sum)
-        tp = (float(pp), p[1])
-        palette.append(tp)
-    
-    return palette
+def initialize_analyzer() -> bool:
+    """Initialize analyzer once at startup - fail fast"""
+    global analyzer
+    analyzer = ColorsAnalyzer(color_systems=COLOR_SYSTEM)
+    return analyzer is not None
 
 def process_image_for_colors(image: Image.Image) -> Dict[str, Any]:
     """
     Main processing function - takes PIL Image, returns color analysis data
     This is the core business logic, separated from HTTP concerns
-    Uses pure in-memory processing without temporary files
     """
-    start_time = time.time()
-    
     try:
-        # Get dominant color using our in-memory implementation
-        dominant_color = get_dominant_from_image(image)
-        dr, dg, db = dominant_color[0], dominant_color[1], dominant_color[2]
-        dhex = rgb2hex(dr, dg, db)
+        # Use analyzer instead of direct ML logic
+        result = analyzer.analyze_colors_from_array(image)
         
-        # Get dominant color names
-        dominant_copic = get_color_name(dominant_color, "copic")
-        copic_d = format_copic(dominant_copic)
-        copic_str = f"{copic_d[0]} ({copic_d[1]})"
-        
-        # Get Prismacolor for dominant color
-        dominant_prisma = get_color_name(dominant_color, "prismacolor")
-        prisma_d = format_copic(dominant_prisma)
-        prisma_str = f"{prisma_d[0]} ({prisma_d[1]})"
-        
-        # Get color palette using our in-memory implementation
-        palette_colors = get_palette_from_image(image)
-        
-        # Build palette arrays with both systems
-        palette_with_both = []
-        for p in palette_colors:
-            clr = p[1]
-            copic_name = get_color_name(clr, "copic")
-            prisma_name = get_color_name(clr, "prismacolor")
-            
-            if copic_name:
-                copic_formatted = format_copic(copic_name)
-                copic_str_pal = f"{copic_formatted[0]} ({copic_formatted[1]})"
-                
-                prisma_formatted = format_copic(prisma_name) if prisma_name else ["Unknown", ""]
-                prisma_str_pal = f"{prisma_formatted[0]} ({prisma_formatted[1]})" if prisma_name else "Unknown"
-                
-                hex_val = rgb2hex(clr[0], clr[1], clr[2])
-                temp = get_color_temperature(copic_str_pal)
-                
-                palette_with_both.append({
-                    "copic": copic_str_pal,
-                    "hex": hex_val,
-                    "prismacolor": prisma_str_pal,
-                    "temperature": temp
-                })
-        
-        # Remove duplicates based on hex value
-        unique_palette = []
-        seen_hex = set()
-        for color in palette_with_both:
-            if color["hex"] not in seen_hex:
-                unique_palette.append(color)
-                seen_hex.add(color["hex"])
-        
-        # Calculate palette temperature
-        palette_temp = calculate_palette_temperature([{"color": c["copic"]} for c in unique_palette])
-        
-        # Get primary color temperature
-        primary_temp = get_color_temperature(copic_str)
-        
-        analysis_time = round(time.time() - start_time, 3)
-        
-        # Build response in V3 format
-        color_prediction = {
-            "primary": {
-                "copic": copic_str,
-                "hex": dhex,
-                "prismacolor": prisma_str,
-                "temperature": primary_temp
-            },
-            "palette": {
-                "temperature": palette_temp,
-                "colors": unique_palette
+        if not result.get('success'):
+            return {
+                "success": False,
+                "error": result.get('error', 'Color analysis failed')
             }
-        }
         
         return {
             "success": True,
-            "predictions": [color_prediction],
-            "processing_time": analysis_time
+            "predictions": result.get('predictions', []),
+            "processing_time": result.get('processing_time', 0)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error processing image for colors: {e}")
+        return {
+            "success": False,
+            "error": f"Processing failed: {str(e)}"
+        }
+
+def process_multiregion_colors(image: Image.Image, regions: int = 4) -> Dict[str, Any]:
+    """
+    Process image using multi-region color analysis for comprehensive palette
+    """
+    try:
+        result = analyzer.analyze_colors_multiregion(image, regions)
+        
+        if not result.get('success'):
+            return {
+                "success": False,
+                "error": result.get('error', 'Multi-region color analysis failed')
+            }
+        
+        return {
+            "success": True,
+            "predictions": result.get('predictions', []),
+            "processing_time": result.get('processing_time', 0),
+            "metadata": result.get('metadata', {})
         }
         
     except Exception as e:
         return {
             "success": False,
-            "error": f"Color analysis failed: {str(e)}",
-            "processing_time": round(time.time() - start_time, 3)
+            "error": f"Multi-region processing failed: {str(e)}"
         }
 
-def create_colors_response(predictions: list, processing_time: float) -> Dict[str, Any]:
+def create_colors_response(predictions: list, processing_time: float, additional_metadata: dict = None) -> Dict[str, Any]:
     """Create standardized colors response"""
+    metadata = {
+        "processing_time": round(processing_time, 3),
+        "model_info": {
+            "framework": "Haishoku"
+        }
+    }
+    
+    # Merge additional metadata if provided
+    if additional_metadata:
+        metadata.update(additional_metadata)
+    
     return {
         "service": "colors",
         "status": "success", 
         "predictions": predictions,
-        "metadata": {
-            "processing_time": round(processing_time, 3),
-            "model_info": {
-                "framework": "Haishoku + PIL (in-memory)"
-            }
-        }
+        "metadata": metadata
     }
 
 def analyze_colors(image_file: str, cleanup: bool = True) -> Dict[str, Any]:
@@ -701,7 +533,18 @@ def analyze():
             if url:
                 # Download from URL directly into memory
                 try:
-                    response = requests.get(url, timeout=10)
+                    # Add browser-like headers to bypass anti-hotlinking protection
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Accept-Encoding': 'gzip, deflate, br',
+                        'DNT': '1',
+                        'Connection': 'keep-alive',
+                        'Upgrade-Insecure-Requests': '1',
+                        'Referer': 'https://www.google.com/'
+                    }
+                    response = requests.get(url, headers=headers, timeout=10)
                     response.raise_for_status()
                     
                     if len(response.content) > MAX_FILE_SIZE:
@@ -723,7 +566,12 @@ def analyze():
                     return error_response(f"Failed to load image file: {str(e)}", 500)
         
         # Step 2: Process the image (unified processing path)
-        processing_result = process_image_for_colors(image)
+        # Check for multi-region analysis parameter
+        regions = request.args.get('regions', type=int)
+        if regions and regions > 1:
+            processing_result = process_multiregion_colors(image, regions)
+        else:
+            processing_result = process_image_for_colors(image)
         
         # Step 3: Handle processing result
         if not processing_result["success"]:
@@ -732,7 +580,8 @@ def analyze():
         # Step 4: Create response
         response = create_colors_response(
             processing_result["predictions"],
-            processing_result["processing_time"]
+            processing_result["processing_time"],
+            processing_result.get("metadata", {})
         )
         
         return jsonify(response)
@@ -836,7 +685,18 @@ def analyze_v3():
             try:
                 filename = uuid.uuid4().hex + ".jpg"
                 filepath = os.path.join(UPLOAD_FOLDER, filename)
-                response = requests.get(url, timeout=10)
+                # Add browser-like headers to bypass anti-hotlinking protection
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'DNT': '1',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                    'Referer': 'https://www.google.com/'
+                }
+                response = requests.get(url, headers=headers, timeout=10)
                 response.raise_for_status()
                 
                 if len(response.content) > MAX_FILE_SIZE:
@@ -1010,10 +870,19 @@ def analyze_v2_compat():
 
 
 if __name__ == '__main__':
+    # Initialize analyzer
+    print("Starting Colors service...")
+    
+    analyzer_loaded = initialize_analyzer()
+    
+    if not analyzer_loaded:
+        print("Failed to load Colors analyzer. Service will run but analysis will fail.")
+    
     host = "0.0.0.0" if not PRIVATE else "127.0.0.1"
     print(f"Starting Color Analysis API on {host}:{PORT}")
     print(f"Private mode: {PRIVATE}")
     print(f"Configured color systems: {', '.join([s.title() for s in COLOR_SYSTEM])}")
+    print(f"Analyzer loaded: {analyzer_loaded}")
     app.run(host=host, port=int(PORT), debug=False, threaded=True)
 
 
