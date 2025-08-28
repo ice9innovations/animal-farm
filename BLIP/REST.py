@@ -41,6 +41,7 @@ from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from blip_analyzer import BlipAnalyzer
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -72,6 +73,9 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 # Load emoji mappings from local JSON file
 emoji_mappings = {}
 emoji_tokenizer = None
+
+# Global BLIP analyzer - initialize once at startup
+blip_analyzer = None
 
 # Priority overrides for critical ambiguities
 PRIORITY_OVERRIDES = {
@@ -187,57 +191,34 @@ def lookup_text_for_emojis(text: str) -> Dict[str, Any]:
 
 
 
-# Device configuration
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-if torch.backends.mps.is_available():
-    device = torch.device("mps")
+# Device info logging (moved to analyzer)
+logger.info(f"PyTorch version: {torch.__version__}")
+logger.info(f"CUDA available: {torch.cuda.is_available()}")
+logger.info(f"CUDA device count: {torch.cuda.device_count() if torch.cuda.is_available() else 0}")
+if torch.cuda.is_available():
+    logger.info(f"CUDA device: {torch.cuda.get_device_name(0)}")
 
-logger.info(f"Using device: {device}")
-
-# Model configuration
-MODEL_URLS = {
-    'base_14M': 'https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base_14M.pth',
-    'base': 'https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base.pth',
-    'large': 'https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_large.pth',
-    'base_capfilt_large': 'https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base_capfilt_large.pth'
-}
-
-model = None
-
-def load_model() -> bool:
-    """Load BLIP model with error handling"""
-    global model
+def initialize_blip_analyzer() -> bool:
+    """Initialize BLIP analyzer once at startup - fail fast"""
+    global blip_analyzer
     try:
-        # Try to import BLIP model
-        try:
-            from models.blip import blip_decoder
-        except ImportError:
-            logger.error("BLIP models not found. Please install BLIP or ensure models directory exists.")
+        logger.info("Initializing BLIP Analyzer...")
+        
+        blip_analyzer = BlipAnalyzer(
+            image_size=IMAGE_SIZE,
+            model_path="./model_base_capfilt_large.pth"
+        )
+        
+        # Initialize the model
+        if not blip_analyzer.initialize():
+            logger.error("❌ Failed to initialize BLIP Analyzer")
             return False
             
-        # Load the required model
-        model_path = "./model_base_capfilt_large.pth"
-        
-        if not os.path.exists(model_path):
-            logger.error(f"BLIP model not found: {model_path}")
-            logger.error("Please download the required model: model_base_capfilt_large.pth")
-            return False
-            
-        logger.info(f"Loading BLIP model from {model_path}")
-        # Use base ViT for all models (the 'large' refers to caption filtering, not ViT size)
-        model = blip_decoder(pretrained=model_path, image_size=IMAGE_SIZE, vit='base')
-        model.eval()
-        model = model.to(device)
-        
-        # Temporarily disable FP16 for BLIP - causing tensor type mismatch errors  
-        # Similar to YOLO, BLIP architecture has FP16 incompatibility issues
-        logger.info("Using FP32 for BLIP model stability")
-        
-        logger.info("BLIP model loaded successfully")
+        logger.info("✅ BLIP Analyzer initialized successfully")
         return True
         
     except Exception as e:
-        logger.error(f"Failed to load BLIP model: {e}")
+        logger.error(f"❌ Error initializing BLIP Analyzer: {str(e)}")
         return False
 
 
@@ -333,10 +314,10 @@ def process_image_for_caption(image: Image.Image) -> Dict[str, Any]:
     This is the core business logic, separated from HTTP concerns
     """
     try:
-        # Generate caption using existing function
-        result = generate_caption(image)
+        # Generate caption using analyzer
+        result = blip_analyzer.analyze_caption_from_array(image)
         
-        if result.get('status') == 'error':
+        if not result.get('success'):
             return {
                 "success": False,
                 "error": result.get('error', 'Caption generation failed')
@@ -349,6 +330,7 @@ def process_image_for_caption(image: Image.Image) -> Dict[str, Any]:
         return {
             "success": True,
             "caption": caption,
+            "emojis": emojis,
             "word_mappings": word_mappings
         }
         
@@ -360,115 +342,72 @@ def process_image_for_caption(image: Image.Image) -> Dict[str, Any]:
         }
 
 def create_blip_response(caption: str, word_mappings: Dict[str, str], processing_time: float) -> Dict[str, Any]:
-    """Create standardized BLIP response with emoji mappings"""
-    predictions = []
-    if caption:
-        emoji_mappings = []
-        if word_mappings:
-            for word, emoji in word_mappings.items():
-                is_shiny, shiny_roll = check_shiny()
-                
-                mapping = {
-                    "word": word,
-                    "emoji": emoji
-                }
-                
-                if is_shiny:
-                    mapping["shiny"] = True
-                    logging.info(f"✨ SHINY {word.upper()} EMOJI DETECTED! Roll: {shiny_roll} ✨")
-                
-                emoji_mappings.append(mapping)
-        
-        predictions.append({
-            "text": caption,
-            "emoji_mappings": emoji_mappings
-        })
+    """Create standardized BLIP response with metadata"""
+    is_shiny, shiny_roll = check_shiny()
+    
+    prediction = {
+        "properties": {
+            "caption": caption,
+            "word_mappings": word_mappings
+        }
+    }
+    
+    # Add shiny flag for rare detections
+    if is_shiny:
+        prediction["shiny"] = True
+        logger.info(f"✨ SHINY CAPTION GENERATED! Roll: {shiny_roll} ✨")
     
     return {
         "service": "blip",
         "status": "success",
-        "predictions": predictions,
+        "predictions": [prediction],
         "metadata": {
             "processing_time": round(processing_time, 3),
-            "model_info": {
-                "framework": "Salesforce"
-            }
+            "model_info": {"framework": "BLIP (Bootstrapping Language-Image Pre-training)"}
         }
     }
 
-def generate_caption(image: Image.Image) -> Dict[str, Any]:
-    """Generate caption for PIL Image using BLIP model"""
-    if not model:
-        return {"error": "Model not loaded", "status": "error"}
-        
+def download_image_from_url(url: str) -> Image.Image:
+    """Download image from URL and return as PIL Image"""
     try:
-        # Preprocess image
-        image_tensor = preprocess_image(image)
-        if image_tensor is None:
-            return {"error": "Failed to preprocess image", "status": "error"}
-            
-        # Generate caption with FP16 optimization
-        with torch.no_grad():
-            # Use autocast for FP16 inference if model is FP16
-            use_autocast = (device.type == 'cuda' and hasattr(model, 'dtype') and 
-                          model.dtype == torch.float16)
-            # Ensure proper tensor format
-            if image_tensor.dim() != 4:
-                logger.error(f"Invalid image tensor dimensions: {image_tensor.shape}")
-                return {"error": "Invalid image format", "status": "error"}
-                
-            # Try with num_beams=1 first (primary fix)
-            try:
-                if use_autocast:
-                    with torch.cuda.amp.autocast():
-                        caption = model.generate(
-                            image_tensor, 
-                            sample=False, 
-                            num_beams=1,  # Fix for tensor size mismatch issue
-                            max_length=20, 
-                            min_length=5
-                        )
-                else:
-                    caption = model.generate(
-                        image_tensor, 
-                        sample=False, 
-                        num_beams=1,  # Fix for tensor size mismatch issue
-                        max_length=20, 
-                        min_length=5
-                    )
-            except RuntimeError as e:
-                if "size of tensor" in str(e):
-                    logger.warning("Beam search failed, trying with sample=True")
-                    # Fallback: use sampling instead of beam search
-                    if use_autocast:
-                        with torch.cuda.amp.autocast():
-                            caption = model.generate(
-                                image_tensor, 
-                                sample=True, 
-                                num_beams=1,
-                                max_length=20, 
-                                min_length=5
-                            )
-                    else:
-                        caption = model.generate(
-                            image_tensor, 
-                            sample=True, 
-                            num_beams=1,
-                            max_length=20, 
-                            min_length=5
-                        )
-                else:
-                    raise e
-            
-        caption_text = caption[0] if caption else "No caption generated"
-        logger.info(f"Generated caption: {caption_text}")
+        headers = {'User-Agent': 'BLIP Caption Generation Service'}
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
         
-        # Return simple caption
-        return {"caption": caption_text, "status": "success"}
+        if len(response.content) > MAX_FILE_SIZE:
+            raise ValueError(f"Image too large. Max size: {MAX_FILE_SIZE/1024/1024}MB")
         
+        # Return PIL Image directly from bytes
+        from io import BytesIO
+        image = Image.open(BytesIO(response.content))
+        
+        # Convert to RGB if necessary
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+            
+        return image
+        
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Failed to download image: {str(e)}")
+
+def validate_image_file(file_path: str) -> Image.Image:
+    """Validate and load image file as PIL Image"""
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
+    
+    if not is_allowed_file(file_path):
+        raise ValueError("File type not allowed")
+    
+    try:
+        image = Image.open(file_path)
+        
+        # Convert to RGB if necessary
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+            
+        return image
     except Exception as e:
-        logger.error(f"Error generating caption: {e}")
-        return {"error": f"Caption generation failed: {str(e)}", "status": "error"}
+        raise Exception(f"Failed to load image: {str(e)}")
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
@@ -599,31 +538,16 @@ def analyze():
                 return error_response("Cannot provide both url and file parameters")
             
             if url:
-                # Download directly to memory
-                response = requests.get(url, timeout=10)
-                response.raise_for_status()
-                
-                content_type = response.headers.get('content-type', '')
-                if not content_type.startswith('image/'):
-                    return error_response("URL does not point to an image")
-                
-                if len(response.content) > MAX_FILE_SIZE:
-                    return error_response("Downloaded file too large")
-                
-                image = Image.open(BytesIO(response.content)).convert('RGB')
+                try:
+                    image = download_image_from_url(url)
+                except Exception as e:
+                    return error_response(str(e))
                 
             else:  # file parameter
-                # Read file directly to memory
-                if not os.path.exists(file):
-                    return error_response(f"File not found: {file}")
-                
-                if not is_allowed_file(file):
-                    return error_response("File type not allowed")
-                
-                if not validate_file_size(file):
-                    return error_response("File too large")
-                
-                image = Image.open(file).convert('RGB')
+                try:
+                    image = validate_image_file(file)
+                except Exception as e:
+                    return error_response(str(e))
         
         # Step 2: Process the image (unified processing path)
         processing_result = process_image_for_caption(image)
@@ -652,13 +576,13 @@ if __name__ == '__main__':
     # Initialize model and emoji data
     logger.info("Starting BLIP service...")
     
-    model_loaded = load_model()
+    model_loaded = initialize_blip_analyzer()
     
     # Using local emoji file - no external dependencies
     
     if not model_loaded:
-        logger.error("Failed to load BLIP model. Service will run but caption generation will fail.")
-        logger.error("Please ensure BLIP models are downloaded and available.")
+        logger.error("Failed to initialize BLIP analyzer. Service cannot function.")
+        exit(1)
         
     
     # Determine host based on private mode
