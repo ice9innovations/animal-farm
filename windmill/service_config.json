@@ -3,7 +3,7 @@
     "blip": {
       "host": "localhost",
       "port": 7777,
-      "endpoint": "/analyze",
+      "endpoint": "/v3/analyze",
       "queue_prefix": "queue_",
       "category": "primary",
       "description": "Image captioning with emoji mapping"
@@ -11,7 +11,7 @@
     "clip": {
       "host": "localhost",
       "port": 7778,
-      "endpoint": "/analyze",
+      "endpoint": "/v3/analyze",
       "queue_prefix": "queue_",
       "category": "primary",
       "description": "Image classification with confidence scoring"
@@ -19,7 +19,7 @@
     "colors": {
       "host": "localhost",
       "port": 7770,
-      "endpoint": "/analyze", 
+      "endpoint": "/v3/analyze", 
       "queue_prefix": "queue_",
       "category": "primary",
       "description": "Copic/Prismacolor color analysis"
@@ -27,7 +27,7 @@
     "detectron2": {
       "host": "localhost",
       "port": 7771,
-      "endpoint": "/analyze",
+      "endpoint": "/v3/analyze",
       "queue_prefix": "queue_",
       "category": "primary",
       "description": "Object detection with bounding boxes"
@@ -35,7 +35,7 @@
     "face": {
       "host": "localhost",
       "port": 7772,
-      "endpoint": "/analyze",
+      "endpoint": "/v3/analyze",
       "queue_prefix": "queue_",
       "category": "spatial_only",
       "description": "Face detection and pose estimation"
@@ -43,7 +43,7 @@
     "inception_v3": {
       "host": "localhost",
       "port": 7779,
-      "endpoint": "/analyze",
+      "endpoint": "/v3/analyze",
       "queue_prefix": "queue_",
       "category": "primary",
       "description": "ImageNet classification"
@@ -51,7 +51,7 @@
     "metadata": {
       "host": "localhost",
       "port": 7781,
-      "endpoint": "/analyze",
+      "endpoint": "/v3/analyze",
       "queue_prefix": "queue_",
       "category": "primary",
       "description": "EXIF/technical metadata extraction"
@@ -59,7 +59,7 @@
     "ocr": {
       "host": "localhost",
       "port": 7775,
-      "endpoint": "/analyze",
+      "endpoint": "/v3/analyze",
       "queue_prefix": "queue_",
       "category": "primary",
       "description": "Text extraction with PaddleOCR"
@@ -67,7 +67,7 @@
     "nsfw2": {
       "host": "localhost",
       "port": 7774,
-      "endpoint": "/analyze",
+      "endpoint": "/v3/analyze",
       "queue_prefix": "queue_",
       "category": "primary",
       "description": "Content moderation"
@@ -75,7 +75,7 @@
     "ollama": {
       "host": "localhost",
       "port": 7782,
-      "endpoint": "/analyze",
+      "endpoint": "/v3/analyze",
       "queue_prefix": "queue_",
       "category": "primary",
       "description": "LLM vision analysis"
@@ -83,7 +83,7 @@
     "pose": {
       "host": "localhost",
       "port": 7786,
-      "endpoint": "/analyze",
+      "endpoint": "/v3/analyze",
       "queue_prefix": "queue_",
       "category": "spatial_only",
       "description": "Pose Estimation"
@@ -91,7 +91,7 @@
     "rtdetr": {
       "host": "localhost",
       "port": 7780,
-      "endpoint": "/analyze",
+      "endpoint": "/v3/analyze",
       "queue_prefix": "queue_",
       "category": "primary",
       "description": "Transformer-based object detection"
@@ -99,7 +99,7 @@
     "yolov8": {
       "host": "localhost",
       "port": 7773,
-      "endpoint": "/analyze",
+      "endpoint": "/v3/analyze",
       "queue_prefix": "queue_",
       "category": "primary",
       "description": "Real-time object detection"
