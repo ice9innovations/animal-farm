@@ -54,6 +54,7 @@ class SpatialEnrichmentWorker:
         # Logging
         self.setup_logging()
         self.db_conn = None
+        self.read_db_conn = None
         
     def setup_logging(self):
         """Configure logging"""
@@ -74,6 +75,7 @@ class SpatialEnrichmentWorker:
     def connect_to_database(self):
         """Connect to PostgreSQL database"""
         try:
+            # Main connection for transactions (write operations)
             self.db_conn = psycopg2.connect(
                 host=self.db_host,
                 database=self.db_name,
@@ -81,6 +83,16 @@ class SpatialEnrichmentWorker:
                 password=self.db_password
             )
             self.db_conn.autocommit = False
+            
+            # Read-only connection for queries (prevents idle transactions)
+            self.read_db_conn = psycopg2.connect(
+                host=self.db_host,
+                database=self.db_name,
+                user=self.db_user,
+                password=self.db_password
+            )
+            self.read_db_conn.autocommit = True  # Auto-commit for read queries
+            
             self.logger.info(f"Connected to PostgreSQL at {self.db_host}")
             return True
             
@@ -91,7 +103,7 @@ class SpatialEnrichmentWorker:
     def find_merged_boxes_needing_enrichment(self):
         """Find merged_boxes that need spatial enrichment"""
         try:
-            cursor = self.db_conn.cursor()
+            cursor = self.read_db_conn.cursor()
             
             # Find merged boxes that haven't been processed for enrichment yet
             # or have been updated since last enrichment

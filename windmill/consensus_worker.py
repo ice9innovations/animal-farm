@@ -57,6 +57,7 @@ class ConsensusWorker:
         # Logging
         self.setup_logging()
         self.db_conn = None
+        self.read_db_conn = None
         
     def setup_logging(self):
         """Configure logging"""
@@ -77,6 +78,7 @@ class ConsensusWorker:
     def connect_to_database(self):
         """Connect to PostgreSQL database"""
         try:
+            # Main connection for transactions (write operations)
             self.db_conn = psycopg2.connect(
                 host=self.db_host,
                 database=self.db_name,
@@ -84,6 +86,16 @@ class ConsensusWorker:
                 password=self.db_password
             )
             self.db_conn.autocommit = False  # Use transactions
+            
+            # Read-only connection for queries (prevents idle transactions)
+            self.read_db_conn = psycopg2.connect(
+                host=self.db_host,
+                database=self.db_name,
+                user=self.db_user,
+                password=self.db_password
+            )
+            self.read_db_conn.autocommit = True  # Auto-commit for read queries
+            
             self.logger.info(f"Connected to PostgreSQL at {self.db_host}")
             return True
             
@@ -94,7 +106,7 @@ class ConsensusWorker:
     def find_images_needing_consensus_update(self):
         """Find images that have new service results since last consensus"""
         try:
-            cursor = self.db_conn.cursor()
+            cursor = self.read_db_conn.cursor()
             
             # Find images with service results but no consensus, or outdated consensus
             query = """
@@ -137,7 +149,7 @@ class ConsensusWorker:
     def get_service_results_for_image(self, image_id):
         """Get all successful service results for an image"""
         try:
-            cursor = self.db_conn.cursor()
+            cursor = self.read_db_conn.cursor()
             
             query = """
                 SELECT service, data, processing_time, result_created
@@ -731,6 +743,8 @@ class ConsensusWorker:
         finally:
             if self.db_conn:
                 self.db_conn.close()
+            if self.read_db_conn:
+                self.read_db_conn.close()
             self.logger.info("Consensus worker stopped")
     
     def run(self):

@@ -411,7 +411,7 @@ class BoundingBoxMergerWorker:
         return intersection / union if union > 0 else 0
     
     def update_merged_boxes_for_image(self, image_id, image_filename):
-        """Update merged boxes for a single image using DELETE+INSERT pattern"""
+        """Update merged boxes for a single image using safe DELETE+INSERT pattern"""
         try:
             # Get bbox results
             bbox_results = self.get_bbox_results_for_image(image_id)
@@ -428,17 +428,27 @@ class BoundingBoxMergerWorker:
                 self.logger.warning(f"Could not harmonize boxes for image {image_id}")
                 return False
             
-            # Atomic DELETE + INSERT
+            # Safe atomic DELETE + INSERT with foreign key handling
             cursor = self.db_conn.cursor()
             
-            # Delete old merged boxes
+            # Step 1: Clear postprocessing references to avoid FK constraint violation
+            cursor.execute("""
+                UPDATE postprocessing 
+                SET merged_box_id = NULL 
+                WHERE merged_box_id IN (
+                    SELECT merged_id FROM merged_boxes WHERE image_id = %s
+                )
+            """, (image_id,))
+            
+            # Step 2: Delete old merged boxes (now safe)
             cursor.execute("DELETE FROM merged_boxes WHERE image_id = %s", (image_id,))
             deleted_count = cursor.rowcount
             
-            # Insert new merged boxes
+            # Step 3: Insert new merged boxes
             cursor.execute("""
                 INSERT INTO merged_boxes (image_id, source_result_ids, merged_data, worker_id, status)
                 VALUES (%s, %s, %s, %s, %s)
+                RETURNING merged_id
             """, (
                 image_id, 
                 merged_data['source_result_ids'],
@@ -446,6 +456,9 @@ class BoundingBoxMergerWorker:
                 self.worker_id,
                 'success'
             ))
+            
+            # Get the new merged_id for potential postprocessing re-linking
+            new_merged_id = cursor.fetchone()[0]
             
             cursor.close()
             
