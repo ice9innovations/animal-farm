@@ -1,4 +1,4 @@
-# MediaPipe Pose Estimation Service
+# Pose Estimation Service
 
 **Port**: 7786  
 **Framework**: Google MediaPipe Pose  
