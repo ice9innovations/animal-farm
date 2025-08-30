@@ -55,7 +55,7 @@ from detectron2.data.detection_utils import read_image
 from detectron2.utils.logger import setup_logger
 
 # Local predictor module (exists in Detectron2 repo)
-from predictor import VisualizationDemo
+from detectron2_analyzer import Detectron2Analyzer
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -148,120 +148,16 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
 # Global variables
-demo = None
+analyzer = None
 coco_classes = []
-# Thread lock for model inference
-model_lock = threading.Lock()
 
 # IoU threshold for filtering overlapping detections  
 # Lowered from 0.45 to 0.3 to catch more overlapping detections
 IOU_THRESHOLD = 0.3
 
-def calculate_iou(box1: Dict[str, float], box2: Dict[str, float]) -> float:
-    """Calculate Intersection over Union (IoU) between two bounding boxes"""
-    # Extract coordinates - now using consistent x,y,width,height format
-    x1_1, y1_1 = box1['x'], box1['y']
-    x2_1, y2_1 = x1_1 + box1['width'], y1_1 + box1['height']
-    
-    x1_2, y1_2 = box2['x'], box2['y']
-    x2_2, y2_2 = x1_2 + box2['width'], y1_2 + box2['height']
-    
-    # Calculate intersection
-    x1_inter = max(x1_1, x1_2)
-    y1_inter = max(y1_1, y1_2)
-    x2_inter = min(x2_1, x2_2)
-    y2_inter = min(y2_1, y2_2)
-    
-    # Check if there's an intersection
-    if x1_inter >= x2_inter or y1_inter >= y2_inter:
-        return 0.0
-    
-    # Calculate intersection area
-    intersection = (x2_inter - x1_inter) * (y2_inter - y1_inter)
-    
-    # Calculate areas using width/height from bbox
-    area1 = box1['width'] * box1['height']
-    area2 = box2['width'] * box2['height']
-    
-    union = area1 + area2 - intersection
-    
-    # Return IoU
-    return intersection / union if union > 0 else 0.0
+# ML processing functions moved to analyzer - these are now utility functions
 
-def apply_iou_filtering(detections: List[Dict], iou_threshold: float = IOU_THRESHOLD) -> List[Dict]:
-    """Apply IoU-based filtering to merge overlapping detections of the same class"""
-    if not detections:
-        return detections
-    
-    # Group detections by class
-    class_groups = {}
-    for detection in detections:
-        class_name = detection.get('class_name', '')
-        if class_name not in class_groups:
-            class_groups[class_name] = []
-        class_groups[class_name].append(detection)
-    
-    filtered_detections = []
-    
-    # Process each class separately
-    for class_name, class_detections in class_groups.items():
-        if len(class_detections) == 1:
-            # Only one detection for this class, keep it
-            filtered_detections.extend(class_detections)
-            continue
-        
-        # For multiple detections of the same class, apply IoU filtering
-        keep_indices = []
-        
-        for i, det1 in enumerate(class_detections):
-            should_keep = True
-            
-            for j in keep_indices:
-                det2 = class_detections[j]
-                bbox1 = det1.get('bbox', {})
-                bbox2 = det2.get('bbox', {})
-                
-                # Calculate IoU if both have valid bboxes
-                if all(k in bbox1 for k in ['x', 'y', 'width', 'height']) and \
-                   all(k in bbox2 for k in ['x', 'y', 'width', 'height']):
-                    iou = calculate_iou(bbox1, bbox2)
-                    
-                    if iou > iou_threshold:
-                        # High overlap detected
-                        if det1['confidence'] <= det2['confidence']:
-                            # Current detection has lower confidence, don't keep it
-                            should_keep = False
-                            logger.debug(f"Detectron2 IoU filter: Removing {class_name} "
-                                       f"conf={det1['confidence']:.3f} (IoU={iou:.3f} with "
-                                       f"conf={det2['confidence']:.3f})")
-                            break
-                        else:
-                            # Current detection has higher confidence, remove the previous one
-                            keep_indices.remove(j)
-                            logger.debug(f"Detectron2 IoU filter: Replacing {class_name} "
-                                       f"conf={det2['confidence']:.3f} with "
-                                       f"conf={det1['confidence']:.3f} (IoU={iou:.3f})")
-            
-            if should_keep:
-                keep_indices.append(i)
-        
-        # Add the kept detections
-        for i in keep_indices:
-            filtered_detections.append(class_detections[i])
-        
-        logger.debug(f"Detectron2 IoU filter: {class_name} {len(class_detections)} → {len(keep_indices)} detections")
-    
-    return filtered_detections
-
-def resize_pil_image_for_inference(image: Image.Image, max_size=512) -> Image.Image:
-    """Resize PIL image to speed up inference"""
-    width, height = image.size
-    if max(height, width) > max_size:
-        scale = max_size / max(height, width)
-        new_width = int(width * scale)
-        new_height = int(height * scale)
-        image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-    return image
+# Image resizing moved to analyzer
 
 def find_config_file() -> Optional[str]:
     """Check for required Detectron2 config file"""
@@ -270,45 +166,6 @@ def find_config_file() -> Optional[str]:
         return CONFIG_FILE
     else:
         logger.error(f"Required config file not found: {CONFIG_FILE}")
-        return None
-
-def setup_cfg(config_file: str, confidence_threshold: float = CONFIDENCE_THRESHOLD) -> Any:
-    """Setup Detectron2 configuration"""
-    try:
-        cfg = get_cfg()
-        
-        # Load config file
-        cfg.merge_from_file(config_file)
-        
-        # Set model weights - use local file if available, otherwise download
-        local_model_path = "./model_final_280758.pkl"
-        if os.path.exists(local_model_path):
-            cfg.MODEL.WEIGHTS = local_model_path
-            logger.info(f"Using cached local model: {local_model_path}")
-        else:
-            cfg.MODEL.WEIGHTS = "detectron2://COCO-Detection/faster_rcnn_R_50_FPN_3x/137849458/model_final_280758.pkl"
-            logger.info("Downloading model weights (this may take time on first run)")
-
-        # Set confidence thresholds
-        cfg.MODEL.RETINANET.SCORE_THRESH_TEST = confidence_threshold
-        cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = confidence_threshold
-        cfg.MODEL.PANOPTIC_FPN.COMBINE.INSTANCES_CONFIDENCE_THRESH = confidence_threshold
-        
-        # Performance optimizations
-        cfg.TEST.DETECTIONS_PER_IMAGE = 20           # Limit to 20 detections max
-        cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 128  # Reduce batch size
-        
-        # Set device - require CUDA
-        import torch
-        if not torch.cuda.is_available():
-            raise RuntimeError("CUDA is not available. GPU is required for Detectron2.")
-        cfg.MODEL.DEVICE = "cuda"
-        logger.info(f"Using device: {cfg.MODEL.DEVICE}")
- 
-        cfg.freeze()
-        return cfg
-    except Exception as e:
-        logger.error(f"Failed to setup config: {e}")
         return None
 
 def load_coco_classes() -> bool:
@@ -324,35 +181,30 @@ def load_coco_classes() -> bool:
         return False
 
 
-def initialize_detectron2() -> bool:
-    """Initialize Detectron2 model"""
-    global demo
+def initialize_detectron2_analyzer() -> bool:
+    """Initialize Detectron2 analyzer once at startup"""
+    global analyzer
     try:
+        logger.info("Initializing Detectron2 Analyzer...")
+        
         # Find config file
         config_file = find_config_file()
         if not config_file:
             logger.error("No Detectron2 config file found")
             return False
-            
-        # Setup configuration
-        cfg = setup_cfg(config_file)
-        if cfg is None:
-            return False
-            
-        # Setup logger
-        setup_logger(name="fvcore")
         
-        # Initialize demo
-        demo = VisualizationDemo(cfg)
+        analyzer = Detectron2Analyzer(
+            config_file=config_file,
+            confidence_threshold=CONFIDENCE_THRESHOLD,
+            coco_classes=coco_classes,
+            use_half_precision=USE_HALF_PRECISION
+        )
         
-        # FP16 optimization enabled
-        logger.info("FP16 half precision enabled via autocast - 50% VRAM reduction expected!")
-        
-        logger.info("Detectron2 demo initialized successfully")
+        logger.info("✅ Detectron2 Analyzer initialized successfully")
         return True
         
     except Exception as e:
-        logger.error(f"Failed to initialize Detectron2: {e}")
+        logger.error(f"❌ Error initializing Detectron2 Analyzer: {str(e)}")
         return False
 
 def lookup_emoji(class_name: str) -> Optional[str]:
@@ -385,228 +237,53 @@ def validate_file_size(file_path: str) -> bool:
     except OSError:
         return False
 
-def process_detections(predictions: Dict[str, Any], scale_x: float = 1.0, scale_y: float = 1.0) -> List[Dict[str, Any]]:
-    """Process Detectron2 predictions into structured format"""
-    detections = []
-    
-    if not predictions or "instances" not in predictions:
-        logger.warning("No instances in predictions")
-        return detections
-        
-    instances = predictions["instances"]
-    
-    # Access detectron2 instances attributes properly
-    pred_classes = instances.pred_classes if hasattr(instances, 'pred_classes') else None
-    scores = instances.scores if hasattr(instances, 'scores') else None
-    
-    if pred_classes is None or scores is None:
-        logger.warning("Missing pred_classes or scores")
-        return detections
-    
-    
-    # Get bounding boxes if available
-    boxes = getattr(instances, "pred_boxes", None)
-    
-    for i in range(len(pred_classes)):
-        # Extract class ID and confidence with specific error handling
-        try:
-            class_id = int(pred_classes[i].item())
-        except (ValueError, TypeError, AttributeError) as e:
-            logger.warning(f"Detection {i}: Failed to extract class_id: {e}")
-            continue
-            
-        try:
-            confidence = float(scores[i].item())
-        except (ValueError, TypeError, AttributeError) as e:
-            logger.warning(f"Detection {i}: Failed to extract confidence: {e}")
-            continue
-            
-        # Get class name with +1 offset: COCO classes file has "background" at index 0,
-        # but Detectron2 models only predict object classes (0-79), so model ID 0 = "person" at index 1
-        if 0 <= class_id + 1 < len(coco_classes):
-            class_name = coco_classes[class_id + 1]
-        else:
-            class_name = f"class_{class_id}"
-            
-        # Only include detections above confidence threshold
-        if confidence >= CONFIDENCE_THRESHOLD:
-            # Look up emoji (fails loudly if Mirror Stage unavailable/fails)
-            try:
-                emoji = lookup_emoji(class_name)
-            except RuntimeError as e:
-                logger.error(f"Emoji lookup failed for '{class_name}': {e}")
-                raise RuntimeError(f"Detection failed due to emoji lookup failure: {e}")
-            
-            detection = {
-                "class_id": class_id,
-                "class_name": class_name,
-                "confidence": round(confidence, 3),
-                "emoji": emoji
-            }
-            
-            # Extract bounding box - try multiple approaches to always get spatial info
-            bbox_extracted = False
-            if boxes is not None and i < len(boxes):
-                # Method 1: Standard tensor extraction
-                try:
-                    box = boxes[i].tensor.cpu().numpy()[0]
-                    
-                    if len(box) >= 4:  # Accept any format with at least 4 coordinates
-                        x1_scaled = round(float(box[0]) * scale_x)
-                        y1_scaled = round(float(box[1]) * scale_y)
-                        x2_scaled = round(float(box[2]) * scale_x)
-                        y2_scaled = round(float(box[3]) * scale_y)
-                        
-                        # Ensure coordinates are in correct order and bounds
-                        x1_scaled = max(0, min(x1_scaled, x2_scaled))
-                        y1_scaled = max(0, min(y1_scaled, y2_scaled))
-                        x2_scaled = max(x1_scaled + 1, x2_scaled)  # Ensure width > 0
-                        y2_scaled = max(y1_scaled + 1, y2_scaled)  # Ensure height > 0
-                        
-                        detection["bbox"] = {
-                            "x": x1_scaled,
-                            "y": y1_scaled,
-                            "width": x2_scaled - x1_scaled,
-                            "height": y2_scaled - y1_scaled
-                        }
-                        bbox_extracted = True
-                        
-                except Exception as e:
-                    logger.debug(f"Detection {i}: Standard bbox extraction failed: {e}")
-                
-                # Method 2: Try alternative tensor access if Method 1 failed
-                if not bbox_extracted:
-                    try:
-                        # Try different tensor access patterns
-                        if hasattr(boxes[i], 'tensor'):
-                            tensor_data = boxes[i].tensor.cpu().numpy()
-                            if len(tensor_data.shape) > 1:
-                                box = tensor_data.flatten()[:4]  # Take first 4 values
-                            else:
-                                box = tensor_data[:4]
-                        else:
-                            # Direct numpy array access
-                            box = boxes[i].cpu().numpy()[:4]
-                        
-                        if len(box) >= 4:
-                            x1_scaled = round(float(box[0]) * scale_x)
-                            y1_scaled = round(float(box[1]) * scale_y) 
-                            x2_scaled = round(float(box[2]) * scale_x)
-                            y2_scaled = round(float(box[3]) * scale_y)
-                            
-                            x1_scaled = max(0, min(x1_scaled, x2_scaled))
-                            y1_scaled = max(0, min(y1_scaled, y2_scaled))
-                            x2_scaled = max(x1_scaled + 1, x2_scaled)
-                            y2_scaled = max(y1_scaled + 1, y2_scaled)
-                            
-                            detection["bbox"] = {
-                                "x": x1_scaled,
-                                "y": y1_scaled,
-                                "width": x2_scaled - x1_scaled,
-                                "height": y2_scaled - y1_scaled
-                            }
-                            bbox_extracted = True
-                            
-                    except Exception as e:
-                        logger.debug(f"Detection {i}: Alternative bbox extraction failed: {e}")
-                
-                if not bbox_extracted:
-                    logger.info(f"Detection {i} ({class_name}): No bounding box could be extracted - complex segmentation shape")
-            
-            detections.append(detection)
-            
-    # Sort by confidence (highest first)
-    detections.sort(key=lambda x: x['confidence'], reverse=True)
-    
-    # Apply IoU-based filtering to merge overlapping detections of the same class
-    filtered_detections = apply_iou_filtering(detections)
-    
-    return filtered_detections
+# Detection processing moved to analyzer
 
 def process_image_for_detection(image: Image.Image) -> Dict[str, Any]:
     """
     Main processing function - takes PIL Image, returns detection data
-    This is the core business logic, separated from HTTP concerns
-    Uses unified in-memory processing
+    This orchestrates the analyzer call - pure business logic orchestration
     """
-    start_time = time.time()
-    
-    if not demo:
-        return {
-            "success": False,
-            "error": "Detectron2 model not loaded"
-        }
-    
     try:
-        # Store original dimensions before resizing
-        original_width, original_height = image.size
-        
-        # Resize PIL image for faster inference
-        resized_image = resize_pil_image_for_inference(image, max_size=512)
-        resized_width, resized_height = resized_image.size
-        
-        # Calculate scaling factors to convert coordinates back to original image
-        scale_x = original_width / resized_width
-        scale_y = original_height / resized_height
-        
-        # Convert PIL Image to numpy array for Detectron2
-        img_array = np.array(resized_image)
-        # Convert RGB to BGR for Detectron2 (numpy slice - no CV2 needed!)
-        img = img_array[:, :, ::-1]
-        
-        # Run detection with autocast for FP16 optimization (thread-safe)
-        detection_start = time.time()
-        import torch
-        
-        # Acquire lock for thread-safe model inference
-        with model_lock:
-            with torch.amp.autocast('cuda'):
-                predictions, visualized_output = demo.run_on_image(img)
-                precision_used = "FP16"
-        
-        detection_time = time.time() - detection_start
-        
-        # Process results with coordinate scaling
-        detections = process_detections(predictions, scale_x, scale_y)
-        
-        logger.info(f"Detected {len(detections)} objects in {detection_time:.2f}s")
-        
-        # Get image dimensions from PIL Image
-        image_width, image_height = image.size
-        
-        # Build successful response
-        response_data = {
-            "detections": detections,
-            "total_detections": len(detections),
-            "image_dimensions": {
-                "width": image_width,
-                "height": image_height
-            },
-            "model_info": {
-                "confidence_threshold": CONFIDENCE_THRESHOLD,
-                "detection_time": round(detection_time, 3),
-                "framework": "Detectron2",
-                "precision": precision_used
+        if not analyzer:
+            return {
+                "success": False,
+                "error": "Detectron2 analyzer not loaded"
             }
-        }
+        
+        # Use analyzer for core ML processing
+        result = analyzer.analyze_from_pil_image(image)
+        
+        # Add emoji information to detections
+        detections = result.get('detections', [])
+        for detection in detections:
+            class_name = detection.get('class_name', '')
+            try:
+                emoji = lookup_emoji(class_name)
+                if emoji:
+                    detection['emoji'] = emoji
+            except Exception as e:
+                logger.warning(f"Emoji lookup failed for '{class_name}': {e}")
         
         return {
             "success": True,
-            "data": response_data,
-            "processing_time": round(time.time() - start_time, 3)
+            "data": result
         }
         
     except Exception as e:
-        logger.error(f"Error detecting objects: {e}")
+        logger.error(f"Error in image processing orchestration: {e}")
         return {
             "success": False,
-            "error": f"Detection failed: {str(e)}",
-            "processing_time": round(time.time() - start_time, 3)
+            "error": f"Detection failed: {str(e)}"
         }
 
-def create_detectron_response(data: Dict[str, Any], processing_time: float) -> Dict[str, Any]:
+def create_detectron_response(data: Dict[str, Any], processing_time: float = None) -> Dict[str, Any]:
     """Create standardized detectron2 response"""
     detections = data.get("detections", [])
+    
+    # Use processing time from data if not provided
+    if processing_time is None:
+        processing_time = data.get('processing_time', 0)
     
     # Create unified prediction format
     predictions = []
@@ -651,92 +328,7 @@ def create_detectron_response(data: Dict[str, Any], processing_time: float) -> D
         }
     }
 
-def detect_objects(image_path: str, cleanup: bool = True) -> Dict[str, Any]:
-    """Detect objects using Detectron2"""
-    if not demo:
-        return {"error": "Detectron2 model not loaded", "status": "error"}
-        
-    try:
-        # Validate file
-        if not os.path.exists(image_path):
-            return {"error": "Image file not found", "status": "error"}
-            
-        if not validate_file_size(image_path):
-            return {"error": "File too large", "status": "error"}
-            
-        # Read image
-        logger.info(f"Running Detectron2 detection on: {image_path}")
-        img = read_image(image_path, format="BGR")
-        
-        # Store original dimensions before resizing
-        original_height, original_width = img.shape[:2]
-        
-        # Resize image for faster inference
-        img = resize_image_for_inference(img, max_size=512)
-        
-        # Store resized dimensions for coordinate scaling
-        resized_height, resized_width = img.shape[:2]
-        
-        # Calculate scaling factors to convert coordinates back to original image
-        scale_x = original_width / resized_width
-        scale_y = original_height / resized_height
-        
-        # Run detection with autocast for FP16 optimization (thread-safe)
-        start_time = time.time()
-        import torch
-        
-        # Acquire lock for thread-safe model inference
-        with model_lock:
-            with torch.amp.autocast('cuda'):
-                predictions, visualized_output = demo.run_on_image(img)
-                precision_used = "FP16"
-        
-        detection_time = time.time() - start_time
-        
-        # Process results with coordinate scaling
-        detections = process_detections(predictions, scale_x, scale_y)
-        
-        logger.info(f"Detected {len(detections)} objects in {detection_time:.2f}s")
-        
-        # Get image dimensions
-        try:
-            with Image.open(image_path) as pil_img:
-                image_width, image_height = pil_img.size
-        except Exception:
-            image_width = image_height = None
-            
-        # Build response
-        response = {
-            "DETECTRON": {
-                "detections": detections,
-                "total_detections": len(detections),
-                "image_dimensions": {
-                    "width": image_width,
-                    "height": image_height
-                } if image_width and image_height else None,
-                "model_info": {
-                    "confidence_threshold": CONFIDENCE_THRESHOLD,
-                    "detection_time": round(detection_time, 3),
-                    "framework": "Detectron2",
-                    "precision": precision_used
-                },
-                "status": "success"
-            }
-        }
-        
-        # Cleanup (only for temporary files)
-        if cleanup:
-            try:
-                if os.path.exists(image_path) and image_path.startswith(UPLOAD_FOLDER):
-                    os.remove(image_path)
-            except Exception as e:
-                logger.warning(f"Failed to cleanup file {image_path}: {e}")
-            
-        return response
-        
-    except Exception as e:
-        logger.error(f"Error detecting objects in {image_path}: {e}")
-        return {"error": f"Detection failed: {str(e)}", "status": "error"}
+# Legacy detect_objects function removed - functionality moved to analyzer
 
 # Flask app setup
 app = Flask(__name__)
@@ -760,21 +352,54 @@ def internal_error(e):
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
-    if not demo:
+    """Health check endpoint with fail-fast validation"""
+    global analyzer
+    try:
+        # Check if analyzer is initialized and functional
+        if analyzer is None:
+            return jsonify({
+                'status': 'unhealthy',
+                'service': 'detectron2',
+                'error': 'Detectron2 analyzer not initialized'
+            }), 503
+        
+        # Test actual functionality
+        if not analyzer.is_healthy():
+            return jsonify({
+                'status': 'unhealthy', 
+                'service': 'detectron2',
+                'error': 'Detectron2 analyzer non-functional'
+            }), 503
+        
         return jsonify({
-            "status": "unhealthy",
-            "reason": "Detectron2 model not loaded",
-            "framework": "Detectron2"
-        }), 503
-    
-    return jsonify({
-        "status": "healthy",
-        "model_status": "loaded",
-        "confidence_threshold": CONFIDENCE_THRESHOLD,
-        "coco_classes_loaded": len(coco_classes),
-        "framework": "Detectron2"
-    })
+            'status': 'healthy',
+            'service': 'detectron2',
+            'capabilities': ['object_detection', 'instance_segmentation', 'bbox_extraction'],
+            'models': {
+                'object_detection': {
+                    'status': 'ready',
+                    'framework': 'Detectron2',
+                    'confidence_threshold': CONFIDENCE_THRESHOLD,
+                    'classes_loaded': len(coco_classes)
+                }
+            },
+            'supported_classes': len(coco_classes),
+            'endpoints': [
+                "GET /health - Health check",
+                "GET /analyze?url=<image_url> - Analyze objects from URL", 
+                "GET /analyze?file=<file_path> - Analyze objects from file",
+                "POST /analyze - Analyze objects from uploaded file",
+                "GET /v3/analyze?url=<image_url> - V3 compatibility",
+                "GET /v2/analyze?image_url=<image_url> - V2 compatibility"
+            ],
+            'timestamp': time.time()
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'service': 'detectron2',
+            'error': str(e)
+        }), 500
 
 @app.route('/classes', methods=['GET'])
 def get_classes():
@@ -895,10 +520,7 @@ def analyze():
             return error_response(processing_result["error"], 500)
         
         # Step 4: Create response
-        response = create_detectron_response(
-            processing_result["data"],
-            processing_result["processing_time"]
-        )
+        response = create_detectron_response(processing_result["data"])
         
         return jsonify(response)
         
@@ -1014,9 +636,32 @@ def analyze_v3_old():
                     filepath = None
                     raise ValueError("Downloaded file too large")
                 
-                # Detect objects using existing function
-                result = detect_objects(filepath)
-                filepath = None  # detect_objects handles cleanup
+                # Process image using new analyzer approach
+                try:
+                    image = Image.open(filepath).convert('RGB')
+                    processing_result = process_image_for_detection(image)
+                    
+                    # Convert new format to old V3 format for compatibility
+                    if processing_result["success"]:
+                        data = processing_result["data"]
+                        result = {
+                            "DETECTRON": {
+                                "detections": data.get("detections", []),
+                                "total_detections": data.get("total_detections", 0),
+                                "image_dimensions": data.get("image_dimensions"),
+                                "model_info": data.get("model_info", {}),
+                                "status": "success"
+                            }
+                        }
+                    else:
+                        result = {"error": processing_result["error"], "status": "error"}
+                    
+                    # Cleanup
+                    os.remove(filepath)
+                    filepath = None
+                except Exception as img_e:
+                    logger.error(f"Image processing error: {img_e}")
+                    raise img_e
                 
             except Exception as e:
                 logger.error(f"Error processing URL {url}: {e}")
@@ -1057,8 +702,28 @@ def analyze_v3_old():
                     "metadata": {"processing_time": round(time.time() - start_time, 3)}
                 }), 400
             
-            # Detect objects directly from file (no cleanup needed - we don't own the file)
-            result = detect_objects(file, cleanup=False)
+            # Process file directly using new analyzer approach
+            try:
+                image = Image.open(file).convert('RGB')
+                processing_result = process_image_for_detection(image)
+                
+                # Convert new format to old V3 format for compatibility
+                if processing_result["success"]:
+                    data = processing_result["data"]
+                    result = {
+                        "DETECTRON": {
+                            "detections": data.get("detections", []),
+                            "total_detections": data.get("total_detections", 0),
+                            "image_dimensions": data.get("image_dimensions"),
+                            "model_info": data.get("model_info", {}),
+                            "status": "success"
+                        }
+                    }
+                else:
+                    result = {"error": processing_result["error"], "status": "error"}
+            except Exception as img_e:
+                logger.error(f"File processing error: {img_e}")
+                result = {"error": f"File processing failed: {str(img_e)}", "status": "error"}
         
         # Process results (common for both URL and file)
         if result.get('status') == 'error':
@@ -1136,14 +801,14 @@ if __name__ == '__main__':
     logger.info("Starting Detectron2 service...")
     
     coco_loaded = load_coco_classes()
-    model_loaded = initialize_detectron2()
+    model_loaded = initialize_detectron2_analyzer()
     
     # Using local emoji file - no external dependencies
     
     if not model_loaded:
-        logger.error("Failed to load Detectron2 model.")
+        logger.error("Failed to load Detectron2 analyzer.")
         logger.error("Please ensure Detectron2 is installed and config files are available.")
-        logger.error("Service cannot function without model. Exiting.")
+        logger.error("Service cannot function without analyzer. Exiting.")
         exit(1)
         
     if not coco_loaded:
