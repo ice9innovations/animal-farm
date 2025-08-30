@@ -232,10 +232,8 @@ def create_pose_response(pose_data: dict, processing_time: float) -> dict:
         is_shiny, shiny_roll = check_shiny()
         
         enhanced_prediction = {
-            "properties": {
-                "landmarks": prediction['landmarks'],
-                "pose_analysis": prediction['pose_analysis']
-            }
+            "landmarks": prediction['landmarks'],
+            "pose_analysis": prediction['pose_analysis']
         }
         
         # Add shiny flag for rare detections

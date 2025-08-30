@@ -168,54 +168,52 @@ curl -X POST -F "file=@image.jpg" "http://localhost:7786/analyze"
 **Response Format:**
 ```json
 {
-  "metadata": {
-    "model_info": {
-      "framework": "MediaPipe Pose"
-    },
-    "processing_time": 0.101
-  },
+  "service": "pose",
+  "status": "success",
   "predictions": [
     {
-      "properties": {
-        "landmarks": {
-          "nose": {
-            "visibility": 1.0,
-            "x": 0.323,
-            "y": 0.442,
-            "z": -0.538
-          },
-          "left_shoulder": {
-            "visibility": 1.0,
-            "x": 0.433,
-            "y": 0.353,
-            "z": -0.466
-          },
-          "left_elbow": {
-            "visibility": 0.999,
-            "x": 0.56,
-            "y": 0.299,
-            "z": -0.481
-          },
-          "left_wrist": {
-            "visibility": 0.999,
-            "x": 0.691,
-            "y": 0.276,
-            "z": -0.482
-          }
+      "landmarks": {
+        "nose": {
+          "visibility": 1.0,
+          "x": 0.323,
+          "y": 0.442,
+          "z": -0.538
         },
-        "pose_analysis": {
-          "joint_angles": {
-            "left_elbow": 166.9,
-            "left_knee": 68.3,
-            "right_elbow": 159.1,
-            "right_knee": 115.5
-          }
+        "left_shoulder": {
+          "visibility": 1.0,
+          "x": 0.433,
+          "y": 0.353,
+          "z": -0.466
+        },
+        "left_elbow": {
+          "visibility": 0.999,
+          "x": 0.56,
+          "y": 0.299,
+          "z": -0.481
+        },
+        "left_wrist": {
+          "visibility": 0.999,
+          "x": 0.691,
+          "y": 0.276,
+          "z": -0.482
+        }
+      },
+      "pose_analysis": {
+        "joint_angles": {
+          "left_elbow": 166.9,
+          "left_knee": 68.3,
+          "right_elbow": 159.1,
+          "right_knee": 115.5
         }
       }
     }
   ],
-  "service": "pose",
-  "status": "success"
+  "metadata": {
+    "processing_time": 0.101,
+    "model_info": {
+      "framework": "MediaPipe Pose"
+    }
+  }
 }
 ```
 
@@ -351,7 +349,7 @@ with open("image.jpg", "rb") as f:
 
 result = response.json()
 if result["status"] == "success":
-    prediction = result["predictions"][0]["properties"]
+    prediction = result["predictions"][0]
     landmarks = prediction["landmarks"]
     joint_angles = prediction["pose_analysis"]["joint_angles"]
     
@@ -382,9 +380,9 @@ const response = await fetch('http://localhost:7786/analyze', {
 
 const result = await response.json();
 if (result.status === 'success') {
-  const properties = result.predictions[0].properties;
-  const landmarks = properties.landmarks;
-  const jointAngles = properties.pose_analysis.joint_angles;
+  const prediction = result.predictions[0];
+  const landmarks = prediction.landmarks;
+  const jointAngles = prediction.pose_analysis.joint_angles;
   
   console.log('Landmarks detected:', Object.keys(landmarks).length);
   console.log('Joint angles:', jointAngles);
