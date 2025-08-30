@@ -7,7 +7,7 @@
 
 ## Overview
 
-The Face service provides state-of-the-art face detection using Google's MediaPipe framework. The service analyzes images to detect human faces and facial keypoints with fairness optimizations across demographics.
+The Face service provides state-of-the-art face detection using Google's MediaPipe framework. The service analyzes images to detect human faces and extract facial keypoints with fairness optimizations across demographics.
 
 ## Features
 
@@ -87,8 +87,6 @@ The service uses MediaPipe models with optimized settings:
 | Component | Configuration | Purpose |
 |-----------|---------------|---------|
 | Face Detection | Full-range model, confidence 0.2 | Fairness across demographics |
-| Pose Estimation | Full complexity, 33 landmarks | Comprehensive body analysis |
-| Segmentation | Enabled | Person silhouette extraction |
 
 ## API Endpoints
 
@@ -103,19 +101,13 @@ GET /health
 {
   "status": "healthy",
   "service": "face",
-  "capabilities": ["face_detection", "pose_estimation", "person_segmentation"],
+  "capabilities": ["face_detection"],
   "models": {
     "face_detection": {
       "status": "ready",
       "version": "0.10.14",
       "model": "MediaPipe Face Detection (Full Range)",
       "fairness": "Tested across demographics"
-    },
-    "pose_estimation": {
-      "status": "ready",
-      "version": "0.10.14",
-      "model": "MediaPipe Pose",
-      "landmarks": 33
     }
   },
   "endpoints": [
@@ -180,16 +172,13 @@ curl -X POST -F "file=@/path/to/image.jpg" http://localhost:7772/analyze
       "emoji": "🙂",
       "confidence": 0.7625,
       "bbox": [385, 69, 79, 79],
-      "properties": {
-        "keypoints": {
-          "right_eye": [418, 95],
-          "left_eye": [431, 93],
-          "nose_tip": [409, 114],
-          "mouth_center": [421, 129],
-          "right_ear_tragion": [440, 100],
-          "left_ear_tragion": [484, 93]
-        },
-        "method": "mediapipe"
+      "keypoints": {
+        "right_eye": [418, 95],
+        "left_eye": [431, 93],
+        "nose_tip": [409, 114],
+        "mouth_center": [421, 129],
+        "right_ear_tragion": [440, 100],
+        "left_ear_tragion": [484, 93]
       }
     }
   ],
@@ -326,13 +315,8 @@ for prediction in result['predictions']:
         print(f"Face detected: bbox={bbox}, confidence={confidence:.3f}")
         
         # Access facial keypoints
-        keypoints = prediction['properties']['keypoints']
+        keypoints = prediction['keypoints']
         print(f"Eyes: {keypoints['left_eye']}, {keypoints['right_eye']}")
-    
-    elif prediction['label'] in ['standing', 'sitting', 'lying']:
-        pose_type = prediction['label']
-        confidence = prediction['confidence']
-        print(f"Pose: {pose_type}, confidence={confidence:.3f}")
 ```
 
 ### JavaScript Integration
@@ -348,8 +332,6 @@ async function analyzeFaces(imageUrl) {
             if (prediction.label === 'face') {
                 console.log(`Face: confidence=${prediction.confidence}`);
                 console.log(`Bounding box: [${prediction.bbox.join(', ')}]`);
-            } else {
-                console.log(`Pose: ${prediction.label}, confidence=${prediction.confidence}`);
             }
         });
         
@@ -364,7 +346,7 @@ analyzeFaces('https://example.com/image.jpg');
 ### cURL Examples
 
 ```bash
-# Basic face and pose analysis
+# Face detection analysis
 curl "http://localhost:7772/analyze?url=https://example.com/image.jpg"
 
 # File analysis
