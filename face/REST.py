@@ -296,10 +296,7 @@ def create_face_response(data: dict, processing_time: float) -> dict:
             "emoji": get_emoji("face"),
             "confidence": round(float(face['confidence']), CONFIDENCE_DECIMAL_PLACES),
             "bbox": face['bbox'],
-            "properties": {
-                "keypoints": face.get('keypoints', {}),
-                "method": face['method']
-            }
+            "keypoints": face.get('keypoints', {})
         }
         
         # Add shiny flag only for shiny detections
@@ -461,10 +458,7 @@ def build_v3_response(raw_data):
             "emoji": get_emoji("face"),
             "confidence": round(float(face['confidence']), CONFIDENCE_DECIMAL_PLACES),
             "bbox": face['bbox'],
-            "properties": {
-                "keypoints": face.get('keypoints', {}),
-                "method": face['method']
-            }
+            "keypoints": face.get('keypoints', {})
         }
         
         # Add shiny flag only for shiny detections
