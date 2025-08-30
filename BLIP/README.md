@@ -169,33 +169,24 @@ curl -X POST -F "file=@/path/to/image.jpg" http://localhost:7777/analyze
 **Response Format:**
 ```json
 {
-  "metadata": {
-    "model_info": {
-      "framework": "Salesforce"
-    },
-    "processing_time": 0.641
-  },
+  "service": "blip",
+  "status": "success",
   "predictions": [
     {
-      "emoji_mappings": [
-        {
-          "emoji": "🧑",
-          "word": "soldier"
-        },
-        {
-          "emoji": "👩",
-          "word": "girl"
-        },
-        {
-          "emoji": "🌼",
-          "word": "bouquet"
-        }
-      ],
-      "text": "a soldier giving a little girl a bouquet"
+      "text": "a soldier giving a little girl a bouquet",
+      "word_mappings": {
+        "soldier": "🧑",
+        "girl": "👩",
+        "bouquet": "🌼"
+      }
     }
   ],
-  "service": "blip",
-  "status": "success"
+  "metadata": {
+    "processing_time": 0.641,
+    "model_info": {
+      "framework": "BLIP (Bootstrapping Language-Image Pre-training)"
+    }
+  }
 }
 ```
 
@@ -316,9 +307,11 @@ with open('/path/to/image.jpg', 'rb') as f:
 
 result = response.json()
 if result["status"] == "success":
-    caption = result["predictions"][0]["text"]
-    emojis = [m["emoji"] for m in result["predictions"][0]["emoji_mappings"]]
-    print(f"Caption: {caption}")
+    prediction = result["predictions"][0]
+    text = prediction["text"]
+    word_mappings = prediction["word_mappings"]
+    emojis = list(word_mappings.values())
+    print(f"Caption: {text}")
     print(f"Emojis: {' '.join(emojis)}")
 ```
 
@@ -347,7 +340,8 @@ const result = await response.json();
 if (result.status === 'success') {
   const prediction = result.predictions[0];
   console.log('Caption:', prediction.text);
-  console.log('Emojis:', prediction.emoji_mappings.map(m => m.emoji).join(' '));
+  const emojis = Object.values(prediction.word_mappings);
+  console.log('Emojis:', emojis.join(' '));
 }
 ```
 

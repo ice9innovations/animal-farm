@@ -346,10 +346,8 @@ def create_blip_response(caption: str, word_mappings: Dict[str, str], processing
     is_shiny, shiny_roll = check_shiny()
     
     prediction = {
-        "properties": {
-            "caption": caption,
-            "word_mappings": word_mappings
-        }
+        "text": caption,
+        "word_mappings": word_mappings
     }
     
     # Add shiny flag for rare detections
