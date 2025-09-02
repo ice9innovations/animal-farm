@@ -1,0 +1,20 @@
+[Unit]
+Description=YOLO + CLIP Two Stage Detector REST API Service
+After=network.target
+StartLimitBurst=3
+StartLimitIntervalSec=300
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+User=sd
+Group=sd
+WorkingDirectory=/home/sd/animal-farm/CLIP_detection
+ExecStart=/home/sd/animal-farm/CLIP_detection/clip_detection.sh
+EnvironmentFile=/home/sd/animal-farm/CLIP_detection/.env
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
