@@ -1,0 +1,20 @@
+[Unit]
+Description=YOLO + Xception Two Stage REST API Service
+After=network.target
+StartLimitBurst=3
+StartLimitIntervalSec=300
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=5
+User=sd
+Group=sd
+WorkingDirectory=/home/sd/animal-farm/xception_detection
+ExecStart=/home/sd/animal-farm/xception_detection/xception_detection.sh
+EnvironmentFile=/home/sd/animal-farm/xception_detection/.env
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
