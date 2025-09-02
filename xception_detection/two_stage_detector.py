@@ -220,19 +220,22 @@ class TwoStageDetector:
                 clean_pred.pop("bbox", None)  # Remove redundant bbox for full image
                 cleaned_full_image.append(clean_pred)
             
-            # Create grouped predictions structure with full_image first
-            grouped_predictions = {"full_image": cleaned_full_image}
+            # For bbox merger compatibility, return object predictions as array
+            # Include both full image and object predictions in a flat array
+            all_predictions = []
             
-            # Add object predictions one by one to maintain order
-            for pred in object_predictions:
-                grouped_predictions[pred["label"]] = pred
+            # Add full image predictions first (if any) 
+            all_predictions.extend(cleaned_full_image)
+            
+            # Add object predictions with bboxes
+            all_predictions.extend(object_predictions)
             
             logger.info(f"Two-stage analysis: {len(detections)} detected, {len(filtered_detections)} filtered, {len(object_predictions)} classified, full image predictions: {len(full_image_predictions)}")
             
             return {
                 "success": True,
                 "data": {
-                    "predictions": grouped_predictions,
+                    "predictions": all_predictions,
                     "model_info": {
                         "framework": "YOLO + Xception"
                     }
