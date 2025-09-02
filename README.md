@@ -16,6 +16,7 @@ Animal Farm consists of multiple specialized AI services that work together in a
 |---------|------|-------------|
 | **BLIP** | 7777 | Image captioning |
 | **CLIP** | 7778 | Image-text similarity analysis |
+| **CLIP_detection** | 7788 | Two Stage Object Detection with CLIP |
 | **colors** | 7770 | Color analysis and palette extraction |
 | **detectron2** | 7771 | Object detection and instance segmentation |
 | **face** | 7772 | Face detection and analysis |
@@ -25,6 +26,7 @@ Animal Farm consists of multiple specialized AI services that work together in a
 | **ollama-api** | 7782 | Multi-modal large language model analysis |
 | **rtdetr** | 7780 | Transformer-based object detection |
 | **xception** | 7779 | ImageNet classification |
+| **xception_detection** | 7799 | Two Stage Object Detection with Xception |
 | **yolov8** | 7773 | Real-time object detection |
 
 ## Central API
