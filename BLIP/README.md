@@ -169,24 +169,24 @@ curl -X POST -F "file=@/path/to/image.jpg" http://localhost:7777/analyze
 **Response Format:**
 ```json
 {
-  "service": "blip",
-  "status": "success",
-  "predictions": [
-    {
-      "text": "a soldier giving a little girl a bouquet",
-      "word_mappings": {
-        "soldier": "🧑",
-        "girl": "👩",
-        "bouquet": "🌼"
-      }
-    }
-  ],
   "metadata": {
-    "processing_time": 0.641,
     "model_info": {
       "framework": "BLIP (Bootstrapping Language-Image Pre-training)"
+    },
+    "processing_time": 0.641
+  },
+  "predictions": [
+    {
+      "emoji_mappings": [
+        { "emoji": "🧑", "word": "soldier" },
+        { "emoji": "👩", "word": "girl" },
+        { "emoji": "🌼", "word": "bouquet" }
+      ],
+      "text": "a soldier giving a little girl a bouquet"
     }
-  }
+  ],
+  "service": "blip",
+  "status": "success"
 }
 ```
 
@@ -309,8 +309,8 @@ result = response.json()
 if result["status"] == "success":
     prediction = result["predictions"][0]
     text = prediction["text"]
-    word_mappings = prediction["word_mappings"]
-    emojis = list(word_mappings.values())
+    emoji_mappings = prediction["emoji_mappings"]
+    emojis = [mapping["emoji"] for mapping in emoji_mappings]
     print(f"Caption: {text}")
     print(f"Emojis: {' '.join(emojis)}")
 ```
@@ -340,7 +340,7 @@ const result = await response.json();
 if (result.status === 'success') {
   const prediction = result.predictions[0];
   console.log('Caption:', prediction.text);
-  const emojis = Object.values(prediction.word_mappings);
+  const emojis = prediction.emoji_mappings.map(mapping => mapping.emoji);
   console.log('Emojis:', emojis.join(' '));
 }
 ```

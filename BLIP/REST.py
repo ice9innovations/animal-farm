@@ -345,9 +345,17 @@ def create_blip_response(caption: str, word_mappings: Dict[str, str], processing
     """Create standardized BLIP response with metadata"""
     is_shiny, shiny_roll = check_shiny()
     
+    # Convert word_mappings dict to emoji_mappings array format (like Ollama)
+    emoji_mappings = []
+    for word, emoji in word_mappings.items():
+        emoji_mappings.append({
+            "word": word,
+            "emoji": emoji
+        })
+    
     prediction = {
         "text": caption,
-        "word_mappings": word_mappings
+        "emoji_mappings": emoji_mappings
     }
     
     # Add shiny flag for rare detections
