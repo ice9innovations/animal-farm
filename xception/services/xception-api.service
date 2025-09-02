@@ -1,0 +1,20 @@
+[Unit]
+Description=Xception Image Classification REST API Service
+After=network.target
+StartLimitBurst=3
+StartLimitIntervalSec=300
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=5
+User=sd
+Group=sd
+WorkingDirectory=/home/sd/animal-farm/xception
+ExecStart=/home/sd/animal-farm/xception/xception.sh
+EnvironmentFile=/home/sd/animal-farm/xception/.env
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
