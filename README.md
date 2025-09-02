@@ -12,20 +12,20 @@ Animal Farm consists of multiple specialized AI services that work together in a
 
 ## Services
 
-| Service | Port | Status | Description |
-|---------|------|--------|-------------|
-| **BLIP** | 7777 | ✅ Active | Image captioning (Bootstrapping Language-Image Pre-training) |
-| **CLIP** | 7778 | ✅ Active | Image-text similarity analysis |
-| **colors** | 7770 | ✅ Active | Color analysis and palette extraction |
-| **detectron2** | 7771 | ✅ Active | Object detection and instance segmentation (Facebook Detectron2) |
-| **face** | 7772 | ✅ Active | Face detection and analysis |
-| **inception_v3** | 7779 | ✅ Active | ImageNet classification (Google Inception v3) |
-| **metadata** | 7781 | ✅ Active | Image metadata extraction (EXIF, GPS, camera info) |
-| **nsfw2** | 7774 | ✅ Active | Content safety detection (OpenNSFW2) |
-| **ocr** | 7775 | ✅ Active | Optical character recognition (PaddleOCR) |
-| **ollama-api** | 7782 | ✅ Active | Large language model analysis (Ollama/LLaMA integration) |
-| **rtdetr** | 7780 | ✅ Active | Real-time object detection (RT-DETR transformer) |
-| **yolov8** | 7773 | ✅ Active | Real-time object detection (Ultralytics YOLOv8) |
+| Service | Port | Description |
+|---------|------|-------------|
+| **BLIP** | 7777 | Image captioning |
+| **CLIP** | 7778 | Image-text similarity analysis |
+| **colors** | 7770 | Color analysis and palette extraction |
+| **detectron2** | 7771 | Object detection and instance segmentation |
+| **face** | 7772 | Face detection and analysis |
+| **metadata** | 7781 | Image metadata extraction (EXIF, GPS, camera info) |
+| **nsfw2** | 7774 | Content safety detection |
+| **ocr** | 7775 | Optical character recognition |
+| **ollama-api** | 7782 | Multi-modal large language model analysis |
+| **rtdetr** | 7780 | Transformer-based object detection |
+| **xception** | 7779 | ImageNet classification |
+| **yolov8** | 7773 | Real-time object detection |
 
 ## Central API
 
