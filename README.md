@@ -14,18 +14,18 @@ Animal Farm consists of multiple specialized AI services that work together in a
 
 | Service | Port | Status | Description |
 |---------|------|--------|-------------|
-| **BLIP** | 7777 | ✅ Active | Image captioning (Bootstrapping Language-Image Pre-training) |
+| **BLIP** | 7777 | ✅ Active | Image captioning |
 | **CLIP** | 7778 | ✅ Active | Image-text similarity analysis |
 | **colors** | 7770 | ✅ Active | Color analysis and palette extraction |
-| **detectron2** | 7771 | ✅ Active | Object detection and instance segmentation (Facebook Detectron2) |
+| **detectron2** | 7771 | ✅ Active | Object detection and instance segmentation |
 | **face** | 7772 | ✅ Active | Face detection and analysis |
-| **inception_v3** | 7779 | ✅ Active | ImageNet classification (Google Inception v3) |
 | **metadata** | 7781 | ✅ Active | Image metadata extraction (EXIF, GPS, camera info) |
-| **nsfw2** | 7774 | ✅ Active | Content safety detection (OpenNSFW2) |
-| **ocr** | 7775 | ✅ Active | Optical character recognition (PaddleOCR) |
-| **ollama-api** | 7782 | ✅ Active | Large language model analysis (Ollama/LLaMA integration) |
-| **rtdetr** | 7780 | ✅ Active | Real-time object detection (RT-DETR transformer) |
-| **yolov8** | 7773 | ✅ Active | Real-time object detection (Ultralytics YOLOv8) |
+| **nsfw2** | 7774 | ✅ Active | Content safety detection |
+| **ocr** | 7775 | ✅ Active | Optical character recognition |
+| **ollama-api** | 7782 | ✅ Active | Multi-modal large language model analysis |
+| **rtdetr** | 7780 | ✅ Active | Transformer-based object detection |
+| **xception** | 7779 | ✅ Active | ImageNet classification |
+| **yolov8** | 7773 | ✅ Active | Real-time object detection |
 
 ## Central API
 
