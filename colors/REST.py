@@ -597,12 +597,6 @@ def analyze_v3_compat():
     with app.test_request_context('/analyze', method=request.method, data=request.get_data(), query_string=request.args):
         return analyze()
 
-@app.route('/v3/analyze', methods=['POST'])
-def analyze_v3_post():
-    """V3 POST route for file uploads"""
-    with app.test_request_context('/analyze', method='POST', data=request.get_data(), query_string=request.args):
-        return analyze()
-
 @app.route('/v3/analyze_old', methods=['GET', 'POST'])
 def analyze_v3():
     """Unified V3 API endpoint for URL, file path, and POST file upload analysis"""
