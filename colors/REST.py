@@ -594,8 +594,7 @@ def analyze():
 @app.route('/v3/analyze', methods=['GET', 'POST'])
 def analyze_v3_compat():
     """V3 compatibility - redirect to new analyze endpoint"""
-    with app.test_request_context('/analyze', method=request.method, data=request.get_data(), query_string=request.args):
-        return analyze()
+    return analyze()
 
 @app.route('/v3/analyze_old', methods=['GET', 'POST'])
 def analyze_v3():
