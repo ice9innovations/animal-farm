@@ -15,8 +15,8 @@ Animal Farm consists of multiple specialized AI services that work together in a
 | Service | Port | Description |
 |---------|------|-------------|
 | **BLIP** | 7777 | Image captioning |
-| **CLIP** | 7778 | Image-text similarity analysis |
-| **CLIP_detection** | 7788 | Two Stage Object Detection with CLIP |
+| **CLIP** | 7778 | Image-text similarity analysis and caption scoring |
+| **CLIP_detection** | 7788 | Two-stage object detection with CLIP classification |
 | **colors** | 7770 | Color analysis and palette extraction |
 | **detectron2** | 7771 | Object detection and instance segmentation |
 | **face** | 7772 | Face detection and analysis |
@@ -24,9 +24,12 @@ Animal Farm consists of multiple specialized AI services that work together in a
 | **nsfw2** | 7774 | Content safety detection |
 | **ocr** | 7775 | Optical character recognition |
 | **ollama-api** | 7782 | Multi-modal large language model analysis |
+| **pose** | 7786 | Human pose estimation with MediaPipe |
 | **rtdetr** | 7780 | Transformer-based object detection |
-| **xception** | 7779 | ImageNet classification |
-| **xception_detection** | 7799 | Two Stage Object Detection with Xception |
+| **xception** | 7779 | Xception-based ImageNet classification |
+| **xception_detection** | 7799 | Two-stage object detection with Xception classification |
+| **yolo_365** | 7790 | YOLO object detection with Objects365 dataset (365 classes) |
+| **yolo_oi7** | 7791 | YOLO object detection with OpenImages v7 dataset |
 | **yolov8** | 7773 | Real-time object detection |
 
 ## Central API
