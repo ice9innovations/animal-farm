@@ -437,12 +437,17 @@ def internal_error(e):
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    model_status = "loaded" if model else "not_loaded"
-    return jsonify({
-        "status": "healthy",
-        "model_status": model_status,
-        "device": str(device)
-    })
+    try:
+        model_status = "loaded" if blip_analyzer and blip_analyzer.model else "not_loaded"
+        device_str = str(blip_analyzer.device) if blip_analyzer else "unknown"
+        return jsonify({
+            "status": "healthy",
+            "model_status": model_status,
+            "device": device_str
+        })
+    except Exception as e:
+        logger.error(f"Health check error: {str(e)}")
+        return jsonify({"error": "Health check failed", "status": "error"}), 500
 
 # V2 Compatibility Routes - Translate parameters and call V3
 @app.route('/v2/analyze', methods=['GET'])
