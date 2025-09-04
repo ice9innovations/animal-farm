@@ -84,6 +84,7 @@ def is_allowed_file(filename: str) -> bool:
 def create_detector_response(data: Dict[str, Any], processing_time: float) -> Dict[str, Any]:
     """Create standardized response with object detections"""
     predictions = data.get('predictions', [])
+    full_image = data.get('full_image', [])
     
     # Add shiny chance to predictions
     for prediction in predictions:
@@ -92,7 +93,14 @@ def create_detector_response(data: Dict[str, Any], processing_time: float) -> Di
             prediction["shiny"] = True
             logger.info(f"✨ SHINY {prediction.get('label', '').upper()} DETECTED! Roll: {shiny_roll} ✨")
     
-    return {
+    # Add shiny chance to full_image predictions
+    for prediction in full_image:
+        is_shiny, shiny_roll = check_shiny()
+        if is_shiny:
+            prediction["shiny"] = True
+            logger.info(f"✨ SHINY {prediction.get('label', '').upper()} DETECTED! Roll: {shiny_roll} ✨")
+    
+    response = {
         "service": SERVICE_NAME,
         "status": "success",
         "predictions": predictions,
@@ -101,6 +109,12 @@ def create_detector_response(data: Dict[str, Any], processing_time: float) -> Di
             "model_info": data.get('model_info', {})
         }
     }
+    
+    # Only include full_image if it exists and has content
+    if full_image:
+        response["full_image"] = full_image
+    
+    return response
 
 def download_image_from_url(url: str) -> Image.Image:
     """Download image from URL and return as PIL Image (in-memory processing)"""
@@ -148,9 +162,9 @@ def initialize_detector() -> bool:
         logger.info("Initializing two-stage CLIP detector...")
         
         detector = TwoStageCLIPDetector(
+            clip_service_url=CLIP_SERVICE_URL,
             yolo_model_path=YOLO_MODEL_PATH,
             detection_threshold=DETECTION_THRESHOLD,
-            clip_service_url=CLIP_SERVICE_URL,
             max_detections=MAX_DETECTIONS
         )
         

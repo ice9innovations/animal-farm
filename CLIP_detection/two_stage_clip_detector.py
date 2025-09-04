@@ -25,9 +25,9 @@ class TwoStageCLIPDetector:
     """Two-stage object detector: YOLO11n detection + CLIP classification"""
     
     def __init__(self,
+                 clip_service_url: str,
                  yolo_model_path: str = "yolo11n.pt", 
                  detection_threshold: float = 0.5,
-                 clip_service_url: str = "http://localhost:7778",
                  max_detections: int = 30,
                  min_object_size: int = 20):
         """Initialize two-stage detector"""
@@ -199,8 +199,9 @@ class TwoStageCLIPDetector:
             full_image_predictions = [obj for obj in classified_objects if obj.get("is_full_image")]
             object_predictions = [obj for obj in classified_objects if not obj.get("is_full_image")]
             
-            # Sort object predictions by confidence
+            # Sort both by confidence
             object_predictions.sort(key=lambda x: x["confidence"], reverse=True)
+            full_image_predictions.sort(key=lambda x: x["confidence"], reverse=True)
             
             # Clean up full image predictions (remove is_full_image flag and bbox)
             cleaned_full_image = []
@@ -210,22 +211,13 @@ class TwoStageCLIPDetector:
                 clean_pred.pop("bbox", None)  # Remove redundant bbox for full image
                 cleaned_full_image.append(clean_pred)
             
-            # For bbox merger compatibility, return object predictions as array
-            # Include both full image and object predictions in a flat array
-            all_predictions = []
-            
-            # Add full image predictions first (if any) 
-            all_predictions.extend(cleaned_full_image)
-            
-            # Add object predictions with bboxes
-            all_predictions.extend(object_predictions)
-            
-            logger.info(f"Two-stage analysis: {len(detections)} detected, {len(filtered_detections)} filtered, {len(object_predictions)} classified, full image predictions: {len(full_image_predictions)}")
+            logger.info(f"Two-stage analysis: {len(detections)} detected, {len(filtered_detections)} filtered, {len(object_predictions)} objects with bboxes, {len(cleaned_full_image)} full image predictions")
             
             return {
                 "success": True,
                 "data": {
-                    "predictions": all_predictions,
+                    "predictions": object_predictions,
+                    "full_image": cleaned_full_image,
                     "model_info": {
                         "framework": "YOLO + CLIP"
                     }
