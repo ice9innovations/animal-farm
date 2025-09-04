@@ -1,0 +1,8 @@
+requests 
+flask 
+flask-cors 
+ultralytics 
+torch 
+python-dotenv
+pillow
+
