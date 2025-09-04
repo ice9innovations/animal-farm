@@ -42,6 +42,7 @@ CLASSIFICATION_THRESHOLD_STR = os.getenv('CLASSIFICATION_THRESHOLD')
 MAX_DETECTIONS_STR = os.getenv('MAX_DETECTIONS')
 SERVICE_NAME = os.getenv('SERVICE_NAME')
 YOLO_MODEL_PATH = os.getenv('YOLO_MODEL_PATH')
+XCEPTION_SERVICE_URL = os.getenv('XCEPTION_SERVICE_URL')
 
 # Validate critical environment variables
 if not PORT_STR:
@@ -52,6 +53,8 @@ if not SERVICE_NAME:
     raise ValueError("SERVICE_NAME environment variable is required")
 if not YOLO_MODEL_PATH:
     raise ValueError("YOLO_MODEL_PATH environment variable is required")
+if not XCEPTION_SERVICE_URL:
+    raise ValueError("XCEPTION_SERVICE_URL environment variable is required")
 
 # Convert to appropriate types after validation
 PORT = int(PORT_STR)
@@ -81,6 +84,7 @@ def is_allowed_file(filename: str) -> bool:
 def create_detector_response(data: Dict[str, Any], processing_time: float) -> Dict[str, Any]:
     """Create standardized response with object detections"""
     predictions = data.get('predictions', [])
+    full_image = data.get('full_image', [])
     
     # Add shiny chance to predictions
     for prediction in predictions:
@@ -89,7 +93,14 @@ def create_detector_response(data: Dict[str, Any], processing_time: float) -> Di
             prediction["shiny"] = True
             logger.info(f"✨ SHINY {prediction.get('label', '').upper()} DETECTED! Roll: {shiny_roll} ✨")
     
-    return {
+    # Add shiny chance to full_image predictions
+    for prediction in full_image:
+        is_shiny, shiny_roll = check_shiny()
+        if is_shiny:
+            prediction["shiny"] = True
+            logger.info(f"✨ SHINY {prediction.get('label', '').upper()} DETECTED! Roll: {shiny_roll} ✨")
+    
+    response = {
         "service": SERVICE_NAME,
         "status": "success",
         "predictions": predictions,
@@ -98,6 +109,12 @@ def create_detector_response(data: Dict[str, Any], processing_time: float) -> Di
             "model_info": data.get('model_info', {})
         }
     }
+    
+    # Only include full_image if it exists and has content
+    if full_image:
+        response["full_image"] = full_image
+    
+    return response
 
 def download_image_from_url(url: str) -> Image.Image:
     """Download image from URL and return as PIL Image (in-memory processing)"""
@@ -145,6 +162,7 @@ def initialize_detector() -> bool:
         logger.info("Initializing two-stage detector...")
         
         detector = TwoStageDetector(
+            xception_url=XCEPTION_SERVICE_URL,
             yolo_model_path=YOLO_MODEL_PATH,
             detection_threshold=DETECTION_THRESHOLD,
             classification_threshold=CLASSIFICATION_THRESHOLD,
