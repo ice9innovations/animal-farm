@@ -1035,11 +1035,16 @@ def analyze():
         }), 500
 
 # V3 compatibility route
-@app.route('/v3/analyze', methods=['GET'])
+@app.route('/v3/analyze', methods=['GET', 'POST'])
 def analyze_v3_compat():
     """V3 compatibility - redirect to new analyze endpoint"""
-    with app.test_request_context('/analyze', query_string=request.args):
+    if request.method == 'POST':
+        # Forward POST request with data
         return analyze()
+    else:
+        # Forward GET request with query string
+        with app.test_request_context('/analyze', query_string=request.args):
+            return analyze()
 
 # V2 compatibility routes
 @app.route('/v2/analyze_file', methods=['GET'])

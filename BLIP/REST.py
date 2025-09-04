@@ -490,11 +490,16 @@ def analyze_file_v2_compat():
         with app.test_request_context('/analyze'):
             return analyze()
 
-@app.route('/v3/analyze', methods=['GET'])
+@app.route('/v3/analyze', methods=['GET', 'POST'])
 def analyze_v3_compat():
     """V3 compatibility - redirect to new analyze endpoint"""
-    with app.test_request_context('/analyze', query_string=request.args):
+    if request.method == 'POST':
+        # Forward POST request with data
         return analyze()
+    else:
+        # Forward GET request with query string
+        with app.test_request_context('/analyze', query_string=request.args):
+            return analyze()
 
 @app.route('/analyze', methods=['GET', 'POST'])
 def analyze():

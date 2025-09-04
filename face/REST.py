@@ -13,6 +13,7 @@ import tempfile
 import uuid
 import json
 import random
+import threading
 from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
@@ -67,6 +68,7 @@ mp_drawing = mp.solutions.drawing_utils
 
 # Global MediaPipe models - initialize once at startup
 face_detection_model = None
+face_detection_lock = threading.Lock()  # Prevent concurrent MediaPipe processing
 
 # Configuration
 UPLOAD_FOLDER = 'uploads'
@@ -181,7 +183,9 @@ def detect_faces_mediapipe_from_image(image: Image.Image):
         height, width, _ = img_array.shape
         
         # Process with MediaPipe (no CV2 conversion needed - PIL is already RGB!)
-        results = face_detection_model.process(img_array)
+        # Use lock to prevent timestamp collision errors in concurrent requests
+        with face_detection_lock:
+            results = face_detection_model.process(img_array)
         
         faces = []
         if results.detections:

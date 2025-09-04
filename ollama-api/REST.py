@@ -87,38 +87,58 @@ emoji_mappings = {}
 emoji_tokenizer = None
 
 def load_emoji_mappings():
-    """Load fresh emoji mappings from central API"""
+    """Load emoji mappings from central API, fall back to local file"""
     emoji_url = f"http://{API_HOST}:{API_PORT}/emoji_mappings.json"
 
     try:
         logger.info(f"🔄 LLaMa: Loading fresh emoji mappings from {emoji_url}")
         response = requests.get(emoji_url, timeout=API_TIMEOUT)
         response.raise_for_status()
+        logger.info("✅ LLaMa: Successfully loaded emoji mappings from API")
         return response.json()
     except requests.exceptions.RequestException as e:
-        logger.error(f"❌ LLaMa: Failed to load emoji mappings from {emoji_url}: {e}")
-        raise # re-raise to crash the service
+        logger.warning(f"⚠️  LLaMa: Failed to load emoji mappings from API ({e}), falling back to local file")
+        try:
+            with open('emoji_mappings.json', 'r') as f:
+                local_mappings = json.load(f)
+                logger.info("✅ LLaMa: Successfully loaded emoji mappings from local file")
+                return local_mappings
+        except Exception as local_error:
+            logger.error(f"❌ LLaMa: Failed to load local emoji mappings: {local_error}")
+            raise Exception(f"Both API and local emoji mappings failed: API={e}, Local={local_error}")
 
 def load_mwe_mappings():
-    """Load fresh MWE mappings from central API and convert to tuples"""
+    """Load MWE mappings from central API, fall back to local file, convert to tuples"""
     mwe_url = f"http://{API_HOST}:{API_PORT}/mwe.txt"
-    try:
-        logger.info(f"🔄 LLaMa: Loading fresh multi-word expressions (MWE) mappings from {mwe_url}")
-        response = requests.get(mwe_url, timeout=API_TIMEOUT)
-        response.raise_for_status()
-        mwe_text = response.text.splitlines()
-
-        # Convert to tuples for MWETokenizer
+    
+    def process_mwe_lines(mwe_text):
+        """Convert MWE text lines to tuples for MWETokenizer"""
         mwe_tuples = []
         for line in mwe_text:
             if line.strip():  # Skip empty lines
                 # Convert underscore format to word tuples (e.g., "street_sign" -> ("street", "sign"))
                 mwe_tuples.append(tuple(line.strip().replace('_', ' ').split()))
-        
+        return mwe_tuples
+    
+    try:
+        logger.info(f"🔄 LLaMa: Loading fresh multi-word expressions (MWE) mappings from {mwe_url}")
+        response = requests.get(mwe_url, timeout=API_TIMEOUT)
+        response.raise_for_status()
+        mwe_text = response.text.splitlines()
+        mwe_tuples = process_mwe_lines(mwe_text)
+        logger.info(f"✅ LLaMa: Successfully loaded {len(mwe_tuples)} multi-word expressions from API")
         return mwe_tuples
     except requests.exceptions.RequestException as e:
-        logger.error(f"❌ LLaMa: Failed to load multi-word expressions (MWE) mappings from {mwe_url}: {e}")
-        raise # re-raise to crash the service
+        logger.warning(f"⚠️  LLaMa: Failed to load MWE mappings from API ({e}), falling back to local file")
+        try:
+            with open('mwe.txt', 'r') as f:
+                local_mwe_text = f.read().splitlines()
+                mwe_tuples = process_mwe_lines(local_mwe_text)
+                logger.info(f"✅ LLaMa: Successfully loaded {len(mwe_tuples)} multi-word expressions from local file")
+                return mwe_tuples
+        except Exception as local_error:
+            logger.error(f"❌ LLaMa: Failed to load local MWE mappings: {local_error}")
+            raise Exception(f"Both API and local MWE mappings failed: API={e}, Local={local_error}")
 
 # Load emoji mappings on startup
 emoji_mappings = load_emoji_mappings()

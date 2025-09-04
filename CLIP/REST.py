@@ -465,23 +465,41 @@ def analyze():
         logger.error(f"Analyze API error: {e}")
         return error_response(f"Internal error: {str(e)}", 500)
 
-@app.route('/v3/analyze', methods=['GET'])
+@app.route('/v3/analyze', methods=['GET', 'POST'])
 def analyze_v3_compat():
     """V3 compatibility - redirect to new analyze endpoint"""
-    with app.test_request_context('/analyze', query_string=request.args):
+    if request.method == 'POST':
+        # Forward POST request with data
         return analyze()
+    else:
+        # Forward GET request with query string
+        with app.test_request_context('/analyze', query_string=request.args):
+            return analyze()
 
-@app.route('/score', methods=['GET'])
+@app.route('/score', methods=['GET', 'POST'])
 def score_caption():
     """Score caption similarity against image using CLIP"""
     import time
     start_time = time.time()
     
     try:
-        # Get input parameters - same pattern as /v3/analyze
-        caption = request.args.get('caption')
-        url = request.args.get('url')
-        file = request.args.get('file')
+        # Get input parameters - support both GET and POST
+        if request.method == 'POST':
+            # For POST, check JSON body first, then form data, then query string
+            if request.is_json:
+                data = request.get_json()
+                caption = data.get('caption')
+                url = data.get('url')
+                file = data.get('file')
+            else:
+                caption = request.form.get('caption') or request.args.get('caption')
+                url = request.form.get('url') or request.args.get('url')  
+                file = request.form.get('file') or request.args.get('file')
+        else:
+            # For GET, use query parameters
+            caption = request.args.get('caption')
+            url = request.args.get('url')
+            file = request.args.get('file')
         
         # Validate caption parameter
         if not caption or not isinstance(caption, str) or not caption.strip():
@@ -580,11 +598,16 @@ def score_caption():
             "metadata": {"processing_time": round(time.time() - start_time, 3)}
         }), 500
 
-@app.route('/v3/score', methods=['GET'])
+@app.route('/v3/score', methods=['GET', 'POST'])
 def score_caption_v3_compat():
     """V3 compatibility - redirect to new score endpoint"""
-    with app.test_request_context('/score', query_string=request.args):
+    if request.method == 'POST':
+        # Forward POST request with data
         return score_caption()
+    else:
+        # Forward GET request with query string
+        with app.test_request_context('/score', query_string=request.args):
+            return score_caption()
 
 # V2 Compatibility Routes - Translate parameters and call V3
 @app.route('/v2/analyze_file/', methods=['GET'])
