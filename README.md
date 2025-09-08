@@ -14,7 +14,7 @@ Animal Farm consists of multiple specialized AI services that work together in a
 
 | Service | Port | Description |
 |---------|------|-------------|
-| **BLIP** | 7777 | Image captioning |
+| **BLIP2** | 7777 | Image captioning |
 | **CLIP** | 7778 | Image-text similarity analysis and caption scoring |
 | **CLIP_detection** | 7788 | Two-stage object detection with CLIP classification |
 | **colors** | 7770 | Color analysis and palette extraction |
@@ -80,7 +80,7 @@ Animal Farm employs a sophisticated democratic voting system inspired by Orwell'
 **Evidence-Based Consensus**: Services become "more equal than others" through verifiable evidence:
 
 - **Spatial Consensus**: When multiple object detection services (YOLO, Detectron2, RT-DETR) agree on bounding box locations, they receive consensus bonuses equal to `detection_count - 1`
-- **Content Consensus**: When semantic services (BLIP, Ollama) and classification services (CLIP, Inception) agree on the same emoji, they receive consensus bonuses equal to `total_agreeing_services - 1`
+- **Content Consensus**: When semantic services (BLIP2, Ollama) and classification services (CLIP, Xception) agree on the same emoji, they receive consensus bonuses equal to `total_agreeing_services - 1`
 - **Instance Weighting**: Multiple detected instances vote proportionally - 3 people detected gets 3x the spatial votes of 1 person detected
 
 **Specialist Authority**: Each specialist service is authoritative but not exclusive in their domain:
@@ -193,7 +193,7 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines on:
 
 ## License
 
-This project is part of the Window to the World technology suite and as such is licensed under the GPL. Additional icensing terms are available upon request. See individual service directories for specific licensing information.
+This project is part of the Window to the World technology suite and as such is licensed under the GPL. Additional licensing terms are available upon request. See individual service directories for specific licensing information.
 
 ## Support
 
