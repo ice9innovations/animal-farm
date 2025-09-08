@@ -17,22 +17,9 @@ from dotenv import load_dotenv
 # Load environment variables FIRST
 load_dotenv()
 
-# API Configuration for emoji downloads (required)
-API_HOST = os.getenv('API_HOST')
-API_PORT = os.getenv('API_PORT')
-API_TIMEOUT = os.getenv('API_TIMEOUT')
-
-# Validate critical environment variables
-if not API_HOST:
-    raise ValueError("API_HOST environment variable is required")
-if not API_PORT:
-    raise ValueError("API_PORT environment variable is required")
-if not API_TIMEOUT:
-    raise ValueError("API_TIMEOUT environment variable is required")
-
-# Convert to appropriate types after validation
-API_PORT = int(API_PORT)
-API_TIMEOUT = float(API_TIMEOUT)
+# Configuration for GitHub raw file downloads (optional - fallback to local config)
+TIMEOUT = float(os.getenv('TIMEOUT', '10.0'))  # Default 10 seconds for GitHub requests
+AUTO_UPDATE = os.getenv('AUTO_UPDATE', 'True').lower() == 'true'  # Enable/disable GitHub downloads
 
 import torch
 from urllib.parse import urlparse, parse_qs
@@ -88,38 +75,101 @@ PRIORITY_OVERRIDES = {
 }
 
 def load_emoji_mappings():
-    """Load fresh emoji mappings from central API"""
-    emoji_url = f"http://{API_HOST}:{API_PORT}/emoji_mappings.json"
-
+    """Load emoji mappings from GitHub raw files with local caching"""
+    local_cache_path = os.path.join(os.path.dirname(__file__), 'emoji_mappings.json')
+    
+    # Try GitHub raw file first if AUTO_UPDATE is enabled
+    if AUTO_UPDATE:
+        github_url = "https://raw.githubusercontent.com/ice9innovations/animal-farm/refs/heads/main/config/emoji_mappings.json"
+        
+        try:
+            logger.info(f"🔄 BLIP: Loading fresh emoji mappings from GitHub: {github_url}")
+            response = requests.get(github_url, timeout=TIMEOUT)
+            response.raise_for_status()
+            data = response.json()
+            
+            # Cache to disk for future offline use
+            try:
+                with open(local_cache_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                logger.info(f"💾 BLIP: Cached emoji mappings to {local_cache_path}")
+            except Exception as cache_error:
+                logger.warning(f"⚠️  BLIP: Failed to cache emoji mappings: {cache_error}")
+            
+            logger.info("✅ BLIP: Successfully loaded emoji mappings from GitHub")
+            return data
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"⚠️  BLIP: Failed to load emoji mappings from GitHub: {e}")
+            logger.info("🔄 BLIP: Falling back to local cache due to GitHub failure")
+    else:
+        logger.info("🔄 BLIP: AUTO_UPDATE disabled, using local cache only")
+        
+    # Fallback to local cached file
     try:
-        logger.info(f"🔄 BLIP: Loading fresh emoji mappings from {emoji_url}")
-        response = requests.get(emoji_url, timeout=API_TIMEOUT)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        logger.error(f"❌ BLIP: Failed to load emoji mappings from {emoji_url}: {e}")
-        raise # re-raise to crash the service
+        logger.info(f"🔄 BLIP: Loading emoji mappings from local cache: {local_cache_path}")
+        with open(local_cache_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        logger.info("✅ BLIP: Successfully loaded emoji mappings from local cache")
+        return data
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        logger.error(f"❌ BLIP: Failed to load local emoji mappings from {local_cache_path}: {e}")
+        if AUTO_UPDATE:
+            raise Exception(f"Failed to load emoji mappings from both GitHub and local cache: {e}")
+        else:
+            raise Exception(f"Failed to load emoji mappings - AUTO_UPDATE disabled and no local cache available. Set AUTO_UPDATE=True or provide emoji_mappings.json in BLIP directory: {e}")
 
 def load_mwe_mappings():
-    """Load fresh MWE mappings from central API and convert to tuples"""
-    mwe_url = f"http://{API_HOST}:{API_PORT}/mwe.txt"
-    try:
-        logger.info(f"🔄 BLIP: Loading fresh multi-word expressions (MWE) mappings from {mwe_url}")
-        response = requests.get(mwe_url, timeout=API_TIMEOUT)
-        response.raise_for_status()
-        mwe_text = response.text.splitlines()
-
-        # Convert to tuples for MWETokenizer
-        mwe_tuples = []
-        for line in mwe_text:
-            if line.strip():  # Skip empty lines
-                # Convert underscore format to word tuples (e.g., "street_sign" -> ("street", "sign"))
-                mwe_tuples.append(tuple(line.strip().replace('_', ' ').split()))
+    """Load MWE mappings from GitHub raw files with local caching and convert to tuples"""
+    local_cache_path = os.path.join(os.path.dirname(__file__), 'mwe.txt')
+    mwe_text = []
+    
+    # Try GitHub raw file first if AUTO_UPDATE is enabled
+    if AUTO_UPDATE:
+        github_url = "https://raw.githubusercontent.com/ice9innovations/animal-farm/refs/heads/main/config/mwe.txt"
         
-        return mwe_tuples
-    except requests.exceptions.RequestException as e:
-        logger.error(f"❌ BLIP: Failed to load multi-word expressions (MWE) mappings from {mwe_url}: {e}")
-        raise # re-raise to crash the service
+        try:
+            logger.info(f"🔄 BLIP: Loading fresh multi-word expressions (MWE) mappings from GitHub: {github_url}")
+            response = requests.get(github_url, timeout=TIMEOUT)
+            response.raise_for_status()
+            mwe_text = response.text.splitlines()
+            
+            # Cache to disk for future offline use
+            try:
+                with open(local_cache_path, 'w', encoding='utf-8') as f:
+                    f.write(response.text)
+                logger.info(f"💾 BLIP: Cached MWE mappings to {local_cache_path}")
+            except Exception as cache_error:
+                logger.warning(f"⚠️  BLIP: Failed to cache MWE mappings: {cache_error}")
+            
+            logger.info("✅ BLIP: Successfully loaded MWE mappings from GitHub")
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"⚠️  BLIP: Failed to load MWE mappings from GitHub: {e}")
+            logger.info("🔄 BLIP: Falling back to local cache due to GitHub failure")
+    else:
+        logger.info("🔄 BLIP: AUTO_UPDATE disabled, using local cache only")
+        
+    # Fallback to local cached file if GitHub failed or AUTO_UPDATE is disabled
+    if not mwe_text:
+        try:
+            logger.info(f"🔄 BLIP: Loading MWE mappings from local cache: {local_cache_path}")
+            with open(local_cache_path, 'r', encoding='utf-8') as f:
+                mwe_text = f.read().splitlines()
+            logger.info("✅ BLIP: Successfully loaded MWE mappings from local cache")
+        except FileNotFoundError as e:
+            logger.error(f"❌ BLIP: Failed to load local MWE mappings from {local_cache_path}: {e}")
+            if AUTO_UPDATE:
+                raise Exception(f"Failed to load MWE mappings from both GitHub and local cache: {e}")
+            else:
+                raise Exception(f"Failed to load MWE mappings - AUTO_UPDATE disabled and no local cache available. Set AUTO_UPDATE=True or provide mwe.txt in BLIP directory: {e}")
+
+    # Convert to tuples for MWETokenizer
+    mwe_tuples = []
+    for line in mwe_text:
+        if line.strip():  # Skip empty lines
+            # Convert underscore format to word tuples (e.g., "street_sign" -> ("street", "sign"))
+            mwe_tuples.append(tuple(line.strip().replace('_', ' ').split()))
+    
+    return mwe_tuples
 
 # Load emoji mappings on startup
 emoji_mappings = load_emoji_mappings()
