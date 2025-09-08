@@ -19,22 +19,9 @@ load_dotenv()
 
 from clip_analyzer import ClipAnalyzer
 
-# API Configuration for emoji downloads (required)
-API_HOST = os.getenv('API_HOST')
-API_PORT = os.getenv('API_PORT')
-API_TIMEOUT = os.getenv('API_TIMEOUT')
-
-# Validate critical environment variables
-if not API_HOST:
-    raise ValueError("API_HOST environment variable is required")
-if not API_PORT:
-    raise ValueError("API_PORT environment variable is required")
-if not API_TIMEOUT:
-    raise ValueError("API_TIMEOUT environment variable is required")
-
-# Convert to appropriate types after validation
-API_PORT = int(API_PORT)
-API_TIMEOUT = float(API_TIMEOUT)
+# Configuration for GitHub raw file downloads (optional - fallback to local config)
+API_TIMEOUT = float(os.getenv('API_TIMEOUT', '10.0'))  # Default 10 seconds for GitHub requests
+AUTO_UPDATE = os.getenv('AUTO_UPDATE', 'True').lower() == 'true'  # Enable/disable GitHub downloads
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -94,21 +81,54 @@ if torch.backends.mps.is_available():
 
 logger.info(f"Using device: {device}")
 
-# Load emoji mappings from central API
+# Load emoji mappings with GitHub-first approach
 emoji_mappings = {}
 
 def load_emoji_mappings():
-    """Load fresh emoji mappings from central API"""
+    """Load emoji mappings from GitHub raw files with local caching"""
     global emoji_mappings
+    local_cache_path = os.path.join(os.path.dirname(__file__), 'emoji_mappings.json')
     
-    api_url = f"http://{API_HOST}:{API_PORT}/emoji_mappings.json"
-    logger.info(f"🔄 CLIP: Loading fresh emoji mappings from {api_url}")
-    
-    response = requests.get(api_url, timeout=API_TIMEOUT)
-    response.raise_for_status()
-    emoji_mappings = response.json()
-    
-    logger.info(f"✅ CLIP: Loaded fresh emoji mappings from API ({len(emoji_mappings)} entries)")
+    # Try GitHub raw file first if AUTO_UPDATE is enabled
+    if AUTO_UPDATE:
+        github_url = "https://raw.githubusercontent.com/ice9innovations/animal-farm/refs/heads/main/config/emoji_mappings.json"
+        
+        try:
+            logger.info(f"🔄 CLIP: Loading fresh emoji mappings from GitHub: {github_url}")
+            response = requests.get(github_url, timeout=API_TIMEOUT)
+            response.raise_for_status()
+            data = response.json()
+            
+            # Cache to disk for future offline use
+            try:
+                with open(local_cache_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                logger.info(f"💾 CLIP: Cached emoji mappings to {local_cache_path}")
+            except Exception as cache_error:
+                logger.warning(f"⚠️  CLIP: Failed to cache emoji mappings: {cache_error}")
+            
+            emoji_mappings = data
+            logger.info("✅ CLIP: Successfully loaded emoji mappings from GitHub")
+            return
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"⚠️  CLIP: Failed to load emoji mappings from GitHub: {e}")
+            logger.info("🔄 CLIP: Falling back to local cache due to GitHub failure")
+    else:
+        logger.info("🔄 CLIP: AUTO_UPDATE disabled, using local cache only")
+        
+    # Fallback to local cached file
+    try:
+        logger.info(f"🔄 CLIP: Loading emoji mappings from local cache: {local_cache_path}")
+        with open(local_cache_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        emoji_mappings = data
+        logger.info("✅ CLIP: Successfully loaded emoji mappings from local cache")
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        logger.error(f"❌ CLIP: Failed to load local emoji mappings from {local_cache_path}: {e}")
+        if AUTO_UPDATE:
+            raise Exception(f"Failed to load emoji mappings from both GitHub and local cache: {e}")
+        else:
+            raise Exception(f"Failed to load emoji mappings - AUTO_UPDATE disabled and no local cache available. Set AUTO_UPDATE=True or provide emoji_mappings.json in CLIP directory: {e}")
 
 def get_emoji(concept: str) -> Optional[str]:
     """Get emoji for a single concept"""
