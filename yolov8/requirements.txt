@@ -1,0 +1,16 @@
+# PyTorch with CUDA support
+torch==2.5.1+cu121
+torchvision==0.20.1+cu121
+
+# Core ML dependencies
+ultralytics==8.3.0
+numpy==1.26.4
+pillow==11.0.0
+
+# Flask web framework
+flask==3.1.1
+flask-cors==6.0.1
+
+# Environment and utilities
+python-dotenv==1.1.1
+requests==2.32.4
