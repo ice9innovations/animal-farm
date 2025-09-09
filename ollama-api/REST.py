@@ -23,22 +23,9 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-# API Configuration for emoji downloads (required)
-API_HOST = os.getenv('API_HOST')
-API_PORT_STR = os.getenv('API_PORT')
-API_TIMEOUT_STR = os.getenv('API_TIMEOUT')
-
-# Validate critical environment variables
-if not API_HOST:
-    raise ValueError("API_HOST environment variable is required")
-if not API_PORT_STR:
-    raise ValueError("API_PORT environment variable is required")
-if not API_TIMEOUT_STR:
-    raise ValueError("API_TIMEOUT environment variable is required")
-
-# Convert to appropriate types after validation
-API_PORT = int(API_PORT_STR)
-API_TIMEOUT = float(API_TIMEOUT_STR)
+# Configuration Updates (GitHub-first pattern)
+AUTO_UPDATE_STR = os.getenv('AUTO_UPDATE', 'true')
+AUTO_UPDATE = AUTO_UPDATE_STR.lower() == 'true'
 
 FOLDER = './uploads'
 PRIVATE_STR = os.getenv('PRIVATE')
@@ -87,29 +74,39 @@ emoji_mappings = {}
 emoji_tokenizer = None
 
 def load_emoji_mappings():
-    """Load emoji mappings from central API, fall back to local file"""
-    emoji_url = f"http://{API_HOST}:{API_PORT}/emoji_mappings.json"
+    """Load emoji mappings from GitHub, fall back to local cache"""
+    github_url = "https://raw.githubusercontent.com/ice9innovations/animal-farm/refs/heads/main/config/emoji_mappings.json"
+    local_cache_path = 'emoji_mappings.json'
 
-    try:
-        logger.info(f"🔄 LLaMa: Loading fresh emoji mappings from {emoji_url}")
-        response = requests.get(emoji_url, timeout=API_TIMEOUT)
-        response.raise_for_status()
-        logger.info("✅ LLaMa: Successfully loaded emoji mappings from API")
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        logger.warning(f"⚠️  LLaMa: Failed to load emoji mappings from API ({e}), falling back to local file")
+    if AUTO_UPDATE:
         try:
-            with open('emoji_mappings.json', 'r') as f:
-                local_mappings = json.load(f)
-                logger.info("✅ LLaMa: Successfully loaded emoji mappings from local file")
-                return local_mappings
-        except Exception as local_error:
-            logger.error(f"❌ LLaMa: Failed to load local emoji mappings: {local_error}")
-            raise Exception(f"Both API and local emoji mappings failed: API={e}, Local={local_error}")
+            logger.info(f"🔄 LLaMa: Loading emoji mappings from GitHub: {github_url}")
+            response = requests.get(github_url, timeout=10.0)
+            response.raise_for_status()
+            
+            # Save to local cache
+            with open(local_cache_path, 'w') as f:
+                json.dump(response.json(), f, indent=2)
+            
+            logger.info("✅ LLaMa: Loaded emoji mappings from GitHub and cached locally")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"⚠️  LLaMa: Failed to load emoji mappings from GitHub ({e}), falling back to local cache")
+    
+    # Fall back to local cache
+    try:
+        with open(local_cache_path, 'r') as f:
+            local_mappings = json.load(f)
+            logger.info("✅ LLaMa: Successfully loaded emoji mappings from local cache")
+            return local_mappings
+    except Exception as local_error:
+        logger.error(f"❌ LLaMa: Failed to load local emoji mappings: {local_error}")
+        raise Exception(f"Both GitHub and local emoji mappings failed: GitHub download disabled or failed, Local cache={local_error}")
 
 def load_mwe_mappings():
-    """Load MWE mappings from central API, fall back to local file, convert to tuples"""
-    mwe_url = f"http://{API_HOST}:{API_PORT}/mwe.txt"
+    """Load MWE mappings from GitHub, fall back to local cache, convert to tuples"""
+    github_url = "https://raw.githubusercontent.com/ice9innovations/animal-farm/refs/heads/main/config/mwe.txt"
+    local_cache_path = 'mwe.txt'
     
     def process_mwe_lines(mwe_text):
         """Convert MWE text lines to tuples for MWETokenizer"""
@@ -120,25 +117,50 @@ def load_mwe_mappings():
                 mwe_tuples.append(tuple(line.strip().replace('_', ' ').split()))
         return mwe_tuples
     
-    try:
-        logger.info(f"🔄 LLaMa: Loading fresh multi-word expressions (MWE) mappings from {mwe_url}")
-        response = requests.get(mwe_url, timeout=API_TIMEOUT)
-        response.raise_for_status()
-        mwe_text = response.text.splitlines()
-        mwe_tuples = process_mwe_lines(mwe_text)
-        logger.info(f"✅ LLaMa: Successfully loaded {len(mwe_tuples)} multi-word expressions from API")
-        return mwe_tuples
-    except requests.exceptions.RequestException as e:
-        logger.warning(f"⚠️  LLaMa: Failed to load MWE mappings from API ({e}), falling back to local file")
+    if AUTO_UPDATE:
         try:
-            with open('mwe.txt', 'r') as f:
-                local_mwe_text = f.read().splitlines()
-                mwe_tuples = process_mwe_lines(local_mwe_text)
-                logger.info(f"✅ LLaMa: Successfully loaded {len(mwe_tuples)} multi-word expressions from local file")
-                return mwe_tuples
-        except Exception as local_error:
-            logger.error(f"❌ LLaMa: Failed to load local MWE mappings: {local_error}")
-            raise Exception(f"Both API and local MWE mappings failed: API={e}, Local={local_error}")
+            logger.info(f"🔄 LLaMa: Loading MWE mappings from GitHub: {github_url}")
+            response = requests.get(github_url, timeout=10.0)
+            response.raise_for_status()
+            
+            # Save to local cache
+            with open(local_cache_path, 'w') as f:
+                f.write(response.text)
+            
+            mwe_text = response.text.splitlines()
+            mwe_tuples = process_mwe_lines(mwe_text)
+            logger.info(f"✅ LLaMa: Loaded MWE mappings from GitHub and cached locally")
+            return mwe_tuples
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"⚠️  LLaMa: Failed to load MWE mappings from GitHub ({e}), falling back to local cache")
+    
+    # Fall back to local cache
+    try:
+        with open(local_cache_path, 'r') as f:
+            local_mwe_text = f.read().splitlines()
+            mwe_tuples = process_mwe_lines(local_mwe_text)
+            logger.info(f"✅ LLaMa: Successfully loaded {len(mwe_tuples)} multi-word expressions from local cache")
+            return mwe_tuples
+    except Exception as local_error:
+        logger.error(f"❌ LLaMa: Failed to load local MWE mappings: {local_error}")
+        raise Exception(f"Both GitHub and local MWE mappings failed: GitHub download disabled or failed, Local cache={local_error}")
+
+def ensure_ollama_models():
+    """Download required Ollama vision model if it doesn't exist"""
+    import subprocess
+    
+    if VISION_MODEL:
+        try:
+            # Check if model exists
+            result = subprocess.run(['ollama', 'list'], capture_output=True, text=True)
+            if VISION_MODEL not in result.stdout:
+                logger.info(f"🔄 LLaMa: Downloading vision model: {VISION_MODEL}")
+                subprocess.run(['ollama', 'pull', VISION_MODEL], check=True)
+                logger.info(f"✅ LLaMa: Successfully downloaded vision model: {VISION_MODEL}")
+            else:
+                logger.info(f"✅ LLaMa: Vision model {VISION_MODEL} already available")
+        except Exception as e:
+            logger.error(f"❌ LLaMa: Failed to download vision model {VISION_MODEL}: {e}")
 
 # Load emoji mappings on startup
 emoji_mappings = load_emoji_mappings()
@@ -146,6 +168,9 @@ mwe_mappings = load_mwe_mappings()
 
 # Initialize MWE tokenizer with the loaded mappings (already converted to tuples)
 emoji_tokenizer = MWETokenizer(mwe_mappings)
+
+# Ensure Ollama models are downloaded
+ensure_ollama_models()
 
 # Priority overrides for critical ambiguities - defined once at module level
 PRIORITY_OVERRIDES = {
