@@ -28,9 +28,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Load environment variables as strings first
-API_HOST = os.getenv('API_HOST')
-API_PORT_STR = os.getenv('API_PORT')
-API_TIMEOUT_STR = os.getenv('API_TIMEOUT')
+AUTO_UPDATE_STR = os.getenv('AUTO_UPDATE', 'true')
 PORT_STR = os.getenv('PORT')
 PRIVATE_STR = os.getenv('PRIVATE')
 CONFIDENCE_THRESHOLD_STR = os.getenv('CONFIDENCE_THRESHOLD')
@@ -39,20 +37,13 @@ MODEL_PATH = os.getenv('MODEL_PATH')
 SERVICE_NAME = os.getenv('SERVICE_NAME', 'YOLO')
 
 # Validate critical environment variables
-if not API_HOST:
-    raise ValueError("API_HOST environment variable is required")
-if not API_PORT_STR:
-    raise ValueError("API_PORT environment variable is required")
-if not API_TIMEOUT_STR:
-    raise ValueError("API_TIMEOUT environment variable is required")
 if not PORT_STR:
     raise ValueError("PORT environment variable is required")
 if not PRIVATE_STR:
     raise ValueError("PRIVATE environment variable is required")
 
 # Convert to appropriate types after validation
-API_PORT = int(API_PORT_STR)
-API_TIMEOUT = float(API_TIMEOUT_STR)
+AUTO_UPDATE = AUTO_UPDATE_STR.lower() == 'true'
 PORT = int(PORT_STR)
 PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
 CONFIDENCE_THRESHOLD = float(CONFIDENCE_THRESHOLD_STR) if CONFIDENCE_THRESHOLD_STR else 0.25
@@ -169,9 +160,6 @@ def initialize_yolo_analyzer() -> bool:
             confidence_threshold=CONFIDENCE_THRESHOLD,
             iou_threshold=IOU_THRESHOLD,
             max_detections=MAX_DETECTIONS,
-            api_host=API_HOST,
-            api_port=API_PORT,
-            api_timeout=API_TIMEOUT,
             service_name=SERVICE_NAME,
             dataset=DATASET
         )
