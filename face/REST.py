@@ -32,27 +32,24 @@ load_dotenv()
 
 # Step 1: Load as strings (no fallbacks)
 PORT_STR = os.getenv('PORT')
-API_HOST = os.getenv('API_HOST')
-API_PORT_STR = os.getenv('API_PORT')
-API_TIMEOUT_STR = os.getenv('API_TIMEOUT')
+TIMEOUT_STR = os.getenv('TIMEOUT')
+AUTO_UPDATE_STR = os.getenv('AUTO_UPDATE')
 PRIVATE_STR = os.getenv('PRIVATE')
 
 # Step 2: Validate critical environment variables
 if not PORT_STR:
     raise ValueError("PORT environment variable is required")
-if not API_HOST:
-    raise ValueError("API_HOST environment variable is required")
-if not API_PORT_STR:
-    raise ValueError("API_PORT environment variable is required")
-if not API_TIMEOUT_STR:
-    raise ValueError("API_TIMEOUT environment variable is required")
+if not TIMEOUT_STR:
+    raise ValueError("TIMEOUT environment variable is required")
+if not AUTO_UPDATE_STR:
+    raise ValueError("AUTO_UPDATE environment variable is required")
 if not PRIVATE_STR:
     raise ValueError("PRIVATE environment variable is required")
 
 # Step 3: Convert to appropriate types after validation
 PORT = int(PORT_STR)
-API_PORT = int(API_PORT_STR)
-API_TIMEOUT = float(API_TIMEOUT_STR)
+TIMEOUT = float(TIMEOUT_STR)
+AUTO_UPDATE = AUTO_UPDATE_STR.lower() == 'true'
 PRIVATE_MODE = PRIVATE_STR.lower() == 'true'
 
 # Global emoji mappings - loaded from API on startup
@@ -111,16 +108,46 @@ def initialize_models():
         return False
 
 def load_emoji_mappings():
-    """Load emoji mappings from central API"""
+    """Load emoji mappings from GitHub raw files with local caching"""
     global emoji_mappings
+    local_cache_path = os.path.join(os.path.dirname(__file__), 'emoji_mappings.json')
+    
+    # Try GitHub raw file first if AUTO_UPDATE is enabled
+    if AUTO_UPDATE:
+        github_url = "https://raw.githubusercontent.com/ice9innovations/animal-farm/refs/heads/main/config/emoji_mappings.json"
+        
+        try:
+            logger.info(f"Loading emoji mappings from GitHub: {github_url}")
+            response = requests.get(github_url, timeout=TIMEOUT)
+            response.raise_for_status()
+            emoji_mappings = response.json()
+            
+            # Cache the successful download locally
+            try:
+                with open(local_cache_path, 'w') as f:
+                    json.dump(emoji_mappings, f, indent=2)
+                logger.info(f"✅ Loaded {len(emoji_mappings)} emoji mappings from GitHub and cached locally")
+            except Exception as cache_error:
+                logger.warning(f"⚠️ Failed to cache emoji mappings locally: {cache_error}")
+                logger.info(f"✅ Loaded {len(emoji_mappings)} emoji mappings from GitHub (no local cache)")
+            
+            return
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not load emoji mappings from GitHub: {e}")
+            logger.info("Attempting to use local cache...")
+    
+    # Fall back to local cached file
     try:
-        emoji_url = f"http://{API_HOST}:{API_PORT}/emoji_mappings.json"
-        response = requests.get(emoji_url, timeout=API_TIMEOUT)
-        response.raise_for_status()
-        emoji_mappings = response.json()
-        logger.info(f"✅ Loaded {len(emoji_mappings)} emoji mappings from {emoji_url}")
+        if os.path.exists(local_cache_path):
+            with open(local_cache_path, 'r') as f:
+                emoji_mappings = json.load(f)
+            logger.info(f"✅ Loaded {len(emoji_mappings)} emoji mappings from local cache")
+        else:
+            logger.warning("⚠️ No local emoji mappings cache found")
+            emoji_mappings = {}
     except Exception as e:
-        logger.warning(f"⚠️ Could not load emoji mappings: {e}. Using empty mappings.")
+        logger.error(f"❌ Failed to load emoji mappings from local cache: {e}")
         emoji_mappings = {}
 
 def get_emoji(word):
