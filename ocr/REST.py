@@ -31,27 +31,24 @@ load_dotenv()
 # Step 1: Load as strings (no fallbacks)
 PORT_STR = os.getenv('PORT')
 PRIVATE_STR = os.getenv('PRIVATE')
-API_HOST = os.getenv('API_HOST')
-API_PORT_STR = os.getenv('API_PORT')
-API_TIMEOUT_STR = os.getenv('API_TIMEOUT')
+TIMEOUT_STR = os.getenv('TIMEOUT')
+AUTO_UPDATE_STR = os.getenv('AUTO_UPDATE')
 
 # Step 2: Validate critical environment variables
 if not PORT_STR:
     raise ValueError("PORT environment variable is required")
 if not PRIVATE_STR:
     raise ValueError("PRIVATE environment variable is required")
-if not API_HOST:
-    raise ValueError("API_HOST environment variable is required")
-if not API_PORT_STR:
-    raise ValueError("API_PORT environment variable is required")
-if not API_TIMEOUT_STR:
-    raise ValueError("API_TIMEOUT environment variable is required")
+if not TIMEOUT_STR:
+    raise ValueError("TIMEOUT environment variable is required")
+if not AUTO_UPDATE_STR:
+    raise ValueError("AUTO_UPDATE environment variable is required")
 
 # Step 3: Convert to appropriate types after validation
 PORT = int(PORT_STR)
 PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
-API_PORT = int(API_PORT_STR)
-API_TIMEOUT = float(API_TIMEOUT_STR)
+TIMEOUT = float(TIMEOUT_STR)
+AUTO_UPDATE = AUTO_UPDATE_STR.lower() == 'true'
 
 FOLDER = './uploads'
 MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
@@ -114,37 +111,106 @@ def create_ocr_response(data: Dict[str, Any], processing_time: float) -> Dict[st
     }
 
 def load_mwe_mappings():
-    """Load fresh MWE mappings from central API and convert to tuples"""
-    mwe_url = f"http://{API_HOST}:{API_PORT}/mwe.txt"
-    try:
-        print(f"🔄 OCR: Loading fresh multi-word expressions (MWE) mappings from {mwe_url}")
-        response = requests.get(mwe_url, timeout=API_TIMEOUT)
-        response.raise_for_status()
-        mwe_text = response.text.splitlines()
+    """Load MWE mappings from GitHub raw files with local caching"""
+    local_cache_path = os.path.join(os.path.dirname(__file__), 'mwe.txt')
+    
+    # Try GitHub raw file first if AUTO_UPDATE is enabled
+    if AUTO_UPDATE:
+        github_url = "https://raw.githubusercontent.com/ice9innovations/animal-farm/refs/heads/main/config/mwe.txt"
         
-        # Convert to tuples for MWETokenizer
-        mwe_tuples = []
-        for line in mwe_text:
-            if line.strip():
-                mwe_tuples.append(tuple(line.strip().replace('_', ' ').split()))
+        try:
+            print(f"🔄 OCR: Loading MWE mappings from GitHub: {github_url}")
+            response = requests.get(github_url, timeout=TIMEOUT)
+            response.raise_for_status()
+            mwe_text = response.text.splitlines()
+            
+            # Cache the successful download locally
+            try:
+                with open(local_cache_path, 'w') as f:
+                    f.write(response.text)
+                print(f"✅ OCR: Loaded MWE mappings from GitHub and cached locally")
+            except Exception as cache_error:
+                print(f"⚠️ OCR: Failed to cache MWE mappings locally: {cache_error}")
+                print(f"✅ OCR: Loaded MWE mappings from GitHub (no local cache)")
         
-        return mwe_tuples
-    except Exception as e:
-        print(f"❌ OCR: Failed to load multi-word expressions (MWE) mappings from {mwe_url}: {e}")
-        return []
+        except Exception as e:
+            print(f"⚠️ OCR: Could not load MWE mappings from GitHub: {e}")
+            print("OCR: Attempting to use local cache...")
+            # Fall through to local cache
+            try:
+                if os.path.exists(local_cache_path):
+                    with open(local_cache_path, 'r') as f:
+                        mwe_text = f.read().splitlines()
+                else:
+                    print("⚠️ OCR: No local MWE cache found")
+                    return []
+            except Exception as cache_e:
+                print(f"❌ OCR: Failed to load MWE from local cache: {cache_e}")
+                return []
+    else:
+        # Load from local cache only
+        try:
+            if os.path.exists(local_cache_path):
+                with open(local_cache_path, 'r') as f:
+                    mwe_text = f.read().splitlines()
+                print(f"✅ OCR: Loaded MWE mappings from local cache")
+            else:
+                print("⚠️ OCR: No local MWE cache found")
+                return []
+        except Exception as e:
+            print(f"❌ OCR: Failed to load MWE from local cache: {e}")
+            return []
+    
+    # Convert to tuples for MWETokenizer
+    mwe_tuples = []
+    for line in mwe_text:
+        if line.strip():
+            mwe_tuples.append(tuple(line.strip().replace('_', ' ').split()))
+    
+    return mwe_tuples
 
 def load_emoji_mappings():
-    """Load fresh emoji mappings from central API"""
+    """Load emoji mappings from GitHub raw files with local caching"""
     global emoji_mappings
+    local_cache_path = os.path.join(os.path.dirname(__file__), 'emoji_mappings.json')
     
-    api_url = f"http://{API_HOST}:{API_PORT}/emoji_mappings.json"
-    print(f"🔄 OCR: Loading fresh emoji mappings from {api_url}")
+    # Try GitHub raw file first if AUTO_UPDATE is enabled
+    if AUTO_UPDATE:
+        github_url = "https://raw.githubusercontent.com/ice9innovations/animal-farm/refs/heads/main/config/emoji_mappings.json"
+        
+        try:
+            print(f"🔄 OCR: Loading emoji mappings from GitHub: {github_url}")
+            response = requests.get(github_url, timeout=TIMEOUT)
+            response.raise_for_status()
+            emoji_mappings = response.json()
+            
+            # Cache the successful download locally
+            try:
+                with open(local_cache_path, 'w') as f:
+                    json.dump(emoji_mappings, f, indent=2)
+                print(f"✅ OCR: Loaded {len(emoji_mappings)} emoji mappings from GitHub and cached locally")
+            except Exception as cache_error:
+                print(f"⚠️ OCR: Failed to cache emoji mappings locally: {cache_error}")
+                print(f"✅ OCR: Loaded {len(emoji_mappings)} emoji mappings from GitHub (no local cache)")
+            
+            return
+            
+        except Exception as e:
+            print(f"⚠️ OCR: Could not load emoji mappings from GitHub: {e}")
+            print("OCR: Attempting to use local cache...")
     
-    response = requests.get(api_url, timeout=API_TIMEOUT)
-    response.raise_for_status()
-    emoji_mappings = response.json()
-    
-    print(f"✅ OCR: Loaded fresh emoji mappings from API ({len(emoji_mappings)} entries)")
+    # Fall back to local cached file
+    try:
+        if os.path.exists(local_cache_path):
+            with open(local_cache_path, 'r') as f:
+                emoji_mappings = json.load(f)
+            print(f"✅ OCR: Loaded {len(emoji_mappings)} emoji mappings from local cache")
+        else:
+            print("⚠️ OCR: No local emoji mappings cache found")
+            emoji_mappings = {}
+    except Exception as e:
+        print(f"❌ OCR: Failed to load emoji mappings from local cache: {e}")
+        emoji_mappings = {}
 
 def get_emoji(label):
     """Get emoji for a given label from emoji mappings"""
