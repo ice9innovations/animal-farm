@@ -31,28 +31,19 @@ load_dotenv()
 
 # Step 1: Load as strings (no fallbacks)
 PORT_STR = os.getenv('PORT')
-API_HOST = os.getenv('API_HOST')
-API_PORT_STR = os.getenv('API_PORT')
-API_TIMEOUT_STR = os.getenv('API_TIMEOUT')
 PRIVATE_STR = os.getenv('PRIVATE')
+AUTO_UPDATE_STR = os.getenv('AUTO_UPDATE', 'true')
 
 # Step 2: Validate critical environment variables
 if not PORT_STR:
     raise ValueError("PORT environment variable is required")
-if not API_HOST:
-    raise ValueError("API_HOST environment variable is required")
-if not API_PORT_STR:
-    raise ValueError("API_PORT environment variable is required")
-if not API_TIMEOUT_STR:
-    raise ValueError("API_TIMEOUT environment variable is required")
 if not PRIVATE_STR:
     raise ValueError("PRIVATE environment variable is required")
 
 # Step 3: Convert to appropriate types after validation
 PORT = int(PORT_STR)
-API_PORT = int(API_PORT_STR)
-API_TIMEOUT = float(API_TIMEOUT_STR)
 PRIVATE_MODE = PRIVATE_STR.lower() == 'true'
+AUTO_UPDATE = AUTO_UPDATE_STR.lower() == 'true'
 
 # Pose analysis settings from environment (with defaults)
 POSE_MIN_DETECTION_CONFIDENCE = float(os.getenv('POSE_MIN_DETECTION_CONFIDENCE', '0.5'))
@@ -123,16 +114,35 @@ def initialize_pose_analyzer():
         return False
 
 def load_emoji_mappings():
-    """Load emoji mappings from central API"""
+    """Load emoji mappings from GitHub, fall back to local cache"""
     global emoji_mappings
+    
+    github_url = "https://raw.githubusercontent.com/ice9innovations/animal-farm/refs/heads/main/config/emoji_mappings.json"
+    local_cache_path = 'emoji_mappings.json'
+    
+    if AUTO_UPDATE:
+        try:
+            logger.info(f"🔄 Pose: Loading emoji mappings from GitHub: {github_url}")
+            response = requests.get(github_url, timeout=10.0)
+            response.raise_for_status()
+            
+            # Save to local cache
+            with open(local_cache_path, 'w') as f:
+                json.dump(response.json(), f, indent=2)
+            
+            emoji_mappings = response.json()
+            logger.info(f"✅ Pose: Loaded emoji mappings from GitHub and cached locally ({len(emoji_mappings)} entries)")
+            return
+        except Exception as e:
+            logger.warning(f"⚠️ Pose: Failed to load emoji mappings from GitHub ({e}), falling back to local cache")
+    
+    # Fall back to local cache
     try:
-        emoji_url = f"http://{API_HOST}:{API_PORT}/emoji_mappings.json"
-        response = requests.get(emoji_url, timeout=API_TIMEOUT)
-        response.raise_for_status()
-        emoji_mappings = response.json()
-        logger.info(f"✅ Loaded {len(emoji_mappings)} emoji mappings from {emoji_url}")
-    except Exception as e:
-        logger.warning(f"⚠️ Could not load emoji mappings: {e}. Using built-in pose emojis.")
+        with open(local_cache_path, 'r') as f:
+            emoji_mappings = json.load(f)
+        logger.info(f"✅ Pose: Successfully loaded emoji mappings from local cache ({len(emoji_mappings)} entries)")
+    except Exception as local_error:
+        logger.warning(f"⚠️ Pose: Failed to load local emoji mappings: {local_error}. Using built-in pose emojis.")
         emoji_mappings = {}
 
 def get_emoji(pose_type):
