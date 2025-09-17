@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 AUTO_UPDATE_STR = os.getenv('AUTO_UPDATE', 'true')
 PORT_STR = os.getenv('PORT')
 PRIVATE_STR = os.getenv('PRIVATE')
+CONFIDENCE_THRESHOLD_STR = os.getenv('CONFIDENCE_THRESHOLD')
 
 # Validate critical environment variables
 if not PORT_STR:
@@ -44,12 +45,12 @@ if not PRIVATE_STR:
 AUTO_UPDATE = AUTO_UPDATE_STR.lower() == 'true'
 PORT = int(PORT_STR)
 PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
+CONFIDENCE_THRESHOLD = float(CONFIDENCE_THRESHOLD_STR) if CONFIDENCE_THRESHOLD_STR else 0.25
 
 # Configuration
 UPLOAD_FOLDER = './uploads'
 MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
-CONFIDENCE_THRESHOLD = 0.25  # Minimum confidence for detections
 IOU_THRESHOLD = 0.3  # IoU threshold for NMS (lowered from 0.45 for better duplicate detection)
 MAX_DETECTIONS = 100  # Maximum number of detections per image
 
@@ -84,9 +85,9 @@ def load_emoji_mappings():
             response = requests.get(github_url, timeout=10.0)
             response.raise_for_status()
             
-            # Save to local cache
-            with open(local_cache_path, 'w') as f:
-                json.dump(response.json(), f, indent=2)
+            # Save to local cache (preserve emoji characters)
+            with open(local_cache_path, 'w', encoding='utf-8') as f:
+                json.dump(response.json(), f, indent=2, ensure_ascii=False)
             
             emoji_mappings = response.json()
             logger.info(f"✅ YOLO: Loaded emoji mappings from GitHub and cached locally ({len(emoji_mappings)} entries)")
@@ -107,11 +108,12 @@ def load_emoji_mappings():
 load_emoji_mappings()
 
 def get_emoji(word: str) -> str:
-    """Get emoji using direct mapping lookup"""
+    """Get emoji using direct mapping lookup with underscore normalization"""
     if not word:
         return None
     
-    word_clean = word.lower().strip()
+    # Normalize word format: lowercase with underscores (consistent with ollama-api)
+    word_clean = word.lower().strip().replace(' ', '_')
     return emoji_mappings.get(word_clean)
 
 def check_shiny():
@@ -282,10 +284,12 @@ def lookup_emoji(class_name: str) -> Optional[str]:
     clean_name = class_name.lower().strip()
     
     try:
-        # Use simple local emoji lookup
+        # Use simple local emoji lookup (get_emoji handles underscore normalization)
         emoji = get_emoji(clean_name)
         if emoji:
-            logger.debug(f"Local emoji lookup: '{clean_name}' → {emoji}")
+            # Show the normalized name in debug output
+            normalized_name = clean_name.replace(' ', '_')
+            logger.debug(f"Local emoji lookup: '{clean_name}' → '{normalized_name}' → {emoji}")
             return emoji
         
         logger.debug(f"Local emoji lookup: no emoji found for '{clean_name}'")
@@ -331,7 +335,10 @@ def create_yolo_response(data: Dict[str, Any], processing_time: float) -> Dict[s
             prediction["emoji"] = detection['emoji']
         
         predictions.append(prediction)
-    
+
+    # Sort predictions by confidence (highest first)
+    predictions.sort(key=lambda x: x['confidence'], reverse=True)
+
     return {
         "service": "yolo",
         "status": "success",
