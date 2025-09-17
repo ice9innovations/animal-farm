@@ -56,6 +56,7 @@ MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
 PRIVATE_STR = os.getenv('PRIVATE')
 PORT_STR = os.getenv('PORT')
+CONFIDENCE_THRESHOLD_STR = os.getenv('CONFIDENCE_THRESHOLD')
 
 # Validate critical configuration
 if not PRIVATE_STR:
@@ -66,7 +67,7 @@ if not PORT_STR:
 # Convert to appropriate types
 PRIVATE = PRIVATE_STR.lower() == 'true'
 PORT = int(PORT_STR)
-CONFIDENCE_THRESHOLD = 0.5
+CONFIDENCE_THRESHOLD = float(CONFIDENCE_THRESHOLD_STR) if CONFIDENCE_THRESHOLD_STR else 0.5
 IMAGE_SIZE = 160
 
 # Performance optimization flags
@@ -335,7 +336,10 @@ def create_detectron_response(data: Dict[str, Any], processing_time: float = Non
             prediction["emoji"] = detection['emoji']
         
         predictions.append(prediction)
-    
+
+    # Sort predictions by confidence (highest first)
+    predictions.sort(key=lambda x: x['confidence'], reverse=True)
+
     return {
         "service": "detectron2",
         "status": "success",
