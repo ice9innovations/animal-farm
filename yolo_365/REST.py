@@ -23,6 +23,10 @@ from yolo_analyzer import YoloAnalyzer
 # Load environment variables first
 load_dotenv()
 
+# Configuration for GitHub raw file downloads (optional - fallback to local config)
+TIMEOUT = float(os.getenv('TIMEOUT', '10.0'))  # Default 10 seconds for GitHub requests
+AUTO_UPDATE = os.getenv('AUTO_UPDATE', 'True').lower() == 'true'  # Enable/disable GitHub downloads
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -56,6 +60,50 @@ MAX_DETECTIONS = 100  # Maximum number of detections per image
 
 # Global analyzer instance
 yolo_analyzer = None
+
+def load_emoji_mappings():
+    """Load emoji mappings from GitHub raw files with local caching"""
+    local_cache_path = os.path.join(os.path.dirname(__file__), 'emoji_mappings.json')
+
+    # Try GitHub raw file first if AUTO_UPDATE is enabled
+    if AUTO_UPDATE:
+        github_url = "https://raw.githubusercontent.com/ice9innovations/animal-farm/refs/heads/main/config/emoji_mappings.json"
+
+        try:
+            logger.info(f"🔄 {SERVICE_NAME}: Loading fresh emoji mappings from GitHub: {github_url}")
+            response = requests.get(github_url, timeout=TIMEOUT)
+            response.raise_for_status()
+            data = response.json()
+
+            # Cache to disk for future offline use
+            try:
+                with open(local_cache_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                logger.info(f"💾 {SERVICE_NAME}: Cached emoji mappings to {local_cache_path}")
+            except Exception as cache_error:
+                logger.warning(f"⚠️  {SERVICE_NAME}: Failed to cache emoji mappings: {cache_error}")
+
+            logger.info(f"✅ {SERVICE_NAME}: Successfully loaded emoji mappings from GitHub")
+            return data
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"⚠️  {SERVICE_NAME}: Failed to load emoji mappings from GitHub: {e}")
+            logger.info(f"🔄 {SERVICE_NAME}: Falling back to local cache due to GitHub failure")
+    else:
+        logger.info(f"🔄 {SERVICE_NAME}: AUTO_UPDATE disabled, using local cache only")
+
+    # Fallback to local cached file
+    try:
+        logger.info(f"🔄 {SERVICE_NAME}: Loading emoji mappings from local cache: {local_cache_path}")
+        with open(local_cache_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        logger.info(f"✅ {SERVICE_NAME}: Successfully loaded emoji mappings from local cache")
+        return data
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        logger.error(f"❌ {SERVICE_NAME}: Failed to load local emoji mappings from {local_cache_path}: {e}")
+        if AUTO_UPDATE:
+            raise Exception(f"Failed to load emoji mappings from both GitHub and local cache: {e}")
+        else:
+            raise Exception(f"Failed to load emoji mappings - AUTO_UPDATE disabled and no local cache available. Set AUTO_UPDATE=True or provide emoji_mappings.json in service directory: {e}")
 
 def check_shiny() -> tuple[bool, int]:
     """Check if this detection should be shiny (1/2500 chance)"""
@@ -99,7 +147,10 @@ def create_yolo11_response(data: Dict[str, Any], processing_time: float) -> Dict
             prediction["emoji"] = detection['emoji']
         
         predictions.append(prediction)
-    
+
+    # Sort predictions by confidence (highest first)
+    predictions.sort(key=lambda x: x['confidence'], reverse=True)
+
     return {
         "service": SERVICE_NAME if SERVICE_NAME else "yolo",
         "status": "success",
@@ -154,24 +205,32 @@ def initialize_yolo_analyzer() -> bool:
     global yolo_analyzer
     try:
         logger.info("Initializing YOLO Analyzer...")
-        
+
+        # Load emoji mappings first
+        try:
+            emoji_mappings = load_emoji_mappings()
+        except Exception as e:
+            logger.warning(f"⚠️  {SERVICE_NAME}: Failed to load emoji mappings: {e}")
+            emoji_mappings = {}
+
         yolo_analyzer = YoloAnalyzer(
             model_path=MODEL_PATH,
             confidence_threshold=CONFIDENCE_THRESHOLD,
             iou_threshold=IOU_THRESHOLD,
             max_detections=MAX_DETECTIONS,
             service_name=SERVICE_NAME,
-            dataset=DATASET
+            dataset=DATASET,
+            emoji_mappings=emoji_mappings
         )
-        
+
         # Initialize the model
         if not yolo_analyzer.initialize():
             logger.error("❌ Failed to initialize YOLO Analyzer")
             return False
-            
+
         logger.info("✅ YOLO Analyzer initialized successfully")
         return True
-        
+
     except Exception as e:
         logger.error(f"❌ Error initializing YOLO Analyzer: {str(e)}")
         return False
