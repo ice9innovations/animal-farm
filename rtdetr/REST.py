@@ -35,6 +35,7 @@ load_dotenv()
 AUTO_UPDATE_STR = os.getenv('AUTO_UPDATE', 'true')
 PORT_STR = os.getenv('PORT')
 PRIVATE_STR = os.getenv('PRIVATE')
+CONFIDENCE_THRESHOLD_STR = os.getenv('CONFIDENCE_THRESHOLD')
 
 # Validate critical environment variables
 if not PORT_STR:
@@ -46,6 +47,7 @@ if not PRIVATE_STR:
 AUTO_UPDATE = AUTO_UPDATE_STR.lower() == 'true'
 PORT = int(PORT_STR)
 PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
+CONFIDENCE_THRESHOLD = float(CONFIDENCE_THRESHOLD_STR) if CONFIDENCE_THRESHOLD_STR else 0.25
 
 # Configure logging first
 logging.basicConfig(level=logging.INFO)
@@ -61,8 +63,6 @@ from src.core import YAMLConfig
 UPLOAD_FOLDER = './uploads'
 MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
-# Configuration constants
-CONFIDENCE_THRESHOLD = 0.25  # Minimum confidence for detections
 MAX_DETECTIONS = 100  # Maximum number of detections per image
 
 # Ensure upload directory exists
@@ -250,9 +250,9 @@ def load_emoji_mappings():
             response = requests.get(github_url, timeout=10.0)
             response.raise_for_status()
             
-            # Save to local cache
-            with open(local_cache_path, 'w') as f:
-                json.dump(response.json(), f, indent=2)
+            # Save to local cache (preserve emoji characters)
+            with open(local_cache_path, 'w', encoding='utf-8') as f:
+                json.dump(response.json(), f, indent=2, ensure_ascii=False)
             
             emoji_mappings = response.json()
             logger.info(f"✅ RT-DETR: Loaded emoji mappings from GitHub and cached locally ({len(emoji_mappings)} entries)")
@@ -270,10 +270,11 @@ def load_emoji_mappings():
         raise Exception(f"Both GitHub and local emoji mappings failed: GitHub download disabled or failed, Local cache={local_error}")
 
 def get_emoji(concept: str):
-    """Get emoji for a single concept"""
+    """Get emoji for a single concept with underscore normalization"""
     if not concept:
         return None
-    concept_clean = concept.lower().strip()
+    # Normalize word format: lowercase with underscores (consistent with ollama-api)
+    concept_clean = concept.lower().strip().replace(' ', '_')
     return emoji_mappings.get(concept_clean)
 
 def check_shiny():
@@ -385,10 +386,12 @@ def lookup_emoji(class_name: str) -> Optional[str]:
     clean_name = class_name.lower().strip()
     
     try:
-        # Use local emoji service instead of HTTP requests
+        # Use local emoji service (get_emoji handles underscore normalization)
         emoji = get_emoji(clean_name)
         if emoji:
-            logger.debug(f"Local emoji service: '{clean_name}' → {emoji}")
+            # Show the normalized name in debug output
+            normalized_name = clean_name.replace(' ', '_')
+            logger.debug(f"Local emoji service: '{clean_name}' → '{normalized_name}' → {emoji}")
             return emoji
         
         logger.debug(f"Local emoji service: no emoji found for '{clean_name}'")
@@ -432,7 +435,10 @@ def create_rtdetr_response(data: Dict[str, Any], processing_time: float) -> Dict
             prediction["emoji"] = obj['emoji']
         
         predictions.append(prediction)
-    
+
+    # Sort predictions by confidence (highest first)
+    predictions.sort(key=lambda x: x['confidence'], reverse=True)
+
     return {
         "service": "rtdetr",
         "status": "success",
@@ -629,6 +635,7 @@ def health_check():
             "status": model_status,
             "device": str(device) if device else "unknown"
         },
+        "confidence_threshold": CONFIDENCE_THRESHOLD,
         "emoji_service": "local_file",
         "endpoints": [
             "GET /health - Health check",
