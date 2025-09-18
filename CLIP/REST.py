@@ -134,7 +134,10 @@ def get_emoji(concept: str) -> Optional[str]:
     """Get emoji for a single concept"""
     if not concept:
         return None
-    concept_clean = concept.lower().strip().replace(' ', '_')
+    # Strip punctuation before processing
+    import string
+    concept_clean = concept.translate(str.maketrans('', '', string.punctuation))
+    concept_clean = concept_clean.lower().strip().replace(' ', '_')
     return emoji_mappings.get(concept_clean)
 
 
@@ -292,9 +295,11 @@ def create_clip_response(predictions: List[Dict], emoji_matches: List[Dict], pro
 
 def handle_image_input(url: str = None, file: str = None) -> Dict[str, Any]:
     """
-    Handle image input from either URL or file path
-    Returns: {"success": bool, "filepath": str, "cleanup": bool, "error": str}
+    Handle image input from either URL or file path - pure in-memory processing
+    Returns: {"success": bool, "image": PIL.Image, "error": str}
     """
+    from io import BytesIO
+    
     # Validate input - exactly one parameter must be provided
     if not url and not file:
         return {"success": False, "error": "Must provide either url or file parameter"}
@@ -302,59 +307,48 @@ def handle_image_input(url: str = None, file: str = None) -> Dict[str, Any]:
     if url and file:
         return {"success": False, "error": "Cannot provide both url and file parameters"}
     
-    # Handle URL input
+    # Handle URL input - download directly to memory
     if url:
-        filepath = None
         try:
             parsed_url = urlparse(url)
             if not parsed_url.scheme or not parsed_url.netloc:
                 raise ValueError("Invalid URL format")
             
-            # Download image
-            filename = uuid.uuid4().hex + ".jpg"
-            filepath = os.path.join(UPLOAD_FOLDER, filename)
-            
-            response = requests.get(url, timeout=10, stream=True)
+            response = requests.get(url, timeout=10)
             response.raise_for_status()
             
             content_type = response.headers.get('content-type', '')
             if not content_type.startswith('image/'):
                 raise ValueError("URL does not point to an image")
             
-            with open(filepath, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            
-            if not validate_file_size(filepath):
-                os.remove(filepath)
+            if len(response.content) > MAX_FILE_SIZE:
                 raise ValueError("Downloaded file too large")
             
-            return {"success": True, "filepath": filepath, "cleanup": True, "error": None}
+            image = Image.open(BytesIO(response.content)).convert('RGB')
+            return {"success": True, "image": image, "error": None}
             
         except Exception as e:
             logger.error(f"Error processing image URL {url}: {e}")
-            # Cleanup on error
-            if filepath and os.path.exists(filepath):
-                try:
-                    os.remove(filepath)
-                except Exception as cleanup_error:
-                    logger.warning(f"Failed to cleanup file {filepath}: {cleanup_error}")
-            
             return {"success": False, "error": f"Failed to process image URL: {str(e)}"}
     
-    # Handle file path input
+    # Handle file path input - read directly to memory
     elif file:
-        # Validate file path
-        if not os.path.exists(file):
-            return {"success": False, "error": f"File not found: {file}"}
-        
-        if not is_allowed_file(file):
-            return {"success": False, "error": "File type not allowed"}
-        
-        if not validate_file_size(file):
-            return {"success": False, "error": "File too large"}
-        
-        return {"success": True, "filepath": file, "cleanup": False, "error": None}
+        try:
+            if not os.path.exists(file):
+                return {"success": False, "error": f"File not found: {file}"}
+            
+            if not is_allowed_file(file):
+                return {"success": False, "error": "File type not allowed"}
+            
+            if not validate_file_size(file):
+                return {"success": False, "error": "File too large"}
+            
+            image = Image.open(file).convert('RGB')
+            return {"success": True, "image": image, "error": None}
+            
+        except Exception as e:
+            logger.error(f"Error processing image file {file}: {e}")
+            return {"success": False, "error": f"Failed to process image file: {str(e)}"}
 
 
 
@@ -436,32 +430,13 @@ def analyze():
             if url and file:
                 return error_response("Cannot provide both url and file parameters")
             
-            if url:
-                # Download directly to memory
-                response = requests.get(url, timeout=10)
-                response.raise_for_status()
-                
-                content_type = response.headers.get('content-type', '')
-                if not content_type.startswith('image/'):
-                    return error_response("URL does not point to an image")
-                
-                if len(response.content) > MAX_FILE_SIZE:
-                    return error_response("Downloaded file too large")
-                
-                image = Image.open(BytesIO(response.content)).convert('RGB')
-                
-            else:  # file parameter
-                # Read file directly to memory
-                if not os.path.exists(file):
-                    return error_response(f"File not found: {file}")
-                
-                if not is_allowed_file(file):
-                    return error_response("File type not allowed")
-                
-                if not validate_file_size(file):
-                    return error_response("File too large")
-                
-                image = Image.open(file).convert('RGB')
+            # Handle URL or file parameter using shared helper
+            image_result = handle_image_input(url=url, file=file)
+            
+            if not image_result["success"]:
+                return error_response(image_result["error"])
+            
+            image = image_result["image"]
         
         # Step 2: Process the image (unified processing path)
         processing_result = process_image_for_classification(image)
@@ -500,13 +475,53 @@ def analyze_v3_compat():
 def score_caption():
     """Score caption similarity against image using CLIP"""
     import time
+    from io import BytesIO
     start_time = time.time()
     
     try:
         # Get input parameters - support both GET and POST
+        caption = None
+        image = None
+        
         if request.method == 'POST':
-            # For POST, check JSON body first, then form data, then query string
-            if request.is_json:
+            # Handle multipart file upload (from caption scoring worker)
+            if 'file' in request.files:
+                uploaded_file = request.files['file']
+                caption = request.form.get('caption')
+                
+                if uploaded_file.filename == '':
+                    return jsonify({
+                        "service": "clip",
+                        "status": "error",
+                        "similarity_score": None,
+                        "error": {"message": "No file selected"},
+                        "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                    }), 400
+                
+                if not is_allowed_file(uploaded_file.filename):
+                    return jsonify({
+                        "service": "clip",
+                        "status": "error",
+                        "similarity_score": None,
+                        "error": {"message": "File type not allowed"},
+                        "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                    }), 400
+                
+                # Read file directly into memory
+                file_data = uploaded_file.read()
+                if len(file_data) > MAX_FILE_SIZE:
+                    return jsonify({
+                        "service": "clip",
+                        "status": "error",
+                        "similarity_score": None,
+                        "error": {"message": "File too large"},
+                        "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                    }), 400
+                
+                image = Image.open(BytesIO(file_data)).convert('RGB')
+            
+            # Handle JSON or form data
+            elif request.is_json:
                 data = request.get_json()
                 caption = data.get('caption')
                 url = data.get('url')
@@ -533,80 +548,52 @@ def score_caption():
         
         caption = caption.strip()
         
-        # Handle image input using shared helper
-        image_result = handle_image_input(url=url, file=file)
-        
-        if not image_result["success"]:
+        # If no image loaded from multipart upload, fail
+        if image is None:
             return jsonify({
                 "service": "clip",
                 "status": "error",
                 "similarity_score": None,
-                "error": {"message": image_result["error"]},
+                "error": {"message": "Must provide image file via multipart upload"},
                 "metadata": {"processing_time": round(time.time() - start_time, 3)}
             }), 400
         
-        filepath = image_result["filepath"]
-        cleanup = image_result["cleanup"]
-        
-        try:
-            # Check analyzer availability
-            if analyzer is None or analyzer.model is None:
-                return jsonify({
-                    "service": "clip",
-                    "status": "error",
-                    "similarity_score": None,
-                    "error": {"message": "CLIP analyzer not initialized"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 500
-            
-            # Load image and compute similarity score using analyzer
-            image = Image.open(filepath).convert('RGB')
-            similarity_score = analyzer.compute_caption_similarity(image, caption)
-            
-            if similarity_score is None:
-                return jsonify({
-                    "service": "clip",
-                    "status": "error",
-                    "similarity_score": None,
-                    "error": {"message": "Failed to compute similarity score"},
-                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
-                }), 500
-            
-            # Determine image source for response
-            image_source = "url" if url else "file"
-            
-            return jsonify({
-                "service": "clip",
-                "status": "success",
-                "similarity_score": round(float(similarity_score), 3),
-                "caption": caption,
-                "image_source": image_source,
-                "metadata": {
-                    "processing_time": round(time.time() - start_time, 3),
-                    "model_info": {
-                        "framework": "OpenAI",
-                        "model": CLIP_MODEL
-                    }
-                }
-            })
-            
-        except Exception as e:
-            logger.error(f"Error computing caption similarity: {e}")
+        # Check analyzer availability
+        if analyzer is None or analyzer.model is None:
             return jsonify({
                 "service": "clip",
                 "status": "error",
                 "similarity_score": None,
-                "error": {"message": f"Similarity computation failed: {str(e)}"},
+                "error": {"message": "CLIP analyzer not initialized"},
                 "metadata": {"processing_time": round(time.time() - start_time, 3)}
             }), 500
-        finally:
-            # Ensure cleanup of temporary file if needed
-            if cleanup and filepath and os.path.exists(filepath):
-                try:
-                    os.remove(filepath)
-                    logger.debug(f"Cleaned up temporary file: {filepath}")
-                except Exception as e:
-                    logger.warning(f"Failed to cleanup file {filepath}: {e}")
+        
+        # Compute similarity score using analyzer
+        similarity_score = analyzer.compute_caption_similarity(image, caption)
+        
+        if similarity_score is None:
+            return jsonify({
+                "service": "clip",
+                "status": "error",
+                "similarity_score": None,
+                "error": {"message": "Failed to compute similarity score"},
+                "metadata": {"processing_time": round(time.time() - start_time, 3)}
+            }), 500
+        
+        return jsonify({
+            "service": "clip",
+            "status": "success",
+            "similarity_score": round(float(similarity_score), 3),
+            "caption": caption,
+            "image_source": "upload",
+            "metadata": {
+                "processing_time": round(time.time() - start_time, 3),
+                "model_info": {
+                    "framework": "OpenAI",
+                    "model": CLIP_MODEL
+                }
+            }
+        })
         
     except Exception as e:
         logger.error(f"V3 caption scoring error: {e}")

@@ -365,10 +365,11 @@ class ClipAnalyzer:
                     if len(text_features.shape) == 1:
                         text_features = text_features.unsqueeze(0)
                 else:
-                    # Tokenize caption text - try raw caption for better discrimination
+                    # Tokenize caption text - use CLIP's built-in truncation for long captions
                     logger.info("Tokenizing and encoding caption...")
                     logger.info(f"Using raw caption: '{caption}'")
-                    text_tokens = clip.tokenize([caption]).to(self.device)
+                    # Use truncate=True to handle captions longer than 77 tokens
+                    text_tokens = clip.tokenize([caption], truncate=True).to(self.device)
                     
                     # Encode text with autocast for FP16 stability
                     if self.device == "cuda" and hasattr(self.model, 'dtype') and self.model.dtype == torch.float16:
