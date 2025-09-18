@@ -126,9 +126,9 @@ def load_emoji_mappings():
             response = requests.get(github_url, timeout=10.0)
             response.raise_for_status()
             
-            # Save to local cache
-            with open(local_cache_path, 'w') as f:
-                json.dump(response.json(), f, indent=2)
+            # Save to local cache (preserve emoji characters)
+            with open(local_cache_path, 'w', encoding='utf-8') as f:
+                json.dump(response.json(), f, indent=2, ensure_ascii=False)
             
             emoji_mappings = response.json()
             logger.info(f"✅ Pose: Loaded emoji mappings from GitHub and cached locally ({len(emoji_mappings)} entries)")
