@@ -38,10 +38,11 @@ class YoloAnalyzer:
                  api_port: int = None,
                  api_timeout: float = None,
                  service_name: str = "YOLO",
-                 dataset: str = None):
+                 dataset: str = None,
+                 emoji_mappings: Dict[str, str] = None):
         """
         Initialize YOLO analyzer with model configuration
-        
+
         Args:
             model_path: Primary model path to try first
             model_candidates: List of fallback models to try if primary fails
@@ -53,6 +54,7 @@ class YoloAnalyzer:
             api_timeout: API timeout for emoji mappings
             service_name: Name for logging (e.g., "YOLOv8", "YOLOv11", "YOLO-OIv7")
             dataset: Dataset name (e.g., "COCO", "Object365", "Open Images V7")
+            emoji_mappings: Pre-loaded emoji mappings dict
         """
         
         self.model_path = model_path
@@ -77,7 +79,7 @@ class YoloAnalyzer:
             self.device = 'mps'
         
         self.model = None
-        self.emoji_mappings = {}
+        self.emoji_mappings = emoji_mappings or {}
         self.loaded_model_name = None
         
         logger.info(f"✅ {self.service_name}Analyzer initialized - Device: {self.device}")
@@ -85,26 +87,52 @@ class YoloAnalyzer:
     def initialize(self) -> bool:
         """Initialize YOLO model and emoji mappings - fail fast if it doesn't work"""
         try:
-            # Load emoji mappings first
-            if not self._load_emoji_mappings():
-                logger.warning(f"{self.service_name}: Failed to load emoji mappings, continuing without emojis")
-            
+            # Load emoji mappings only if not provided during initialization
+            if not self.emoji_mappings:
+                if not self._load_emoji_mappings():
+                    logger.warning(f"{self.service_name}: Failed to load emoji mappings, continuing without emojis")
+            else:
+                logger.info(f"✅ {self.service_name}: Using pre-loaded emoji mappings ({len(self.emoji_mappings)} entries)")
+
             # Initialize YOLO model
             return self._initialize_yolo_model()
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to initialize {self.service_name}Analyzer: {e}")
             return False
     
     def _load_emoji_mappings(self) -> bool:
-        """Load emoji mappings from local i7.json file"""
+        """Load emoji mappings from GitHub, fall back to local cache"""
+        github_url = "https://raw.githubusercontent.com/ice9innovations/animal-farm/refs/heads/main/config/i7.json"
+        local_cache_path = 'i7.json'
+        
+        auto_update = os.getenv('AUTO_UPDATE', 'true').lower() == 'true'
+
+        if auto_update:
+            try:
+                import requests
+                logger.info(f"🔄 {self.service_name}: Loading emoji mappings from GitHub: {github_url}")
+                response = requests.get(github_url, timeout=10.0)
+                response.raise_for_status()
+                
+                # Save to local cache (preserve emoji characters)
+                with open(local_cache_path, 'w', encoding='utf-8') as f:
+                    json.dump(response.json(), f, indent=2, ensure_ascii=False)
+                
+                self.emoji_mappings = response.json()
+                logger.info(f"✅ {self.service_name}: Loaded emoji mappings from GitHub and cached locally ({len(self.emoji_mappings)} entries)")
+                return True
+            except Exception as e:
+                logger.warning(f"⚠️  {self.service_name}: Failed to load emoji mappings from GitHub ({e}), falling back to local cache")
+        
+        # Fall back to local cache
         try:
-            with open('i7.json', 'r') as f:
+            with open(local_cache_path, 'r') as f:
                 self.emoji_mappings = json.load(f)
-            logger.info(f"✅ {self.service_name}: Loaded emoji mappings from i7.json ({len(self.emoji_mappings)} entries)")
+            logger.info(f"✅ {self.service_name}: Successfully loaded emoji mappings from local cache ({len(self.emoji_mappings)} entries)")
             return True
-        except Exception as e:
-            logger.error(f"❌ {self.service_name}: Failed to load i7.json: {e}")
+        except Exception as local_error:
+            logger.error(f"❌ {self.service_name}: Failed to load local emoji mappings: {local_error}")
             self.emoji_mappings = {}
             return False
     
