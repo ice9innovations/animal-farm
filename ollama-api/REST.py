@@ -84,9 +84,9 @@ def load_emoji_mappings():
             response = requests.get(github_url, timeout=10.0)
             response.raise_for_status()
             
-            # Save to local cache
-            with open(local_cache_path, 'w') as f:
-                json.dump(response.json(), f, indent=2)
+            # Save to local cache (preserve emoji characters)
+            with open(local_cache_path, 'w', encoding='utf-8') as f:
+                json.dump(response.json(), f, indent=2, ensure_ascii=False)
             
             logger.info("✅ LLaMa: Loaded emoji mappings from GitHub and cached locally")
             return response.json()
@@ -222,7 +222,7 @@ def lookup_text_for_emojis(text: str) -> Dict[str, Any]:
         for token in text.split():
             if token:
                 # Strip punctuation from each word
-                clean_token = token.strip('.,!?;:"()[]{}\'')
+                clean_token = token.strip('.,!?;:"()[]{}\'`')
                 if clean_token:
                     word_tokens.append(clean_token)
         
