@@ -216,7 +216,7 @@ def lookup_text_for_emojis(text: str) -> Dict[str, Any]:
         word_tokens = []
         for token in text.split():
             # Remove common punctuation
-            token = token.strip('.,!?;:"()[]{}')
+            token = token.strip('.,!?;:"()[]{}\'`')
             if token:
                 word_tokens.append(token)
         

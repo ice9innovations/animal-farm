@@ -27,7 +27,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration for GitHub raw file downloads (optional - fallback to local config)
-API_TIMEOUT = float(os.getenv('API_TIMEOUT', '10.0'))  # Default 10 seconds for GitHub requests
+TIMEOUT = float(os.getenv('TIMEOUT', '10.0'))  # Default 10 seconds for GitHub requests
 AUTO_UPDATE = os.getenv('AUTO_UPDATE', 'True').lower() == 'true'  # Enable/disable GitHub downloads
 
 import torch
@@ -81,7 +81,7 @@ def load_emoji_mappings():
         
         try:
             logger.info(f"🔄 BLIP2: Loading fresh emoji mappings from GitHub: {github_url}")
-            response = requests.get(github_url, timeout=API_TIMEOUT)
+            response = requests.get(github_url, timeout=TIMEOUT)
             response.raise_for_status()
             data = response.json()
             
@@ -126,7 +126,7 @@ def load_mwe_mappings():
         
         try:
             logger.info(f"🔄 BLIP2: Loading fresh multi-word expressions (MWE) mappings from GitHub: {github_url}")
-            response = requests.get(github_url, timeout=API_TIMEOUT)
+            response = requests.get(github_url, timeout=TIMEOUT)
             response.raise_for_status()
             mwe_text = response.text.splitlines()
             
