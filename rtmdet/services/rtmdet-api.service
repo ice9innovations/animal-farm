@@ -1,0 +1,17 @@
+[Unit]
+Description=RTMDet Object Detection API Service
+After=network.target
+
+[Service]
+Type=simple
+User=sd
+WorkingDirectory=/home/sd/animal-farm/rtmdet
+Environment=PATH=/home/sd/animal-farm/rtmdet/venv/bin
+ExecStart=/home/sd/animal-farm/rtmdet/rtmdet.sh
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

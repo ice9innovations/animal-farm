@@ -1,0 +1,933 @@
+#!/usr/bin/env python3
+"""
+RTMDet Object Detection REST API Service
+Provides high-performance object detection using RTMDet model.
+"""
+
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import torch
+import json
+import requests
+import os
+import uuid
+import logging
+from typing import List, Dict, Any, Optional, Tuple
+from urllib.parse import urlparse
+from PIL import Image, ImageDraw
+import numpy as np
+import time
+import random
+
+from dotenv import load_dotenv
+
+# Load environment variables first
+load_dotenv()
+
+# Configuration for GitHub raw file downloads (optional - fallback to local config)
+TIMEOUT = float(os.getenv('TIMEOUT', '10.0'))  # Default 10 seconds for GitHub requests
+AUTO_UPDATE = os.getenv('AUTO_UPDATE', 'True').lower() == 'true'  # Enable/disable GitHub downloads
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Local analyzer module
+from rtmdet_analyzer import RTMDetAnalyzer
+
+try:
+    from mmdet.apis import init_detector, inference_detector
+    import mmcv
+    MMDET_AVAILABLE = True
+    logger.info("MMDetection available")
+except ImportError as e:
+    logger.warning(f"MMDetection not available: {e}")
+    MMDET_AVAILABLE = False
+
+# Load emoji mappings from local JSON file
+emoji_mappings = {}
+
+def load_emoji_mappings():
+    """Load emoji mappings from GitHub raw files with local caching"""
+    global emoji_mappings
+    local_cache_path = os.path.join(os.path.dirname(__file__), 'emoji_mappings.json')
+
+    # Try GitHub raw file first if AUTO_UPDATE is enabled
+    if AUTO_UPDATE:
+        github_url = "https://raw.githubusercontent.com/ice9innovations/animal-farm/refs/heads/main/config/emoji_mappings.json"
+
+        try:
+            logger.info(f"🔄 RTMDet: Loading fresh emoji mappings from GitHub: {github_url}")
+            response = requests.get(github_url, timeout=TIMEOUT)
+            response.raise_for_status()
+            data = response.json()
+
+            # Cache to disk for future offline use
+            try:
+                with open(local_cache_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                logger.info(f"💾 RTMDet: Cached emoji mappings to {local_cache_path}")
+            except Exception as cache_error:
+                logger.warning(f"⚠️  RTMDet: Failed to cache emoji mappings: {cache_error}")
+
+            emoji_mappings = data
+            logger.info("✅ RTMDet: Successfully loaded emoji mappings from GitHub")
+            return
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"⚠️  RTMDet: Failed to load emoji mappings from GitHub: {e}")
+            logger.info("🔄 RTMDet: Falling back to local cache due to GitHub failure")
+    else:
+        logger.info("🔄 RTMDet: AUTO_UPDATE disabled, using local cache only")
+
+    # Fallback to local cached file
+    try:
+        logger.info(f"🔄 RTMDet: Loading emoji mappings from local cache: {local_cache_path}")
+        with open(local_cache_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        emoji_mappings = data
+        logger.info("✅ RTMDet: Successfully loaded emoji mappings from local cache")
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        logger.error(f"❌ RTMDet: Failed to load local emoji mappings from {local_cache_path}: {e}")
+        if AUTO_UPDATE:
+            raise Exception(f"Failed to load emoji mappings from both GitHub and local cache: {e}")
+        else:
+            raise Exception(f"Failed to load emoji mappings - AUTO_UPDATE disabled and no local cache available. Set AUTO_UPDATE=True or provide emoji_mappings.json in rtmdet directory: {e}")
+
+def get_emoji(word: str) -> str:
+    """Simple emoji lookup - lowercase and replace spaces with underscores"""
+    if not word:
+        return None
+
+    # Basic normalization: lowercase and replace spaces with underscores
+    clean_word = word.lower().strip().replace(' ', '_')
+
+    # Try exact match
+    if clean_word in emoji_mappings:
+        return emoji_mappings[clean_word]
+
+    # Try singular form for common plurals
+    if clean_word.endswith('s') and len(clean_word) > 3:
+        singular = clean_word[:-1]
+        if singular in emoji_mappings:
+            return emoji_mappings[singular]
+
+    return None
+
+def check_shiny():
+    """Check if this detection should be shiny (1/2500 chance)"""
+    roll = random.randint(1, 2500)
+    is_shiny = roll == 1
+    return is_shiny, roll
+
+# Configuration
+UPLOAD_FOLDER = './uploads'
+MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
+PRIVATE_STR = os.getenv('PRIVATE')
+PORT_STR = os.getenv('PORT')
+CONFIDENCE_THRESHOLD_STR = os.getenv('CONFIDENCE_THRESHOLD')
+
+# Validate critical configuration
+if not PRIVATE_STR:
+    raise ValueError("PRIVATE environment variable is required")
+if not PORT_STR:
+    raise ValueError("PORT environment variable is required")
+
+# Convert to appropriate types
+PRIVATE = PRIVATE_STR.lower() == 'true'
+PORT = int(PORT_STR)
+CONFIDENCE_THRESHOLD = float(CONFIDENCE_THRESHOLD_STR) if CONFIDENCE_THRESHOLD_STR else 0.25
+IOU_THRESHOLD = 0.45  # IoU threshold for NMS
+MAX_DETECTIONS = 100  # Maximum number of detections per image
+
+# Ensure upload directory exists
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# Device configuration
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+if torch.backends.mps.is_available():
+    device = 'mps'
+
+logger.info(f"Using device: {device}")
+
+# Global variables
+analyzer = None
+coco_classes = []
+
+# COCO class names (RTMDet uses COCO dataset classes)
+COCO_CLASSES = [
+    'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat',
+    'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat',
+    'dog', 'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack',
+    'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 'sports ball',
+    'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard', 'tennis racket',
+    'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple',
+    'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake',
+    'chair', 'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop',
+    'mouse', 'remote', 'keyboard', 'cell phone', 'microwave', 'oven', 'toaster', 'sink',
+    'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush'
+]
+
+def load_coco_classes() -> bool:
+    """Load COCO class names"""
+    global coco_classes
+    try:
+        coco_classes = COCO_CLASSES
+        logger.info(f"Loaded {len(coco_classes)} COCO classes")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to load COCO classes: {e}")
+        return False
+
+def initialize_rtmdet_analyzer() -> bool:
+    """Initialize RTMDet analyzer once at startup"""
+    global analyzer
+    try:
+        logger.info("Initializing RTMDet Analyzer...")
+
+        analyzer = RTMDetAnalyzer(
+            confidence_threshold=CONFIDENCE_THRESHOLD,
+            coco_classes=coco_classes,
+            device=device
+        )
+
+        logger.info("✅ RTMDet Analyzer initialized successfully")
+        return True
+
+    except Exception as e:
+        logger.error(f"❌ Error initializing RTMDet Analyzer: {str(e)}")
+        return False
+
+def validate_file_size(filepath: str) -> bool:
+    """Validate file size"""
+    try:
+        file_size = os.path.getsize(filepath)
+        return file_size <= MAX_FILE_SIZE
+    except Exception:
+        return False
+
+def is_allowed_file(filename: str) -> bool:
+    """Check if file extension is allowed"""
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def lookup_emoji(class_name: str) -> Optional[str]:
+    """Look up emoji for a given class name using local emoji service (optimized - no HTTP requests)"""
+    clean_name = class_name.lower().strip()
+
+    try:
+        # Use simple local emoji lookup
+        emoji = get_emoji(clean_name)
+        if emoji:
+            logger.debug(f"Local emoji lookup: '{clean_name}' → {emoji}")
+            return emoji
+
+        logger.debug(f"Local emoji lookup: no emoji found for '{clean_name}'")
+        return None
+
+    except Exception as e:
+        logger.warning(f"Local emoji service lookup failed for '{clean_name}': {e}")
+        return None
+
+def process_image_for_detection(image: Image.Image) -> Dict[str, Any]:
+    """
+    Main processing function - takes PIL Image, returns detection data
+    This orchestrates the analyzer call - pure business logic orchestration
+    """
+    try:
+        if not analyzer:
+            return {
+                "success": False,
+                "error": "RTMDet analyzer not loaded"
+            }
+
+        # Use analyzer for core ML processing
+        result = analyzer.analyze_from_pil_image(image)
+
+        # Add emoji information to detections
+        detections = result.get('detections', [])
+        for detection in detections:
+            class_name = detection.get('class_name', '')
+            try:
+                emoji = lookup_emoji(class_name)
+                if emoji:
+                    detection['emoji'] = emoji
+            except Exception as e:
+                logger.warning(f"Emoji lookup failed for '{class_name}': {e}")
+
+        return {
+            "success": True,
+            "data": result
+        }
+
+    except Exception as e:
+        logger.error(f"Error in image processing orchestration: {e}")
+        return {
+            "success": False,
+            "error": f"Detection failed: {str(e)}"
+        }
+
+def create_rtmdet_response(data: Dict[str, Any], processing_time: float = None) -> Dict[str, Any]:
+    """Create standardized rtmdet response"""
+    detections = data.get("detections", [])
+
+    # Use processing time from data if not provided
+    if processing_time is None:
+        processing_time = data.get('processing_time', 0)
+
+    # Create unified prediction format
+    predictions = []
+    for detection in detections:
+        bbox = detection.get('bbox', {})
+        is_shiny, shiny_roll = check_shiny()
+
+        prediction = {
+            "label": detection.get('class_name', ''),
+            "confidence": round(float(detection.get('confidence', 0)), 3)
+        }
+
+        # Add shiny flag only for shiny detections
+        if is_shiny:
+            prediction["shiny"] = True
+            logger.info(f"✨ SHINY {detection.get('class_name', '').upper()} DETECTED! Roll: {shiny_roll} ✨")
+
+        # Add bbox if present (convert from RTMDet format)
+        if bbox:
+            prediction["bbox"] = {
+                "x": bbox.get('x1', 0),
+                "y": bbox.get('y1', 0),
+                "width": bbox.get('width', 0),
+                "height": bbox.get('height', 0)
+            }
+
+        # Add emoji if present
+        if detection.get('emoji'):
+            prediction["emoji"] = detection['emoji']
+
+        predictions.append(prediction)
+
+    # Sort predictions by confidence (highest first)
+    predictions.sort(key=lambda x: x['confidence'], reverse=True)
+
+    return {
+        "service": "rtmdet",
+        "status": "success",
+        "predictions": predictions,
+        "metadata": {
+            "processing_time": round(processing_time, 3),
+            "model_info": {
+                "framework": "MMDetection RTMDet"
+            }
+        }
+    }
+
+def detect_objects(filepath: str) -> Dict[str, Any]:
+    """Detect objects in image using RTMDet"""
+    try:
+        # Load and validate image
+        with Image.open(filepath) as img:
+            img_width, img_height = img.size
+        
+        # Check if we have a real model available
+        if model == "placeholder" or not MMDET_AVAILABLE:
+            # Return honest error - no fake data
+            return {
+                "status": "error",
+                "error": "RTMDet service unavailable: MMDetection dependencies not properly installed"
+            }
+        else:
+            # Run RTMDet inference
+            result = inference_detector(model, filepath)
+            
+            # Process results
+            detections = []
+            
+            # RTMDet returns results as a list of arrays (one per class)
+            # Each array contains [x1, y1, x2, y2, confidence]
+            for class_idx, class_detections in enumerate(result):
+                if len(class_detections) == 0:
+                    continue
+                    
+                class_name = COCO_CLASSES[class_idx]
+                
+                # Filter by confidence threshold
+                for detection in class_detections:
+                    confidence = float(detection[4])
+                    if confidence < CONFIDENCE_THRESHOLD:
+                        continue
+                    
+                    x1, y1, x2, y2 = detection[:4]
+                    
+                    bbox = {
+                        "x1": int(x1),
+                        "y1": int(y1),
+                        "width": int(x2 - x1),
+                        "height": int(y2 - y1)
+                    }
+                    
+                    det = {
+                        "class_name": class_name,
+                        "confidence": confidence,
+                        "bbox": bbox
+                    }
+                    
+                    # Try local emoji lookup
+                    emoji = lookup_emoji(class_name)
+                    if emoji:
+                        det['emoji'] = emoji
+                    
+                    detections.append(det)
+            
+            # Sort by confidence (highest first)
+            detections.sort(key=lambda x: x['confidence'], reverse=True)
+            
+            # Limit number of detections
+            detections = detections[:MAX_DETECTIONS]
+        
+        return {
+            "status": "success",
+            "RTMDet": {
+                "detections": detections,
+                "image_dimensions": {
+                    "width": img_width,
+                    "height": img_height
+                },
+                "model_info": {
+                    "name": "RTMDet",
+                    "framework": "MMDetection",
+                    "confidence_threshold": CONFIDENCE_THRESHOLD
+                }
+            }
+        }
+    
+    except Exception as e:
+        logger.error(f"Error in object detection: {e}")
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+    finally:
+        # Clean up uploaded file
+        if os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+            except Exception as e:
+                logger.warning(f"Could not remove file {filepath}: {e}")
+
+# Initialize Flask app
+app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
+
+# Enable CORS for direct browser access (eliminates PHP proxy)
+CORS(app, origins=["*"], methods=["GET", "POST", "OPTIONS"])
+print("RTMDet service: CORS enabled for direct browser communication")
+
+@app.errorhandler(413)
+def too_large(e):
+    return jsonify({"error": "File too large", "status": "error"}), 413
+
+@app.errorhandler(400)
+def bad_request(e):
+    return jsonify({"error": "Bad request", "status": "error"}), 400
+
+@app.errorhandler(500)
+def internal_error(e):
+    return jsonify({"error": "Internal server error", "status": "error"}), 500
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint with fail-fast validation"""
+    global analyzer
+    try:
+        # Check if analyzer is initialized and functional
+        if analyzer is None:
+            return jsonify({
+                'status': 'unhealthy',
+                'service': 'rtmdet',
+                'error': 'RTMDet analyzer not initialized'
+            }), 503
+
+        # Test actual functionality
+        if not analyzer.is_healthy():
+            return jsonify({
+                'status': 'unhealthy',
+                'service': 'rtmdet',
+                'error': 'RTMDet analyzer non-functional'
+            }), 503
+
+        return jsonify({
+            'status': 'healthy',
+            'service': 'rtmdet',
+            'capabilities': ['object_detection', 'bbox_extraction'],
+            'models': {
+                'object_detection': {
+                    'status': 'ready',
+                    'framework': 'MMDetection RTMDet',
+                    'confidence_threshold': CONFIDENCE_THRESHOLD,
+                    'classes_loaded': len(COCO_CLASSES)
+                }
+            },
+            'supported_classes': len(COCO_CLASSES),
+            'endpoints': [
+                "GET /health - Health check",
+                "GET /analyze?url=<image_url> - Analyze objects from URL",
+                "GET /analyze?file=<file_path> - Analyze objects from file",
+                "POST /analyze - Analyze objects from uploaded file",
+                "GET /v3/analyze?url=<image_url> - V3 compatibility",
+                "GET /v2/analyze?image_url=<image_url> - V2 compatibility"
+            ],
+            'timestamp': time.time()
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'service': 'rtmdet',
+            'error': str(e)
+        }), 500
+
+@app.route('/classes', methods=['GET'])
+def get_classes():
+    """Get supported object classes"""
+    return jsonify({
+        "classes": COCO_CLASSES,
+        "total_classes": len(COCO_CLASSES),
+        "framework": "MMDetection RTMDet"
+    })
+
+@app.route('/', methods=['GET'])
+def analyze_get():
+    """GET endpoint for frontend compatibility - matches other services"""
+    image_url = request.args.get('url')
+    if not image_url:
+        # Return health check if no URL provided
+        if model is not None:
+            return jsonify({
+                "status": "healthy",
+                "service": "rtmdet",
+                "version": "1.0.0",
+                "model_loaded": True
+            })
+        else:
+            return jsonify({
+                "status": "error",
+                "service": "rtmdet",
+                "version": "1.0.0",
+                "model_loaded": False,
+                "error": "RTMDet model not available - MMDetection dependencies not installed"
+            }), 503
+    
+    start_time = time.time()
+    filepath = None
+    
+    try:
+        # Download and process image
+        try:
+            parsed_url = urlparse(image_url)
+            if not parsed_url.scheme or not parsed_url.netloc:
+                raise ValueError("Invalid URL format")
+            
+            # Download image
+            filename = uuid.uuid4().hex + ".jpg"
+            filepath = os.path.join(UPLOAD_FOLDER, filename)
+            
+            response = requests.get(image_url, timeout=10, stream=True)
+            response.raise_for_status()
+            
+            content_type = response.headers.get('content-type', '')
+            if not content_type.startswith('image/'):
+                raise ValueError("URL does not point to an image")
+            
+            with open(filepath, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            
+            if not validate_file_size(filepath):
+                os.remove(filepath)
+                raise ValueError("Downloaded file too large")
+            
+            # Detect objects using existing function
+            result = detect_objects(filepath)
+            
+            # Clear filepath after successful processing (detect_objects handles cleanup)
+            filepath = None
+            
+            if result.get('status') == 'error':
+                return jsonify({
+                    "status": "error",
+                    "error": result.get('error', 'Detection failed'),
+                    "processing_time": round(time.time() - start_time, 3)
+                }), 500
+            
+            # Convert to unified v2 format for frontend compatibility
+            rtmdet_data = result.get('RTMDet', {})
+            detections = rtmdet_data.get('detections', [])
+            image_dims = rtmdet_data.get('image_dimensions', {})
+            
+            # Create unified prediction format
+            predictions = []
+            for detection in detections:
+                bbox = detection.get('bbox', {})
+                prediction = {
+                    "type": "object_detection",
+                    "label": detection.get('class_name', ''),
+                    "confidence": float(detection.get('confidence', 0)),
+                    "bbox": {
+                        "x": bbox.get('x1', 0),
+                        "y": bbox.get('y1', 0),
+                        "width": bbox.get('width', 0),
+                        "height": bbox.get('height', 0)
+                    }
+                }
+                
+                # Add emoji if present
+                if detection.get('emoji'):
+                    prediction["emoji"] = detection['emoji']
+                
+                predictions.append(prediction)
+            
+            # Get model info
+            model_info = rtmdet_data.get('model_info', {})
+            
+            return jsonify({
+                "service": "rtmdet",
+                "status": "success",
+                "predictions": predictions,
+                "metadata": {
+                    "processing_time": round(time.time() - start_time, 3),
+                    "model_info": {
+                        "name": "RTMDet",
+                        "framework": "MMDetection"
+                    },
+                    "image_dimensions": image_dims
+                }
+            })
+            
+        except Exception as e:
+            logger.error(f"Error processing image: {e}")
+            return jsonify({
+                "status": "error",
+                "error": str(e),
+                "processing_time": round(time.time() - start_time, 3)
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        return jsonify({
+            "status": "error",
+            "error": "Internal server error",
+            "processing_time": round(time.time() - start_time, 3)
+        }), 500
+    
+    finally:
+        # Clean up any remaining files
+        if filepath and os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+            except Exception as e:
+                logger.warning(f"Could not remove file {filepath}: {e}")
+
+@app.route('/v2/analyze', methods=['POST'])
+def analyze_v2():
+    """V2 API endpoint with unified response format"""
+    start_time = time.time()
+    filepath = None
+    
+    try:
+        # Get request data
+        data = request.get_json()
+        if not data or 'image_url' not in data:
+            return jsonify({
+                "service": "rtmdet",
+                "status": "error",
+                "predictions": [],
+                "error": {"message": "Missing image_url in request"},
+                "metadata": {"processing_time": round(time.time() - start_time, 3)}
+            }), 400
+        
+        image_url = data['image_url']
+        
+        # Download and process image
+        try:
+            parsed_url = urlparse(image_url)
+            if not parsed_url.scheme or not parsed_url.netloc:
+                raise ValueError("Invalid URL format")
+            
+            # Download image
+            filename = uuid.uuid4().hex + ".jpg"
+            filepath = os.path.join(UPLOAD_FOLDER, filename)
+            
+            response = requests.get(image_url, timeout=10, stream=True)
+            response.raise_for_status()
+            
+            content_type = response.headers.get('content-type', '')
+            if not content_type.startswith('image/'):
+                raise ValueError("URL does not point to an image")
+            
+            with open(filepath, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            
+            if not validate_file_size(filepath):
+                os.remove(filepath)
+                raise ValueError("Downloaded file too large")
+            
+            # Detect objects using existing function
+            result = detect_objects(filepath)
+            
+            # Clear filepath after successful processing (detect_objects handles cleanup)
+            filepath = None
+            
+            if result.get('status') == 'error':
+                return jsonify({
+                    "service": "rtmdet",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": result.get('error', 'Detection failed')},
+                    "metadata": {"processing_time": round(time.time() - start_time, 3)}
+                }), 500
+            
+            # Convert to v2 format
+            rtmdet_data = result.get('RTMDet', {})
+            detections = rtmdet_data.get('detections', [])
+            image_dims = rtmdet_data.get('image_dimensions', {})
+            
+            # Create unified prediction format
+            predictions = []
+            for detection in detections:
+                bbox = detection.get('bbox', {})
+                prediction = {
+                    "type": "object_detection",
+                    "label": detection.get('class_name', ''),
+                    "confidence": float(detection.get('confidence', 0)),  # Already normalized 0-1
+                    "bbox": {
+                        "x": bbox.get('x1', 0),
+                        "y": bbox.get('y1', 0),
+                        "width": bbox.get('width', 0),
+                        "height": bbox.get('height', 0)
+                    }
+                }
+                
+                # Add emoji if present
+                if detection.get('emoji'):
+                    prediction["emoji"] = detection['emoji']
+                
+                predictions.append(prediction)
+            
+            # Get model info
+            model_info = rtmdet_data.get('model_info', {})
+            
+            return jsonify({
+                "service": "rtmdet",
+                "status": "success",
+                "predictions": predictions,
+                "metadata": {
+                    "processing_time": round(time.time() - start_time, 3),
+                    "model_info": {
+                        "name": "RTMDet",
+                        "framework": "MMDetection",
+                        "confidence_threshold": CONFIDENCE_THRESHOLD,
+                        "device": device
+                    },
+                    "image_dimensions": image_dims
+                }
+            })
+            
+        except Exception as e:
+            logger.error(f"Error processing image: {e}")
+            return jsonify({
+                "service": "rtmdet",
+                "status": "error",
+                "predictions": [],
+                "error": {"message": str(e)},
+                "metadata": {"processing_time": round(time.time() - start_time, 3)}
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Unexpected error in analyze_v2: {e}")
+        return jsonify({
+            "service": "rtmdet",
+            "status": "error",
+            "predictions": [],
+            "error": {"message": "Internal server error"},
+            "metadata": {"processing_time": round(time.time() - start_time, 3)}
+        }), 500
+    
+    finally:
+        # Clean up any remaining files
+        if filepath and os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+            except Exception as e:
+                logger.warning(f"Could not remove file {filepath}: {e}")
+
+@app.route('/v3/analyze', methods=['GET', 'POST'])
+def analyze_v3():
+    """Unified V3 analyze endpoint - orchestrates input handling and processing"""
+    start_time = time.time()
+
+    def error_response(message: str, status_code: int = 400):
+        return jsonify({
+            "service": "rtmdet",
+            "status": "error",
+            "predictions": [],
+            "error": {"message": message},
+            "metadata": {"processing_time": round(time.time() - start_time, 3)}
+        }), status_code
+
+    try:
+        # Step 1: Get image into memory from any source
+        if request.method == 'POST' and 'file' in request.files:
+            # Handle file upload
+            uploaded_file = request.files['file']
+            if uploaded_file.filename == '':
+                return error_response("No file selected")
+
+            # Validate file size
+            uploaded_file.seek(0, 2)  # Seek to end
+            file_size = uploaded_file.tell()
+            uploaded_file.seek(0)     # Seek back to beginning
+
+            if file_size > MAX_FILE_SIZE:
+                return error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB")
+
+            # Validate file type
+            if not is_allowed_file(uploaded_file.filename):
+                return error_response("File type not allowed")
+
+            try:
+                from io import BytesIO
+                file_data = uploaded_file.read()
+                image = Image.open(BytesIO(file_data)).convert('RGB')
+            except Exception as e:
+                return error_response(f"Failed to process uploaded image: {str(e)}", 500)
+
+        else:
+            # Handle URL or file parameter
+            url = request.args.get('url')
+            file_path = request.args.get('file')
+
+            if not url and not file_path:
+                return error_response("Must provide either 'url' or 'file' parameter, or POST a file")
+
+            if url and file_path:
+                return error_response("Cannot provide both 'url' and 'file' parameters")
+
+            if url:
+                # Download from URL directly into memory
+                try:
+                    from urllib.parse import urlparse
+                    parsed_url = urlparse(url)
+                    if not parsed_url.scheme or not parsed_url.netloc:
+                        return error_response("Invalid URL format")
+
+                    response = requests.get(url, timeout=10, stream=True)
+                    response.raise_for_status()
+
+                    content_type = response.headers.get('content-type', '')
+                    if not content_type.startswith('image/'):
+                        return error_response("URL does not point to an image")
+
+                    # Check content length if provided
+                    content_length = response.headers.get('content-length')
+                    if content_length and int(content_length) > MAX_FILE_SIZE:
+                        return error_response("Downloaded file too large")
+
+                    from io import BytesIO
+                    image_data = BytesIO()
+                    for chunk in response.iter_content(chunk_size=8192):
+                        image_data.write(chunk)
+                        if image_data.tell() > MAX_FILE_SIZE:
+                            return error_response("Downloaded file too large")
+
+                    image_data.seek(0)
+                    image = Image.open(image_data).convert('RGB')
+
+                except Exception as e:
+                    return error_response(f"Failed to download/process image: {str(e)}")
+            else:  # file_path
+                # Load file directly into memory
+                if not os.path.exists(file_path):
+                    return error_response(f"File not found: {file_path}")
+
+                if not is_allowed_file(file_path):
+                    return error_response("File type not allowed")
+
+                if not validate_file_size(file_path):
+                    return error_response("File too large")
+
+                try:
+                    image = Image.open(file_path).convert('RGB')
+                except Exception as e:
+                    return error_response(f"Failed to load image file: {str(e)}", 500)
+
+        # Step 2: Process the image (unified processing path)
+        processing_result = process_image_for_detection(image)
+
+        # Step 3: Handle processing result
+        if not processing_result["success"]:
+            return error_response(processing_result["error"], 500)
+
+        # Step 4: Create response
+        response = create_rtmdet_response(processing_result["data"])
+
+        return jsonify(response)
+
+    except ValueError as e:
+        return error_response(str(e))
+    except Exception as e:
+        logger.error(f"V3 Analyze API error: {e}")
+        return error_response(f"Internal error: {str(e)}", 500)
+
+@app.route('/analyze', methods=['GET', 'POST'])
+def analyze():
+    """Main analyze endpoint - calls v3 analyze directly"""
+    try:
+        return analyze_v3()
+    except Exception as e:
+        logger.error(f"Analyze API error: {e}")
+        return jsonify({
+            "service": "rtmdet",
+            "status": "error",
+            "predictions": [],
+            "error": {"message": f"Endpoint error: {str(e)}"},
+            "metadata": {"processing_time": 0}
+        }), 500
+
+if __name__ == '__main__':
+    # Initialize services
+    logger.info("Starting RTMDet service...")
+
+    # Load emoji mappings on startup
+    load_emoji_mappings()
+
+    coco_loaded = load_coco_classes()
+    model_loaded = initialize_rtmdet_analyzer()
+
+    if not model_loaded:
+        logger.error("Failed to load RTMDet analyzer.")
+        logger.error("Please ensure MMDetection is installed and RTMDet models are available.")
+        logger.error("Service cannot function without analyzer. Exiting.")
+        exit(1)
+
+    if not coco_loaded:
+        logger.error("Failed to load COCO classes.")
+        logger.error("Service cannot function without class definitions. Exiting.")
+        exit(1)
+
+    # Always use 0.0.0.0 to allow external connections
+    host = "0.0.0.0"
+
+    logger.info(f"Starting RTMDet service on {host}:{PORT}")
+    logger.info(f"Private mode: {PRIVATE}")
+    logger.info(f"Model loaded: {model_loaded}")
+    logger.info(f"COCO classes loaded: {coco_loaded}")
+    logger.info("Emoji lookup: Local file mode")
+    logger.info(f"Confidence threshold: {CONFIDENCE_THRESHOLD}")
+
+    app.run(
+        host=host,
+        port=PORT,
+        debug=False,
+        use_reloader=False,
+        threaded=True
+    )
