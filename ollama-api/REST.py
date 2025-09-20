@@ -167,7 +167,7 @@ emoji_mappings = load_emoji_mappings()
 mwe_mappings = load_mwe_mappings()
 
 # Initialize MWE tokenizer with the loaded mappings (already converted to tuples)
-emoji_tokenizer = MWETokenizer(mwe_mappings)
+emoji_tokenizer = MWETokenizer(mwe_mappings, separator='_')
 
 # Ensure Ollama models are downloaded
 ensure_ollama_models()
