@@ -48301,7 +48301,6 @@ red_dwarf_star
 red_eft
 red_elm
 red_false_mallow
-red_fire
 red_flag
 red_fox
 red_giant
