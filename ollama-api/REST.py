@@ -227,7 +227,11 @@ def lookup_text_for_emojis(text: str) -> Dict[str, Any]:
                     word_tokens.append(clean_token)
         
         tokens = emoji_tokenizer.tokenize(word_tokens)
-        
+
+        # Debug logging
+        logger.debug(f"LLaMa: Input tokens: {word_tokens}")
+        logger.debug(f"LLaMa: MWE tokens: {tokens}")
+
         # Look up emojis for each token
         mappings = {}
         found_emojis = []
@@ -287,7 +291,7 @@ def create_ollama_response(data: Dict[str, Any], processing_time: float) -> Dict
     """Create standardized Ollama response with emoji mappings"""
     text_response = data.get('response', '')
     emoji_mappings = data.get('emoji_mappings', [])
-    
+
     is_shiny, shiny_roll = check_shiny()
     
     prediction = {
