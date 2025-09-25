@@ -31,7 +31,6 @@ FOLDER = './uploads'
 PRIVATE_STR = os.getenv('PRIVATE')
 PORT_STR = os.getenv('PORT')
 OLLAMA_HOST = os.getenv('OLLAMA_HOST')
-TEXT_MODEL = os.getenv('TEXT_MODEL')
 VISION_MODEL = os.getenv('VISION_MODEL')
 TEMPERATURE_STR = os.getenv('TEMPERATURE')
 VISION_PROMPT = os.getenv('PROMPT')
@@ -43,8 +42,6 @@ if not PORT_STR:
     raise ValueError("PORT environment variable is required")
 if not OLLAMA_HOST:
     raise ValueError("OLLAMA_HOST environment variable is required")
-if not TEXT_MODEL:
-    raise ValueError("TEXT_MODEL environment variable is required")
 if not VISION_MODEL:
     raise ValueError("VISION_MODEL environment variable is required")
 if not TEMPERATURE_STR:
@@ -346,44 +343,6 @@ async def get_available_models() -> Dict[str, List[str]]:
         print(f"Failed to get models from Ollama: {e}")
         return COMMON_MODELS
 
-async def process_text_with_ollama(prompt: str, model: str = None) -> Dict[str, Any]:
-    """Process text prompt with Ollama"""
-    start_time = time.time()
-    model = model or TEXT_MODEL
-    
-    try:
-        client = AsyncClient(host=OLLAMA_HOST)
-        message = {'role': 'user', 'content': prompt}
-        response = await client.chat(model=model, messages=[message])
-        
-        output = response['message']['content']
-        processing_time = round(time.time() - start_time, 3)
-        
-        # Truncate if too long
-        if len(output) > MAX_RESPONSE_LENGTH:
-            output = output[:MAX_RESPONSE_LENGTH] + "... [truncated]"
-        
-        # Extract emojis from response
-        emoji_list = get_emojis_for_text(output)
-        
-        return {
-            "llm": {
-                "response": output,
-                "model_used": model,
-                "prompt_length": len(prompt),
-                "response_length": len(output),
-                "processing_time": processing_time,
-                "emoji_mappings": emoji_list,
-                "type": "text",
-                "status": "success"
-            }
-        }
-        
-    except Exception as e:
-        return {
-            "error": f"Text generation failed: {str(e)}",
-            "status": "error"
-        }
 
 def process_image_for_ollama(image: Image.Image, prompt: str = None, model: str = None, temperature: float = None) -> Dict[str, Any]:
     """
@@ -482,7 +441,7 @@ def health_check():
         # Test actual text generation capability
         client = AsyncClient(host=OLLAMA_HOST)
         test_response = loop.run_until_complete(client.chat(
-            model=TEXT_MODEL,
+            model=VISION_MODEL,
             messages=[{'role': 'user', 'content': 'Hi'}]
         ))
         
@@ -508,7 +467,6 @@ def health_check():
         "ollama": {
             "host": OLLAMA_HOST,
             "status": ollama_status,
-            "default_text_model": TEXT_MODEL,
             "default_vision_model": VISION_MODEL
         },
         "available_models": available_models,
@@ -523,7 +481,6 @@ def health_check():
             "GET /models - List available models",
             "GET,POST /analyze - Unified endpoint (URL/file/upload)",
             "GET /v3/analyze - V3 compatibility",
-            "POST /text - Generate text response",
             "POST /image - Analyze image with text"
         ]
     })
@@ -540,7 +497,6 @@ def list_models():
         return jsonify({
             "models": models,
             "defaults": {
-                "text": TEXT_MODEL,
                 "vision": VISION_MODEL
             },
             "status": "success"
@@ -695,38 +651,6 @@ def analyze_v3_compat():
     return analyze()
 
 
-@app.route('/text', methods=['POST'])
-def generate_text():
-    """Generate text response from prompt"""
-    try:
-        data = request.get_json()
-        if not data or 'prompt' not in data:
-            return jsonify({
-                "error": "Missing 'prompt' in request body",
-                "status": "error"
-            }), 400
-        
-        prompt = data['prompt']
-        model = data.get('model', TEXT_MODEL)
-        
-        if len(prompt) > 10000:  # Reasonable prompt limit
-            return jsonify({
-                "error": "Prompt too long (max 10000 characters)",
-                "status": "error"
-            }), 400
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        result = loop.run_until_complete(process_text_with_ollama(prompt, model))
-        loop.close()
-        
-        return jsonify(result)
-        
-    except Exception as e:
-        return jsonify({
-            "error": f"Text generation failed: {str(e)}",
-            "status": "error"
-        }), 500
 
 @app.route('/image', methods=['POST'])
 def analyze_image_with_prompt():
@@ -812,7 +736,6 @@ if __name__ == '__main__':
     # Test Ollama connectivity on startup
     logger.info(f"Starting Ollama LLM API on port {PORT}")
     logger.info(f"Ollama host: {OLLAMA_HOST}")
-    logger.info(f"Default text model: {TEXT_MODEL}")
     logger.info(f"Default vision model: {VISION_MODEL}")
     
     try:
