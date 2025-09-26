@@ -23,6 +23,7 @@ import mediapipe as mp
 import requests
 from datetime import datetime
 from urllib.parse import urlparse
+from face_analyzer import FaceAnalyzer
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -59,13 +60,11 @@ emoji_mappings = {}
 app = Flask(__name__)
 CORS(app)
 
-# MediaPipe initialization
-mp_face_detection = mp.solutions.face_detection
-mp_drawing = mp.solutions.drawing_utils
+# GPU configuration
+USE_GPU = os.getenv('USE_GPU', 'true').lower() == 'true'
 
-# Global MediaPipe models - initialize once at startup
-face_detection_model = None
-face_detection_lock = threading.Lock()  # Prevent concurrent MediaPipe processing
+# Global face analyzer - initialize once at startup
+face_analyzer = None
 
 # Configuration
 UPLOAD_FOLDER = 'uploads'
@@ -88,23 +87,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def initialize_models():
-    """Initialize MediaPipe face detection model at startup"""
-    global face_detection_model
+def initialize_face_analyzer():
+    """Initialize face analyzer once at startup"""
+    global face_analyzer
     try:
-        logger.info("Initializing MediaPipe Face Detection model...")
-        
-        # Face Detection
-        face_detection_model = mp_face_detection.FaceDetection(
+        if USE_GPU:
+            logger.info("Initializing MediaPipe Face Analyzer with GPU acceleration...")
+        else:
+            logger.info("Initializing MediaPipe Face Analyzer with CPU...")
+
+        face_analyzer = FaceAnalyzer(
+            min_detection_confidence=FACE_MIN_DETECTION_CONFIDENCE,
             model_selection=1,  # 1 for full range detection (better for diverse faces)
-            min_detection_confidence=FACE_MIN_DETECTION_CONFIDENCE
+            use_gpu=USE_GPU
         )
-        logger.info("✅ MediaPipe Face Detection model initialized")
-        
+
+        gpu_status = "GPU" if USE_GPU else "CPU"
+        logger.info(f"✅ Face Analyzer initialized successfully ({gpu_status})")
         return True
-        
+
     except Exception as e:
-        logger.error(f"❌ Error initializing MediaPipe Face Detection model: {str(e)}")
+        logger.error(f"❌ Error initializing Face Analyzer: {str(e)}")
         return False
 
 def load_emoji_mappings():
@@ -164,113 +167,30 @@ def allowed_file(filename):
     """Check if file extension is allowed"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def download_image(url):
-    """Download image from URL and return as bytes"""
+
+def download_image_from_url(url: str) -> Image.Image:
+    """Download image from URL and return as PIL Image"""
     try:
         headers = {'User-Agent': 'MediaPipe Face Analysis Service'}
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
-        
+
         if len(response.content) > MAX_FILE_SIZE:
             raise ValueError(f"Image too large. Max size: {MAX_FILE_SIZE/1024/1024}MB")
-        
-        return io.BytesIO(response.content)
-    
-    except requests.exceptions.RequestException as e:
-        raise Exception(f"Failed to download image: {str(e)}")
 
-def convert_to_jpg(image_bytes):
-    """Convert any image format to JPG for consistent processing"""
-    try:
-        image = Image.open(image_bytes)
-        
+        # Return PIL Image directly from bytes
+        image = Image.open(io.BytesIO(response.content))
+
         # Convert to RGB if necessary (for PNG with transparency, etc.)
         if image.mode != 'RGB':
             image = image.convert('RGB')
-        
-        # Save as JPG
-        jpg_bytes = io.BytesIO()
-        image.save(jpg_bytes, format='JPEG', quality=85)
-        jpg_bytes.seek(0)
-        
-        return jpg_bytes
-        
-    except Exception as e:
-        raise Exception(f"Failed to convert image: {str(e)}")
 
-def detect_faces_mediapipe_from_image(image: Image.Image):
-    """Detect faces using MediaPipe directly from PIL Image (no temp files)"""
-    global face_detection_model
-    
-    try:
-        # Convert PIL Image to numpy array
-        img_array = np.array(image)
-        
-        # MediaPipe expects RGB format (PIL Images are already RGB)
-        height, width, _ = img_array.shape
-        
-        # Process with MediaPipe (no CV2 conversion needed - PIL is already RGB!)
-        # Use lock to prevent timestamp collision errors in concurrent requests
-        with face_detection_lock:
-            results = face_detection_model.process(img_array)
-        
-        faces = []
-        if results.detections:
-            for detection in results.detections:
-                # Get bounding box
-                bbox = detection.location_data.relative_bounding_box
-                
-                # Convert to pixel coordinates
-                x = int(bbox.xmin * width)
-                y = int(bbox.ymin * height)
-                w = int(bbox.width * width)
-                h = int(bbox.height * height)
-                
-                # Get confidence
-                confidence = detection.score[0] if detection.score else 0.0
-                
-                # Get key points if available
-                keypoints = {}
-                if detection.location_data.relative_keypoints:
-                    keypoints = {
-                        'right_eye': [
-                            int(detection.location_data.relative_keypoints[0].x * width),
-                            int(detection.location_data.relative_keypoints[0].y * height)
-                        ],
-                        'left_eye': [
-                            int(detection.location_data.relative_keypoints[1].x * width),
-                            int(detection.location_data.relative_keypoints[1].y * height)
-                        ],
-                        'nose_tip': [
-                            int(detection.location_data.relative_keypoints[2].x * width),
-                            int(detection.location_data.relative_keypoints[2].y * height)
-                        ],
-                        'mouth_center': [
-                            int(detection.location_data.relative_keypoints[3].x * width),
-                            int(detection.location_data.relative_keypoints[3].y * height)
-                        ],
-                        'right_ear_tragion': [
-                            int(detection.location_data.relative_keypoints[4].x * width),
-                            int(detection.location_data.relative_keypoints[4].y * height)
-                        ],
-                        'left_ear_tragion': [
-                            int(detection.location_data.relative_keypoints[5].x * width),
-                            int(detection.location_data.relative_keypoints[5].y * height)
-                        ]
-                    }
-                
-                faces.append({
-                    'bbox': [x, y, w, h],
-                    'confidence': confidence,
-                    'keypoints': keypoints,
-                    'method': 'mediapipe'
-                })
-        
-        return faces, {'width': width, 'height': height}
-        
-    except Exception as e:
-        logger.error(f"MediaPipe face detection error: {str(e)}")
-        return [], {'width': 0, 'height': 0}
+        return image
+
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Failed to download image: {str(e)}")
+
+
 
 def process_image_for_faces(image: Image.Image) -> dict:
     """
@@ -279,32 +199,29 @@ def process_image_for_faces(image: Image.Image) -> dict:
     Uses pure in-memory processing
     """
     start_time = time.time()
-    
-    if not face_detection_model:
+
+    if not face_analyzer:
         return {
             "success": False,
-            "error": "MediaPipe face detection model not loaded"
+            "error": "Face analyzer not loaded"
         }
-    
+
     try:
         # Ensure image is in RGB mode
         if image.mode != 'RGB':
             image = image.convert('RGB')
-        
-        # Perform face detection analysis
-        faces, dimensions = detect_faces_mediapipe_from_image(image)
-        
+
+        # Perform face detection analysis using FaceAnalyzer
+        face_data = face_analyzer.analyze_faces_from_image(image)
+
         processing_time = time.time() - start_time
-        
+
         return {
             "success": True,
-            "data": {
-                'faces': faces,
-                'dimensions': dimensions
-            },
+            "data": face_data,
             "processing_time": processing_time
         }
-        
+
     except Exception as e:
         logger.error(f"Face processing error: {str(e)}")
         return {
@@ -348,77 +265,16 @@ def create_face_response(data: dict, processing_time: float) -> dict:
     }
 
 
-def process_image(image_source, is_url=False, is_file_path=False):
-    """Process image and perform face detection analysis - returns raw data"""
-    start_time = time.time()
-    temp_path = None
-    
-    try:
-        # Handle image source
-        if is_url:
-            image_bytes = download_image(image_source)
-        elif is_file_path:
-            # Direct file path - use directly without temporary conversion
-            faces, dimensions = detect_faces_mediapipe(image_source)
-            processing_time = time.time() - start_time
-            return {
-                'faces': faces,
-                'dimensions': dimensions,
-                'processing_time': processing_time,
-                'error': None
-            }
-        else:
-            image_bytes = image_source
-        
-        # Convert to JPG for consistent processing
-        jpg_bytes = convert_to_jpg(image_bytes)
-        
-        # Save to temporary file
-        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp_file:
-            jpg_bytes.seek(0)
-            tmp_file.write(jpg_bytes.read())
-            temp_path = tmp_file.name
-        
-        # Perform face detection analysis
-        faces, dimensions = detect_faces_mediapipe(temp_path)
-        
-        # Calculate processing time
-        processing_time = time.time() - start_time
-        
-        return {
-            'faces': faces,
-            'dimensions': dimensions,
-            'processing_time': processing_time,
-            'error': None
-        }
-    
-    except Exception as e:
-        logger.error(f"Image processing error: {str(e)}")
-        processing_time = time.time() - start_time
-        return {
-            'faces': [],
-            'dimensions': {'width': 0, 'height': 0},
-            'processing_time': processing_time,
-            'error': str(e)
-        }
-    
-    finally:
-        # Clean up temporary file
-        if temp_path and os.path.exists(temp_path):
-            try:
-                os.unlink(temp_path)
-            except Exception as e:
-                logger.warning(f"Could not clean up temp file {temp_path}: {e}")
 
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    global face_detection_model
+    global face_analyzer
     try:
-        # Check if model is initialized
-        face_status = 'ready' if face_detection_model is not None else 'not_initialized'
-        
-        all_ready = face_detection_model is not None
+        # Check if analyzer is initialized
+        face_status = 'ready' if face_analyzer is not None else 'not_initialized'
+
+        all_ready = face_analyzer is not None
         
         return jsonify({
             'status': 'healthy' if all_ready else 'degraded',
@@ -430,7 +286,8 @@ def health_check():
                     'version': mp.__version__,
                     'model': 'MediaPipe Face Detection (Full Range)',
                     'fairness': 'Tested across demographics',
-                    'keypoints': 6
+                    'keypoints': 6,
+                    'gpu_enabled': USE_GPU
                 }
             },
             'endpoints': [
@@ -462,52 +319,6 @@ def build_error_response(error_message, start_time, status_code):
         }
     }), status_code
 
-def build_v3_response(raw_data):
-    """Build standardized V3 response from raw face detection data"""
-    # Handle errors
-    if raw_data['error']:
-        return jsonify({
-            "service": "face",
-            "status": "error",
-            "predictions": [],
-            "metadata": {
-                "processing_time": round(raw_data['processing_time'], 3),
-                "model_info": {"framework": "MediaPipe"}
-            },
-            "error": {"message": str(raw_data['error'])}
-        }), 500
-    
-    # Build V3 predictions
-    predictions = []
-    
-    # Add face predictions
-    for face in raw_data['faces']:
-        is_shiny, shiny_roll = check_shiny()
-        
-        prediction = {
-            "label": "face",
-            "emoji": get_emoji("face"),
-            "confidence": round(float(face['confidence']), CONFIDENCE_DECIMAL_PLACES),
-            "bbox": face['bbox'],
-            "keypoints": face.get('keypoints', {})
-        }
-        
-        # Add shiny flag only for shiny detections
-        if is_shiny:
-            prediction["shiny"] = True
-            logger.info(f"✨ SHINY FACE DETECTED! Roll: {shiny_roll} ✨")
-        
-        predictions.append(prediction)
-    
-    return jsonify({
-        "service": "face",
-        "status": "success",
-        "predictions": predictions,
-        "metadata": {
-            "processing_time": round(raw_data['processing_time'], 3),
-            "model_info": {"framework": "MediaPipe"}
-        }
-    })
 
 @app.route('/analyze', methods=['GET', 'POST'])
 def analyze():
@@ -650,9 +461,15 @@ def analyze_v3():
                     temp_path = temp_file.name
                     file.save(temp_path)
                 
-                # Process with face detection
-                raw_data = process_image(temp_path, is_file_path=True)
-                return build_v3_response(raw_data)
+                # Use the new unified analyze function
+                try:
+                    image = Image.open(temp_path).convert('RGB')
+                    result = process_image_for_faces(image)
+                    if not result["success"]:
+                        return build_error_response(result["error"], start_time, 500)
+                    return jsonify(create_face_response(result["data"], result["processing_time"]))
+                except Exception as e:
+                    return build_error_response(f"Failed to process image: {str(e)}", start_time, 500)
                 
             except Exception as e:
                 return build_error_response(f"Failed to process uploaded image: {str(e)}", start_time, 500)
@@ -678,21 +495,32 @@ def analyze_v3():
         
         # Handle URL input
         if url:
-            raw_data = process_image(url, is_url=True)
-        
+            try:
+                image = download_image_from_url(url)
+                result = process_image_for_faces(image)
+                if not result["success"]:
+                    return build_error_response(result["error"], start_time, 500)
+                return jsonify(create_face_response(result["data"], result["processing_time"]))
+            except Exception as e:
+                return build_error_response(f"Failed to process URL: {str(e)}", start_time, 500)
+
         # Handle file path input
         elif file_path:
             # Validate file path
             if not os.path.exists(file_path):
                 return build_error_response(f"File not found: {file_path}", start_time, 404)
-            
+
             if not allowed_file(file_path):
                 return build_error_response("File type not allowed", start_time, 400)
-            
-            raw_data = process_image(file_path, is_file_path=True)
-        
-        # Use shared response builder
-        return build_v3_response(raw_data)
+
+            try:
+                image = Image.open(file_path).convert('RGB')
+                result = process_image_for_faces(image)
+                if not result["success"]:
+                    return build_error_response(result["error"], start_time, 500)
+                return jsonify(create_face_response(result["data"], result["processing_time"]))
+            except Exception as e:
+                return build_error_response(f"Failed to process file: {str(e)}", start_time, 500)
         
     except Exception as e:
         logger.error(f"Error in V3 analysis: {str(e)}")
@@ -732,10 +560,10 @@ def analyze_v2_compat():
             return analyze()
 
 if __name__ == '__main__':
-    # Initialize MediaPipe face detection model at startup
-    logger.info("Initializing MediaPipe Face Detection model...")
-    if not initialize_models():
-        logger.error("Failed to initialize MediaPipe Face Detection model. Service will not function properly.")
+    # Initialize face analyzer at startup - fail fast if it doesn't work
+    logger.info("Initializing Face Analysis Service...")
+    if not initialize_face_analyzer():
+        logger.error("Failed to initialize Face Analyzer. Service cannot function.")
         exit(1)
     
     # Load emoji mappings on startup
