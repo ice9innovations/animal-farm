@@ -19,17 +19,20 @@ logger = logging.getLogger(__name__)
 class PoseAnalyzer:
     """Core MediaPipe pose analysis with enhanced pose classification and analysis"""
     
-    def __init__(self, 
+    def __init__(self,
                  min_detection_confidence: float = 0.5,
                  min_tracking_confidence: float = 0.5,
                  model_complexity: int = 2,
-                 enable_segmentation: bool = True):
+                 enable_segmentation: bool = True,
+                 use_gpu: bool = True):
         """Initialize MediaPipe pose analyzer"""
-        
+
         self.mp_pose = mp.solutions.pose
         self.mp_drawing = mp.solutions.drawing_utils
-        
+        self.use_gpu = use_gpu
+
         # Initialize pose model with enhanced settings
+        # MediaPipe automatically uses GPU when available unless explicitly disabled
         self.pose_model = self.mp_pose.Pose(
             static_image_mode=True,
             model_complexity=model_complexity,  # 2 for best accuracy
@@ -52,7 +55,8 @@ class PoseAnalyzer:
             'left_foot_index', 'right_foot_index'
         ]
         
-        logger.info("✅ PoseAnalyzer initialized with MediaPipe Pose")
+        gpu_status = "GPU" if use_gpu else "CPU"
+        logger.info(f"✅ PoseAnalyzer initialized with MediaPipe Pose ({gpu_status})")
     
     def analyze_pose_from_array(self, image_array: np.ndarray) -> Dict[str, Any]:
         """

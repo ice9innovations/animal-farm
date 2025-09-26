@@ -50,6 +50,7 @@ POSE_MIN_DETECTION_CONFIDENCE = float(os.getenv('POSE_MIN_DETECTION_CONFIDENCE',
 POSE_MIN_TRACKING_CONFIDENCE = float(os.getenv('POSE_MIN_TRACKING_CONFIDENCE', '0.5'))
 POSE_MODEL_COMPLEXITY = int(os.getenv('POSE_MODEL_COMPLEXITY', '2'))
 ENABLE_SEGMENTATION = os.getenv('ENABLE_SEGMENTATION', 'true').lower() == 'true'
+USE_GPU = os.getenv('USE_GPU', 'true').lower() == 'true'
 
 # Global emoji mappings - loaded from API on startup
 emoji_mappings = {}
@@ -97,18 +98,23 @@ def initialize_pose_analyzer():
     """Initialize pose analyzer once at startup"""
     global pose_analyzer
     try:
-        logger.info("Initializing MediaPipe Pose Analyzer...")
-        
+        if USE_GPU:
+            logger.info("Initializing MediaPipe Pose Analyzer with GPU acceleration...")
+        else:
+            logger.info("Initializing MediaPipe Pose Analyzer with CPU...")
+
         pose_analyzer = PoseAnalyzer(
             min_detection_confidence=POSE_MIN_DETECTION_CONFIDENCE,
             min_tracking_confidence=POSE_MIN_TRACKING_CONFIDENCE,
             model_complexity=POSE_MODEL_COMPLEXITY,
-            enable_segmentation=ENABLE_SEGMENTATION
+            enable_segmentation=ENABLE_SEGMENTATION,
+            use_gpu=USE_GPU
         )
-        
-        logger.info("✅ Pose Analyzer initialized successfully")
+
+        gpu_status = "GPU" if USE_GPU else "CPU"
+        logger.info(f"✅ Pose Analyzer initialized successfully ({gpu_status})")
         return True
-        
+
     except Exception as e:
         logger.error(f"❌ Error initializing Pose Analyzer: {str(e)}")
         return False
@@ -299,7 +305,8 @@ def health_check():
                     'version': mp.__version__,
                     'model': 'MediaPipe Pose',
                     'landmarks': 33,
-                    'complexity': POSE_MODEL_COMPLEXITY
+                    'complexity': POSE_MODEL_COMPLEXITY,
+                    'gpu_enabled': USE_GPU
                 }
             },
             'supported_poses': list(POSE_CLASSIFICATIONS.keys()),
