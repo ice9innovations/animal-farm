@@ -26,6 +26,7 @@ Animal Farm consists of multiple specialized AI services that work together in a
 | **ollama-api** | 7782 | Multi-modal large language model analysis |
 | **pose** | 7786 | Human pose estimation with MediaPipe |
 | **rtdetr** | 7780 | Transformer-based object detection |
+| **rtmdet** | 7792 | Transformer-based object detection |
 | **xception** | 7779 | Xception-based ImageNet classification |
 | **xception_detection** | 7799 | Two-stage object detection with Xception classification |
 | **yolo_365** | 7790 | YOLO object detection with Objects365 dataset (365 classes) |
