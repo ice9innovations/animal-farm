@@ -10,6 +10,8 @@ import os
 import logging
 import random
 import time
+import torch
+import torchvision.ops
 from typing import List, Dict, Any
 from urllib.parse import urlparse
 from PIL import Image
@@ -160,6 +162,60 @@ def create_yolo11_response(data: Dict[str, Any], processing_time: float) -> Dict
             "model_info": yolo_analyzer.get_model_info() if yolo_analyzer else {}
         }
     }
+
+def apply_nms_consolidation(detections: List[Dict[str, Any]], nms_threshold: float = 0.5, confidence_threshold: float = 0.25) -> List[Dict[str, Any]]:
+    """
+    Apply Non-Maximum Suppression to eliminate overlapping detections.
+    This is the core function that actually removes overlapping bounding boxes.
+    """
+    if not detections:
+        return []
+
+    # Filter by confidence threshold first
+    valid_detections = [det for det in detections if det.get('confidence', 0) >= confidence_threshold]
+
+    if len(valid_detections) <= 1:
+        return valid_detections
+
+    # Convert detections to tensors for NMS
+    boxes = []
+    scores = []
+
+    for detection in valid_detections:
+        bbox = detection.get('bbox', {})
+        if not bbox:
+            continue
+
+        # YOLO-365 format should be {x, y, width, height} - convert to [x1, y1, x2, y2] for NMS
+        x = float(bbox.get('x', 0))
+        y = float(bbox.get('y', 0))
+        width = float(bbox.get('width', 0))
+        height = float(bbox.get('height', 0))
+        x2 = x + width
+        y2 = y + height
+
+        boxes.append([x, y, x2, y2])
+        scores.append(float(detection.get('confidence', 0)))
+
+    if not boxes:
+        return []
+
+    # Convert to PyTorch tensors
+    boxes_tensor = torch.tensor(boxes, dtype=torch.float32)
+    scores_tensor = torch.tensor(scores, dtype=torch.float32)
+
+    # Apply NMS - this is where overlapping detections are actually eliminated
+    keep_indices = torchvision.ops.nms(boxes_tensor, scores_tensor, nms_threshold)
+
+    # Return only the detections that survived NMS
+    consolidated_detections = []
+    for idx in keep_indices:
+        consolidated_detections.append(valid_detections[idx.item()])
+
+    # Sort by confidence (highest first)
+    consolidated_detections.sort(key=lambda x: x.get('confidence', 0), reverse=True)
+
+    return consolidated_detections
 
 def download_image_from_url(url: str) -> Image.Image:
     """Download image from URL and return as PIL Image (in-memory processing)"""
@@ -428,7 +484,13 @@ def analyze():
         # Step 3: Handle processing result
         if not processing_result["success"]:
             return error_response(processing_result["error"], 500)
-        
+
+        # Step 3.5: Apply NMS consolidation to eliminate overlapping detections
+        detections = processing_result.get('detections', [])
+        if detections:
+            detections = apply_nms_consolidation(detections)
+            processing_result['detections'] = detections
+
         # Step 4: Create response
         response = create_yolo11_response(
             processing_result,
