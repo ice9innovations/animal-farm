@@ -173,8 +173,17 @@ def create_nudenet_response(detections: List[Dict], processing_time: float) -> D
     for detection in detections:
         category = detection['class']
         confidence = round(detection['score'], 3)
-        bbox = detection['box']  # [x1, y1, x2, y2]
+        bbox_array = detection['box']  # [x1, y1, x2, y2] from NudeNet
         emoji = get_emoji_for_category(category)
+
+        # Convert NudeNet bbox format [x1, y1, x2, y2] to standard dictionary format
+        # Other services use {'x': x, 'y': y, 'width': w, 'height': h}
+        bbox = {
+            'x': int(bbox_array[0]),
+            'y': int(bbox_array[1]),
+            'width': int(bbox_array[2] - bbox_array[0]),
+            'height': int(bbox_array[3] - bbox_array[1])
+        }
 
         # Check for shiny on each detection
         is_shiny, shiny_roll = check_shiny()
