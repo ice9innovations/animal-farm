@@ -80,7 +80,17 @@ def initialize_detector() -> bool:
     try:
         logger.info("Initializing NudeNet Detector...")
         nude_detector = NudeDetector()
-        logger.info("✅ NudeNet Detector initialized successfully")
+
+        # The nudenet library has a bug where it accepts but ignores the providers parameter.
+        # We must recreate the ONNX session with GPU providers explicitly.
+        import onnxruntime
+        import nudenet
+        model_path = os.path.join(os.path.dirname(nudenet.__file__), "320n.onnx")
+        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+        nude_detector.onnx_session = onnxruntime.InferenceSession(model_path, providers=providers)
+
+        actual_providers = nude_detector.onnx_session.get_providers()
+        logger.info(f"✅ NudeNet Detector initialized with providers: {actual_providers}")
         return True
     except Exception as e:
         logger.error(f"❌ Error initializing NudeNet Detector: {str(e)}")
@@ -116,47 +126,27 @@ def process_image_for_detection(image: Image.Image) -> Dict[str, Any]:
         if image.mode != 'RGB':
             image = image.convert('RGB')
 
-        # NudeNet can work with PIL Images directly via detect() method
-        # It expects the image to be saved temporarily or passed as path
-        # For in-memory processing, we need to save to a BytesIO buffer
-        # However, NudeDetector.detect() expects a file path
-        # Let's check if there's a better way...
-
-        # Actually, NudeDetector has a detect() method that accepts file paths
-        # For in-memory, we'll need to convert PIL Image to the format it expects
-        # The library internally uses cv2, so we might need a temporary approach
-
-        # Convert PIL Image to format NudeNet expects
+        # Convert PIL Image to numpy array for in-memory processing
+        # NudeDetector.detect() accepts numpy arrays via its _read_image() function
         import numpy as np
-        import tempfile
+        image_array = np.array(image)
 
-        # Save to temporary file for NudeNet processing
-        # This is necessary because NudeNet's detect() expects a file path
-        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp_file:
-            temp_path = tmp_file.name
-            image.save(temp_path, 'JPEG')
+        # Detect using NudeNet with in-memory numpy array (no temp files)
+        detections = nude_detector.detect(image_array)
 
-        try:
-            # Detect using NudeNet
-            detections = nude_detector.detect(temp_path)
+        # Filter by confidence threshold
+        filtered_detections = [
+            det for det in detections
+            if det['score'] * 100 >= DETECTION_THRESHOLD
+        ]
 
-            # Filter by confidence threshold
-            filtered_detections = [
-                det for det in detections
-                if det['score'] * 100 >= DETECTION_THRESHOLD
-            ]
+        processing_time = round(time.time() - start_time, 3)
 
-            processing_time = round(time.time() - start_time, 3)
-
-            return {
-                "success": True,
-                "detections": filtered_detections,
-                "processing_time": processing_time
-            }
-        finally:
-            # Clean up temporary file
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
+        return {
+            "success": True,
+            "detections": filtered_detections,
+            "processing_time": processing_time
+        }
 
     except Exception as e:
         logger.error(f"NudeNet detection failed: {e}")
@@ -173,16 +163,15 @@ def create_nudenet_response(detections: List[Dict], processing_time: float) -> D
     for detection in detections:
         category = detection['class']
         confidence = round(detection['score'], 3)
-        bbox_array = detection['box']  # [x1, y1, x2, y2] from NudeNet
+        bbox_array = detection['box']  # [x, y, w, h] from NudeNet (already clamped by library)
         emoji = get_emoji_for_category(category)
 
-        # Convert NudeNet bbox format [x1, y1, x2, y2] to standard dictionary format
-        # Other services use {'x': x, 'y': y, 'width': w, 'height': h}
+        # NudeNet returns [x, y, w, h] format - use directly
         bbox = {
             'x': int(bbox_array[0]),
             'y': int(bbox_array[1]),
-            'width': int(bbox_array[2] - bbox_array[0]),
-            'height': int(bbox_array[3] - bbox_array[1])
+            'width': int(bbox_array[2]),
+            'height': int(bbox_array[3])
         }
 
         # Check for shiny on each detection
