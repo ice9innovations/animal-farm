@@ -2,8 +2,10 @@ import os
 import logging
 import tempfile
 import time
+import requests
 from contextlib import contextmanager
-from typing import Optional, Dict, Any
+from io import BytesIO
+from typing import Optional, Dict, Any, Tuple
 
 from dotenv import load_dotenv
 
@@ -12,6 +14,7 @@ load_dotenv()
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from PIL import Image
 from speciesnet import SpeciesNet, DEFAULT_MODEL
 
 # Configure logging
@@ -34,6 +37,7 @@ if not PORT_STR:
 
 PRIVATE = PRIVATE_STR.lower() == 'true'
 PORT = int(PORT_STR)
+CONFIDENCE_THRESHOLD = float(os.getenv('CONFIDENCE_THRESHOLD', '0.5'))
 
 # Global SpeciesNet model - initialize once at startup
 speciesnet_model = None
@@ -57,10 +61,33 @@ def is_allowed_file(filename: str) -> bool:
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def ext_from_content_type(content_type: str, fallback_url: str = '') -> str:
+    """Guess a file extension from a Content-Type header, with URL fallback."""
+    ct = content_type.lower()
+    if 'jpeg' in ct or 'jpg' in ct:
+        return '.jpg'
+    if 'png' in ct:
+        return '.png'
+    if 'webp' in ct:
+        return '.webp'
+    if 'tiff' in ct or 'tif' in ct:
+        return '.tiff'
+    # Fall back to the URL's own extension
+    parts = fallback_url.split('?')[0].rsplit('.', 1)
+    return f'.{parts[1].lower()}' if len(parts) > 1 else '.jpg'
+
+
+# /dev/shm is a RAM-backed tmpfs on Linux - files here never touch disk
+_RAM_DIR = '/dev/shm' if os.path.isdir('/dev/shm') else None
+
+
 @contextmanager
 def temp_image_file(data: bytes, ext: str):
-    """Write bytes to a temp file, yield its path, delete on exit."""
-    tmp = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
+    """Write bytes to a RAM-backed temp file, yield its path, delete on exit.
+
+    Uses /dev/shm (tmpfs) so image data never touches disk.
+    """
+    tmp = tempfile.NamedTemporaryFile(suffix=ext, dir=_RAM_DIR, delete=False)
     try:
         tmp.write(data)
         tmp.close()
@@ -70,6 +97,18 @@ def temp_image_file(data: bytes, ext: str):
             os.unlink(tmp.name)
 
 
+def image_size_from_bytes(data: bytes) -> Tuple[int, int]:
+    """Return (width, height) from raw image bytes."""
+    img = Image.open(BytesIO(data))
+    return img.size  # (width, height)
+
+
+def image_size_from_path(path: str) -> Tuple[int, int]:
+    """Return (width, height) from an image file on disk."""
+    img = Image.open(path)
+    return img.size  # (width, height)
+
+
 def run_prediction(
     filepath: str,
     country: Optional[str] = None,
@@ -77,7 +116,7 @@ def run_prediction(
     latitude: Optional[float] = None,
     longitude: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """Run SpeciesNet prediction on a single image (path or URL)."""
+    """Run SpeciesNet prediction on a single image (local path or URL)."""
     instance = {"filepath": filepath}
     if country:
         instance["country"] = country
@@ -99,13 +138,86 @@ def run_prediction(
     return {"filepath": filepath, "failures": ["UNKNOWN"]}
 
 
-def create_response(prediction: Dict[str, Any], processing_time: float) -> Dict[str, Any]:
+def parse_label(taxonomy_str: str) -> str:
+    """Extract common name from a SpeciesNet taxonomy string.
+
+    Format: <uuid>;<class>;<order>;<family>;<genus>;<species>;<common_name>
+    Returns the last non-empty segment, e.g. 'capybara', 'blank', 'animal'.
+    """
+    for part in reversed(taxonomy_str.split(';')):
+        if part.strip():
+            return part.strip()
+    return taxonomy_str
+
+
+def format_prediction(
+    prediction: Dict[str, Any],
+    img_width: int,
+    img_height: int,
+) -> Optional[Dict[str, Any]]:
+    """Reformat a raw SpeciesNet prediction into a clean, consistent structure.
+
+    Returns None if the top-level confidence is below CONFIDENCE_THRESHOLD.
+    """
+    if prediction.get("failures"):
+        return {"failures": prediction["failures"]}
+
+    formatted = {}
+
+    # Top-level result - bail out early if below threshold
+    if "prediction" in prediction:
+        confidence = round(prediction["prediction_score"], 4)
+        if confidence < CONFIDENCE_THRESHOLD:
+            return None
+        formatted["label"] = parse_label(prediction["prediction"])
+        formatted["confidence"] = confidence
+
+    # Classifications: zip classes+scores, filter by threshold
+    if "classifications" in prediction:
+        classes = prediction["classifications"]["classes"]
+        scores = prediction["classifications"]["scores"]
+        formatted["classifications"] = [
+            {"label": parse_label(cls), "score": round(score, 4)}
+            for cls, score in zip(classes, scores)
+            if score >= CONFIDENCE_THRESHOLD
+        ]
+
+    # Detections: convert fractional bbox to pixel coordinates, filter by threshold
+    if "detections" in prediction:
+        formatted["detections"] = [
+            {
+                "label": det["label"],
+                "confidence": round(det["conf"], 4),
+                "bbox": {
+                    "x": round(det["bbox"][0] * img_width),
+                    "y": round(det["bbox"][1] * img_height),
+                    "width": round(det["bbox"][2] * img_width),
+                    "height": round(det["bbox"][3] * img_height),
+                },
+            }
+            for det in prediction["detections"]
+            if det["conf"] >= CONFIDENCE_THRESHOLD
+        ]
+
+    formatted["prediction_source"] = prediction.get("prediction_source")
+    formatted["model_version"] = prediction.get("model_version")
+
+    return formatted
+
+
+def create_response(
+    prediction: Dict[str, Any],
+    img_width: int,
+    img_height: int,
+    processing_time: float,
+) -> Dict[str, Any]:
     """Create standardized API response."""
     has_failures = bool(prediction.get("failures"))
+    formatted = format_prediction(prediction, img_width, img_height)
     return {
         "service": "speciesnet",
         "status": "error" if has_failures else "success",
-        "predictions": [prediction],
+        "predictions": [formatted] if formatted else [],
         "metadata": {
             "processing_time": round(processing_time, 3),
             "model_info": {
@@ -205,35 +317,53 @@ def analyze():
             if len(file_data) > MAX_FILE_SIZE:
                 return error_response("File too large")
 
+            img_width, img_height = image_size_from_bytes(file_data)
             ext = '.' + uploaded_file.filename.rsplit('.', 1)[1].lower()
             with temp_image_file(file_data, ext) as filepath:
                 prediction = run_prediction(filepath, **geo)
 
-        # --- URL or local file path (GET or POST query params) ---
-        else:
+        # --- URL (we download it so we have the bytes for dimensions) ---
+        elif request.args.get('url'):
             url = request.args.get('url')
-            file = request.args.get('file')
+            if not (url.startswith('http://') or url.startswith('https://')):
+                return error_response("URL must start with http:// or https://")
 
-            if not url and not file:
-                return error_response(
-                    "Must provide a 'url' or 'file' query parameter, or POST a file"
+            try:
+                resp = requests.get(
+                    url,
+                    headers={'User-Agent': 'SpeciesNet API (github.com/google/cameratrapai)'},
+                    timeout=30,
                 )
-            if url and file:
-                return error_response("Cannot provide both 'url' and 'file' parameters")
+                resp.raise_for_status()
+            except requests.exceptions.RequestException as e:
+                return error_response(f"Failed to download image: {e}")
 
-            if url:
-                # SpeciesNet's load_rgb_image() handles HTTP/HTTPS natively - no temp file needed
-                if not (url.startswith('http://') or url.startswith('https://')):
-                    return error_response("URL must start with http:// or https://")
-                prediction = run_prediction(url, **geo)
-            else:
-                if not os.path.exists(file):
-                    return error_response(f"File not found: {file}")
-                if not is_allowed_file(file):
-                    return error_response("File type not allowed")
-                prediction = run_prediction(file, **geo)
+            file_data = resp.content
+            if len(file_data) > MAX_FILE_SIZE:
+                return error_response(f"Image too large. Max size: {MAX_FILE_SIZE // (1024 * 1024)}MB")
 
-        return jsonify(create_response(prediction, time.time() - start_time))
+            img_width, img_height = image_size_from_bytes(file_data)
+            ext = ext_from_content_type(resp.headers.get('content-type', ''), url)
+            with temp_image_file(file_data, ext) as filepath:
+                prediction = run_prediction(filepath, **geo)
+
+        # --- Local file path ---
+        elif request.args.get('file'):
+            file = request.args.get('file')
+            if not os.path.exists(file):
+                return error_response(f"File not found: {file}")
+            if not is_allowed_file(file):
+                return error_response("File type not allowed")
+
+            img_width, img_height = image_size_from_path(file)
+            prediction = run_prediction(file, **geo)
+
+        else:
+            return error_response(
+                "Must provide a 'url' or 'file' query parameter, or POST a file"
+            )
+
+        return jsonify(create_response(prediction, img_width, img_height, time.time() - start_time))
 
     except Exception as e:
         logger.error(f"Analyze error: {e}", exc_info=True)

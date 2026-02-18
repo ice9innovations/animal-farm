@@ -6,13 +6,14 @@
 
 ## Overview
 
-SpeciesNet runs a full detector + classifier + ensemble pipeline to identify wildlife species in images. It returns a primary prediction (species, genus, family, or broader category), top-5 classification scores, bounding box detections, and geofenced results when location data is provided.
+SpeciesNet runs a full detector + classifier + ensemble pipeline to identify wildlife species in images. It returns a primary prediction (common name, confidence score), filtered classification candidates, and pixel-coordinate bounding box detections. Geofenced results are available when location data is provided.
 
 ## Features
 
 - **Unified API**: Single endpoint for URL, local file path, or file upload
 - **Geolocation support**: Optional country/region/GPS coordinates for geofenced predictions
-- **Full pipeline**: Detector, classifier, and ensemble run together by default
+- **Confidence filtering**: Configurable threshold filters low-confidence results
+- **Privacy-safe**: Image data processed in RAM only (`/dev/shm`) — never written to disk
 - **CORS enabled**: Direct browser access supported
 
 ## Installation
@@ -31,8 +32,8 @@ cd /home/sd/speciesnet
 # Activate virtual environment
 source speciesnet_venv/bin/activate
 
-# Install Flask dependencies (if not already done)
-pip install flask flask-cors python-dotenv
+# Install dependencies
+pip install -r requirements.txt
 ```
 
 ### 2. Model Download
@@ -51,15 +52,17 @@ chmod 600 ~/.kaggle/kaggle.json
 ### Environment Variables (.env)
 
 ```bash
-PORT=7778           # Service port
-PRIVATE=False       # False = bind to 0.0.0.0, True = localhost only
-MODEL=kaggle:google/speciesnet/pyTorch/v4.0.2a/1   # Optional, this is the default
+PORT=7778
+PRIVATE=False
+CONFIDENCE_THRESHOLD=0.5
+# MODEL=kaggle:google/speciesnet/pyTorch/v4.0.2a/1  # optional, this is the default
 ```
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `PORT` | Yes | - | Service listening port |
-| `PRIVATE` | Yes | - | Access control (False=public, True=localhost-only) |
+| `PRIVATE` | Yes | - | Access control (`False`=public, `True`=localhost-only) |
+| `CONFIDENCE_THRESHOLD` | No | `0.5` | Minimum confidence to include a result |
 | `MODEL` | No | `kaggle:google/speciesnet/pyTorch/v4.0.2a/1` | Model version to load |
 
 ## API Endpoints
@@ -96,16 +99,18 @@ POST /analyze  (multipart file upload)
 | `latitude` | float | GPS latitude |
 | `longitude` | float | GPS longitude |
 
+Providing location data enables SpeciesNet's geofencing, which can improve accuracy by filtering out species not found in the given region.
+
 **Examples:**
 
 ```bash
-# Analyze from URL
-curl "http://localhost:7778/analyze?url=https://example.com/camera_trap.jpg"
-
 # Analyze from local file
 curl "http://localhost:7778/analyze?file=/path/to/image.jpg"
 
-# Analyze with geolocation (improves accuracy via geofencing)
+# Analyze from URL
+curl "http://localhost:7778/analyze?url=https://example.com/camera_trap.jpg"
+
+# With geolocation
 curl "http://localhost:7778/analyze?file=/path/to/image.jpg&country=KEN&latitude=-1.2&longitude=36.8"
 
 # Upload a file
@@ -126,36 +131,35 @@ curl -X POST \
   "status": "success",
   "predictions": [
     {
-      "filepath": "/tmp/uploads/abc123.jpg",
-      "classifications": {
-        "classes": [
-          "872e96f1-7a77-4ed2-824a-22fcbb32f598;mammalia;rodentia;caviidae;hydrochoerus;hydrochaeris;capybara",
-          "6286f8b4-312f-4d04-a018-51a5d65be3f6;mammalia;rodentia;sciuridae;marmota;marmota;alpine marmot"
-        ],
-        "scores": [0.9662, 0.0069]
-      },
+      "label": "capybara",
+      "confidence": 0.9662,
+      "classifications": [
+        {"label": "capybara", "score": 0.9662}
+      ],
       "detections": [
         {
-          "category": "1",
           "label": "animal",
-          "conf": 0.9191,
-          "bbox": [0.16, 0.1585, 0.72, 0.6885]
+          "confidence": 0.9191,
+          "bbox": {"x": 44, "y": 29, "width": 198, "height": 126}
         }
       ],
-      "prediction": "872e96f1-7a77-4ed2-824a-22fcbb32f598;mammalia;rodentia;caviidae;hydrochoerus;hydrochaeris;capybara",
-      "prediction_score": 0.9662,
       "prediction_source": "classifier",
       "model_version": "4.0.2a"
     }
   ],
   "metadata": {
-    "processing_time": 1.243,
+    "processing_time": 0.468,
     "model_info": {
       "model": "kaggle:google/speciesnet/pyTorch/v4.0.2a/1",
       "framework": "SpeciesNet (Google Camera Trap AI)"
     }
   }
 }
+```
+
+When confidence is below `CONFIDENCE_THRESHOLD`, `predictions` is an empty list:
+```json
+{"service": "speciesnet", "status": "success", "predictions": [], ...}
 ```
 
 **Error Response:**
@@ -169,29 +173,35 @@ curl -X POST \
 }
 ```
 
-### Understanding the Prediction Field
+### Response Fields
 
-The `prediction` field is a semicolon-delimited taxonomy string:
+| Field | Description |
+|-------|-------------|
+| `label` | Common name of the identified species (e.g. `capybara`, `animal`, `blank`) |
+| `confidence` | Top-level prediction confidence, rounded to 4 decimal places |
+| `classifications` | All classifications at or above `CONFIDENCE_THRESHOLD`, each with `label` and `score` |
+| `detections` | Bounding boxes at or above `CONFIDENCE_THRESHOLD`, with pixel coordinates |
+| `prediction_source` | How the result was derived (see below) |
+| `model_version` | SpeciesNet model version that produced the result |
 
-```
-<uuid>;<class>;<order>;<family>;<genus>;<species>;<common_name>
-```
+### Prediction Sources
 
-Examples:
-- `...;mammalia;rodentia;caviidae;hydrochoerus;hydrochaeris;capybara` → species-level ID
-- `...;mammalia;carnivora;;;;<common>` → rolled up to order level
-- `...;;;;;;blank` → empty frame, no animal detected
-- `...;;;;;;animal` → animal detected but not identified to species
-
-The `prediction_source` field indicates how the result was derived:
-- `classifier` - classifier confidence was high enough
-- `detector` - detection confidence drove the result
-- `classifier+rollup_to_*` - classifier result rolled up the taxonomy tree due to low confidence
-- `geofence_*` - geofencing filtered or modified the result
+| Value | Meaning |
+|-------|---------|
+| `classifier` | Classifier confidence was high enough for a direct result |
+| `detector` | Detection confidence drove the result (classifier uncertain) |
+| `classifier+rollup_to_*` | Result rolled up the taxonomy tree due to low species-level confidence |
+| `geofence_*` | Geofencing filtered or adjusted the result |
 
 ### Bounding Box Format
 
-Bounding boxes use `[xmin, ymin, width, height]` as fractions of image dimensions (0.0–1.0).
+Bounding boxes are in **pixel coordinates** for the input image:
+
+```json
+{"x": 44, "y": 29, "width": 198, "height": 126}
+```
+
+Where `x`, `y` is the top-left corner of the box.
 
 ## Service Management
 
@@ -203,13 +213,12 @@ source speciesnet_venv/bin/activate
 python REST.py
 ```
 
-### Systemd Service
+### Systemd
 
 ```bash
-sudo cp services/speciesnet-api.service /etc/systemd/system/
-sudo systemctl daemon-reload
 sudo systemctl start speciesnet-api
-sudo systemctl enable speciesnet-api
+sudo systemctl stop speciesnet-api
+sudo systemctl status speciesnet-api
 sudo journalctl -u speciesnet-api -f
 ```
 
@@ -217,7 +226,7 @@ sudo journalctl -u speciesnet-api -f
 
 - **Input**: PNG, JPG/JPEG, TIFF/TIF, WebP
 - **Max size**: 20MB
-- **Input methods**: URL download, local file path, multipart upload
+- **Temp storage**: RAM only (`/dev/shm`) — image data never written to disk
 
 ## Integration Examples
 
@@ -226,19 +235,19 @@ sudo journalctl -u speciesnet-api -f
 ```python
 import requests
 
-# From URL
-resp = requests.get(
-    "http://localhost:7778/analyze",
-    params={"url": "https://example.com/camera_trap.jpg", "country": "KEN"}
-)
-
 # From local file path
 resp = requests.get(
     "http://localhost:7778/analyze",
     params={"file": "/data/images/trap001.jpg"}
 )
 
-# File upload
+# From URL with geolocation
+resp = requests.get(
+    "http://localhost:7778/analyze",
+    params={"url": "https://example.com/trap.jpg", "country": "KEN"}
+)
+
+# File upload with geo params
 with open("/data/images/trap001.jpg", "rb") as f:
     resp = requests.post(
         "http://localhost:7778/analyze",
@@ -247,20 +256,18 @@ with open("/data/images/trap001.jpg", "rb") as f:
     )
 
 result = resp.json()
-if result["status"] == "success":
+if result["status"] == "success" and result["predictions"]:
     pred = result["predictions"][0]
-    print(f"Species: {pred['prediction'].split(';')[-1]}")
-    print(f"Score:   {pred['prediction_score']:.3f}")
+    print(f"Species: {pred['label']}")
+    print(f"Score:   {pred['confidence']}")
     print(f"Source:  {pred['prediction_source']}")
 ```
 
 ### JavaScript
 
 ```javascript
-// From URL
-const resp = await fetch(
-  'http://localhost:7778/analyze?url=https://example.com/camera_trap.jpg'
-);
+// From local file path
+const resp = await fetch('http://localhost:7778/analyze?file=/data/images/trap001.jpg');
 
 // File upload
 const formData = new FormData();
@@ -272,10 +279,9 @@ const resp = await fetch('http://localhost:7778/analyze', {
 });
 
 const result = await resp.json();
-if (result.status === 'success') {
+if (result.status === 'success' && result.predictions.length > 0) {
   const pred = result.predictions[0];
-  const commonName = pred.prediction.split(';').pop();
-  console.log('Identified as:', commonName, 'with score', pred.prediction_score);
+  console.log('Identified as:', pred.label, 'with score', pred.confidence);
 }
 ```
 
@@ -287,10 +293,11 @@ if (result.status === 'success') {
 | `File type not allowed` | Unsupported extension | Use JPG, PNG, TIFF, or WebP |
 | `File too large` | File > 20MB | Resize or compress the image |
 | `Failed to download image` | Bad URL or network error | Verify the URL is accessible |
+| `URL must start with http://` | Non-HTTP URL provided | Use a full http/https URL |
 | `Model not loaded` | Startup failure | Check logs for Kaggle auth errors |
 
 ---
 
-**Documentation Version**: 1.0
+**Documentation Version**: 1.1
 **Last Updated**: 2026-02-18
 **Upstream**: https://github.com/google/cameratrapai
