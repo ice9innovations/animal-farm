@@ -42,6 +42,54 @@ CONFIDENCE_THRESHOLD = float(os.getenv('CONFIDENCE_THRESHOLD', '0.5'))
 # Global SpeciesNet model - initialize once at startup
 speciesnet_model = None
 
+# Taxonomy → group mappings loaded from family_groups.csv
+# The same CSV feeds three dicts keyed by family, order, and class names.
+# Known family/order/class names don't collide so we can tell them apart by
+# which taxonomy field they appear in.
+FAMILY_GROUPS: Dict[str, str] = {}
+ORDER_GROUPS: Dict[str, str] = {}
+CLASS_GROUPS: Dict[str, str] = {}
+
+# Known taxonomy classes for disambiguation when loading the CSV
+_CLASSES = {'mammalia', 'aves', 'reptilia', 'amphibia', 'arachnida'}
+_ORDERS = {
+    'squamata', 'testudines', 'crocodilia', 'crocodylia', 'anura', 'caudata',
+    'rodentia', 'carnivora', 'artiodactyla', 'perissodactyla', 'primates',
+    'chiroptera', 'lagomorpha', 'eulipotyphla', 'afrosoricida', 'proboscidea',
+    'hyracoidea', 'tubulidentata', 'macroscelidea', 'pholidota', 'pilosa',
+    'cingulata', 'dasyuromorphia', 'diprotodontia', 'peramelemorphia',
+    'didelphimorphia', 'monotremata', 'accipitriformes', 'falconiformes',
+    'strigiformes', 'galliformes', 'anseriformes', 'passeriformes',
+    'psittaciformes', 'piciformes', 'columbiformes', 'gruiformes',
+    'charadriiformes', 'pelecaniformes', 'suliformes', 'araneae',
+}
+
+
+def load_family_groups() -> None:
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'family_groups.csv')
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                parts = line.split(',', 1)
+                if len(parts) != 2:
+                    continue
+                key, value = parts[0].strip(), parts[1].strip()
+                if key in _CLASSES:
+                    CLASS_GROUPS[key] = value
+                elif key in _ORDERS:
+                    ORDER_GROUPS[key] = value
+                else:
+                    FAMILY_GROUPS[key] = value
+        logger.info(
+            f"Loaded {len(FAMILY_GROUPS)} family, {len(ORDER_GROUPS)} order, "
+            f"{len(CLASS_GROUPS)} class group mappings"
+        )
+    except FileNotFoundError:
+        logger.warning(f"family_groups.csv not found at {path} - group field will be omitted")
+
 
 def initialize_speciesnet() -> bool:
     """Initialize SpeciesNet model once at startup - fail fast."""
@@ -138,6 +186,15 @@ def run_prediction(
     return {"filepath": filepath, "failures": ["UNKNOWN"]}
 
 
+def group_from_taxonomy(taxonomy_str: str) -> Optional[str]:
+    """Look up the plain-English group name, falling back through family → order → class."""
+    parts = taxonomy_str.split(';')
+    family = parts[3] if len(parts) > 3 else ''
+    order  = parts[2] if len(parts) > 2 else ''
+    cls    = parts[1] if len(parts) > 1 else ''
+    return FAMILY_GROUPS.get(family) or ORDER_GROUPS.get(order) or CLASS_GROUPS.get(cls)
+
+
 def parse_label(taxonomy_str: str) -> str:
     """Extract common name from a SpeciesNet taxonomy string.
 
@@ -146,7 +203,7 @@ def parse_label(taxonomy_str: str) -> str:
     """
     for part in reversed(taxonomy_str.split(';')):
         if part.strip():
-            return part.strip()
+            return part.strip().replace(' ', '_')
     return taxonomy_str
 
 
@@ -171,9 +228,12 @@ def format_predictions(
     if confidence < CONFIDENCE_THRESHOLD:
         return None
 
+    taxonomy_str = prediction["prediction"]
+
     # Build the shared base fields (same for every detection)
     base = {
-        "label": parse_label(prediction["prediction"]),
+        "label": parse_label(taxonomy_str),
+        "group": group_from_taxonomy(taxonomy_str) or parse_label(taxonomy_str),
         "confidence": confidence,
         "prediction_source": prediction.get("prediction_source"),
         "model_version": prediction.get("model_version"),
@@ -380,6 +440,7 @@ def analyze():
 if __name__ == '__main__':
     logger.info("Starting SpeciesNet service...")
 
+    load_family_groups()
     model_loaded = initialize_speciesnet()
 
     if not model_loaded:
