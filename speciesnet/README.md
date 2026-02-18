@@ -133,15 +133,9 @@ curl -X POST \
     {
       "label": "capybara",
       "confidence": 0.9662,
+      "bbox": {"x": 44, "y": 29, "width": 198, "height": 126},
       "classifications": [
         {"label": "capybara", "score": 0.9662}
-      ],
-      "detections": [
-        {
-          "label": "animal",
-          "confidence": 0.9191,
-          "bbox": {"x": 44, "y": 29, "width": 198, "height": 126}
-        }
       ],
       "prediction_source": "classifier",
       "model_version": "4.0.2a"
@@ -157,7 +151,14 @@ curl -X POST \
 }
 ```
 
-When confidence is below `CONFIDENCE_THRESHOLD`, `predictions` is an empty list:
+There is one entry in `predictions` per detected animal. If multiple animals are detected in a frame, each gets its own entry with its own `bbox`, all sharing the same top-level `label` and `confidence` (SpeciesNet classifies at the image level, not per animal).
+
+Blank frames or images where no animal is detected above the threshold will have one entry without a `bbox`:
+```json
+{"label": "blank", "confidence": 0.9409, "classifications": [...], ...}
+```
+
+When the top-level confidence is below `CONFIDENCE_THRESHOLD`, `predictions` is an empty list:
 ```json
 {"service": "speciesnet", "status": "success", "predictions": [], ...}
 ```
@@ -179,8 +180,8 @@ When confidence is below `CONFIDENCE_THRESHOLD`, `predictions` is an empty list:
 |-------|-------------|
 | `label` | Common name of the identified species (e.g. `capybara`, `animal`, `blank`) |
 | `confidence` | Top-level prediction confidence, rounded to 4 decimal places |
+| `bbox` | Pixel-coordinate bounding box `{x, y, width, height}` — omitted for blank frames |
 | `classifications` | All classifications at or above `CONFIDENCE_THRESHOLD`, each with `label` and `score` |
-| `detections` | Bounding boxes at or above `CONFIDENCE_THRESHOLD`, with pixel coordinates |
 | `prediction_source` | How the result was derived (see below) |
 | `model_version` | SpeciesNet model version that produced the result |
 

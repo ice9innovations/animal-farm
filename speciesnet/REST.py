@@ -150,44 +150,54 @@ def parse_label(taxonomy_str: str) -> str:
     return taxonomy_str
 
 
-def format_prediction(
+def format_predictions(
     prediction: Dict[str, Any],
     img_width: int,
     img_height: int,
-) -> Optional[Dict[str, Any]]:
-    """Reformat a raw SpeciesNet prediction into a clean, consistent structure.
+) -> Optional[list]:
+    """Reformat a raw SpeciesNet prediction into a flat list of prediction objects.
 
-    Returns None if the top-level confidence is below CONFIDENCE_THRESHOLD.
+    Returns one entry per detection (matching YOLO's format), with bbox promoted
+    to the top level of each prediction. Returns None if below CONFIDENCE_THRESHOLD,
+    or a list with one bbox-less entry if there are no detections (e.g. blank frame).
     """
     if prediction.get("failures"):
-        return {"failures": prediction["failures"]}
+        return [{"failures": prediction["failures"]}]
 
-    formatted = {}
+    # Bail out early if top-level confidence is below threshold
+    if "prediction" not in prediction:
+        return None
+    confidence = round(prediction["prediction_score"], 4)
+    if confidence < CONFIDENCE_THRESHOLD:
+        return None
 
-    # Top-level result - bail out early if below threshold
-    if "prediction" in prediction:
-        confidence = round(prediction["prediction_score"], 4)
-        if confidence < CONFIDENCE_THRESHOLD:
-            return None
-        formatted["label"] = parse_label(prediction["prediction"])
-        formatted["confidence"] = confidence
+    # Build the shared base fields (same for every detection)
+    base = {
+        "label": parse_label(prediction["prediction"]),
+        "confidence": confidence,
+        "prediction_source": prediction.get("prediction_source"),
+        "model_version": prediction.get("model_version"),
+    }
 
     # Classifications: zip classes+scores, filter by threshold
     if "classifications" in prediction:
         classes = prediction["classifications"]["classes"]
         scores = prediction["classifications"]["scores"]
-        formatted["classifications"] = [
+        base["classifications"] = [
             {"label": parse_label(cls), "score": round(score, 4)}
             for cls, score in zip(classes, scores)
             if score >= CONFIDENCE_THRESHOLD
         ]
 
-    # Detections: convert fractional bbox to pixel coordinates, filter by threshold
-    if "detections" in prediction:
-        formatted["detections"] = [
+    # Flatten: one prediction entry per detection, bbox at the top level
+    detections = [
+        det for det in prediction.get("detections", [])
+        if det["conf"] >= CONFIDENCE_THRESHOLD
+    ]
+    if detections:
+        return [
             {
-                "label": det["label"],
-                "confidence": round(det["conf"], 4),
+                **base,
                 "bbox": {
                     "x": round(det["bbox"][0] * img_width),
                     "y": round(det["bbox"][1] * img_height),
@@ -195,14 +205,11 @@ def format_prediction(
                     "height": round(det["bbox"][3] * img_height),
                 },
             }
-            for det in prediction["detections"]
-            if det["conf"] >= CONFIDENCE_THRESHOLD
+            for det in detections
         ]
 
-    formatted["prediction_source"] = prediction.get("prediction_source")
-    formatted["model_version"] = prediction.get("model_version")
-
-    return formatted
+    # No detections (blank frame, undetected animal, etc.) - return base without bbox
+    return [base]
 
 
 def create_response(
@@ -213,11 +220,11 @@ def create_response(
 ) -> Dict[str, Any]:
     """Create standardized API response."""
     has_failures = bool(prediction.get("failures"))
-    formatted = format_prediction(prediction, img_width, img_height)
+    formatted = format_predictions(prediction, img_width, img_height)
     return {
         "service": "speciesnet",
         "status": "error" if has_failures else "success",
-        "predictions": [formatted] if formatted else [],
+        "predictions": formatted if formatted else [],
         "metadata": {
             "processing_time": round(processing_time, 3),
             "model_info": {
