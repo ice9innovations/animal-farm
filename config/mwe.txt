@@ -1,3 +1,4 @@
+golden_retriever
 train_track
 train_tracks
 swimming_pool
