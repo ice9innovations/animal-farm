@@ -1,0 +1,15 @@
+[Unit]
+Description=llama.cpp llama-server (llava-llama3)
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+User=sd
+WorkingDirectory=/home/sd/animal-farm/llama-cpp
+ExecStart=/home/sd/animal-farm/llama-cpp/llama-server.sh
+
+[Install]
+WantedBy=multi-user.target

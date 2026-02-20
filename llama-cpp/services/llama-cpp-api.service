@@ -1,0 +1,15 @@
+[Unit]
+Description=llama.cpp Vision REST API
+After=network.target llama-cpp-server.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+User=sd
+WorkingDirectory=/home/sd/animal-farm/llama-cpp
+ExecStart=/home/sd/animal-farm/llama-cpp/rest.sh
+
+[Install]
+WantedBy=multi-user.target
