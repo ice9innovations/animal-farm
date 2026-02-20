@@ -1,0 +1,37 @@
+accelerate
+blinker
+certifi
+charset-normalizer
+click
+filelock
+Flask==3.1.1
+flask-cors==6.0.1
+fsspec
+huggingface-hub
+idna
+itsdangerous
+Jinja2
+MarkupSafe
+nltk
+numpy
+packaging
+pillow
+python-dotenv
+PyYAML
+regex
+requests
+safetensors
+tokenizers
+# Install torch separately with CUDA support before running pip install -r requirements.txt.
+# Use the wheel index that matches your installed CUDA version (cu128 on this machine):
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+tqdm
+# moondream local inference source:
+# git clone https://github.com/vikhyat/moondream.git /tmp/moondream_src
+# cp -r /tmp/moondream_src/moondream /home/sd/animal-farm/moondream/moondream
+# rm -rf /tmp/moondream_src
+transformers==4.56.1
+typing_extensions
+urllib3
+Werkzeug
+einops
