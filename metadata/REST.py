@@ -127,7 +127,7 @@ def serialize_metadata_value(value):
         return str(value)
 
 def get_file_hash(filepath: str) -> str:
-    """Generate SHA3-256 hash of file"""
+    """Generate SHA-256 hash of file"""
     try:
         with open(filepath, 'rb') as f:
             file_data = f.read()
@@ -594,54 +594,53 @@ def analyze_composition(filepath: str) -> Dict[str, Any]:
     except Exception as e:
         return {"error": f"Composition analysis failed: {str(e)}"}
 
-def download_image_from_url(url: str) -> Image.Image:
-    """Download image from URL and return as PIL Image"""
+def download_image_bytes(url: str) -> bytes:
+    """Download image from URL and return raw bytes"""
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
-        
+
         if len(response.content) > MAX_FILE_SIZE:
             raise ValueError(f"Image too large. Max size: {MAX_FILE_SIZE/1024/1024}MB")
-        
-        # Return PIL Image directly from bytes
-        image = Image.open(io.BytesIO(response.content))
-        
-        # Convert to RGB if necessary
-        if image.mode not in ['RGB', 'RGBA', 'L']:
-            image = image.convert('RGB')
-            
-        return image
-        
+
+        # Validate it's a real image without decoding fully
+        Image.open(io.BytesIO(response.content)).verify()
+
+        return response.content
+
     except requests.exceptions.RequestException as e:
         raise Exception(f"Failed to download image: {str(e)}")
 
-def validate_image_file(file_path: str) -> Image.Image:
-    """Validate and load image file as PIL Image"""
+def load_image_bytes(file_path: str) -> bytes:
+    """Read and validate image from local file path, returning raw bytes"""
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File not found: {file_path}")
-    
+
     try:
-        image = Image.open(file_path)
-        
-        # Convert to RGB if necessary (but preserve original mode for metadata)
-        if image.mode not in ['RGB', 'RGBA', 'L']:
-            image = image.convert('RGB')
-            
-        return image
+        with open(file_path, 'rb') as f:
+            image_bytes = f.read()
+        Image.open(io.BytesIO(image_bytes)).verify()
+        return image_bytes
     except Exception as e:
         raise Exception(f"Failed to load image: {str(e)}")
 
-def process_image_for_metadata(image: Image.Image) -> dict:
-    """Main processing function - takes PIL Image, returns metadata data
-    This is the core business logic, separated from HTTP concerns"""
+def process_image_for_metadata(image_bytes: bytes) -> dict:
+    """Main processing function - takes raw image bytes, returns metadata data.
+    Writes original bytes directly to disk so ExifTool sees the real embedded metadata."""
+    import tempfile
+    temp_filename = None
     try:
-        # Save PIL Image to temporary file for metadata extraction
-        import tempfile
-        temp_filename = None
-        
-        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False, dir=FOLDER) as tmp_file:
+        # Detect original format for the correct file extension
+        with Image.open(io.BytesIO(image_bytes)) as img:
+            fmt = img.format or 'JPEG'
+        ext_map = {'JPEG': '.jpg', 'PNG': '.png', 'WEBP': '.webp',
+                   'GIF': '.gif', 'TIFF': '.tif', 'BMP': '.bmp'}
+        suffix = ext_map.get(fmt, '.jpg')
+
+        # Write original bytes — preserves EXIF and original encoding
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=FOLDER) as tmp_file:
             temp_filename = os.path.basename(tmp_file.name)
-            image.save(tmp_file.name, format='JPEG', quality=95)
+            tmp_file.write(image_bytes)
         
         # Extract metadata using existing function
         result = extract_comprehensive_metadata(temp_filename, cleanup=True)
@@ -920,12 +919,10 @@ def analyze():
                     }
                 }), 400
             
-            # Validate file size
-            file.seek(0, 2)  # Seek to end
-            file_size = file.tell()
-            file.seek(0)     # Seek back to beginning
-            
-            if file_size > MAX_FILE_SIZE:
+            # Read raw bytes — preserves original encoding and EXIF
+            image_bytes = file.read()
+
+            if len(image_bytes) > MAX_FILE_SIZE:
                 return jsonify({
                     "service": "metadata",
                     "status": "error",
@@ -936,18 +933,15 @@ def analyze():
                         "model_info": {"framework": "ExifTool + PIL + OpenCV + NumPy"}
                     }
                 }), 400
-            
-            # Load image from POST upload
+
             try:
-                image = Image.open(file)
-                if image.mode not in ['RGB', 'RGBA', 'L']:
-                    image = image.convert('RGB')
+                Image.open(io.BytesIO(image_bytes)).verify()
             except Exception as e:
                 return jsonify({
                     "service": "metadata",
                     "status": "error",
                     "predictions": [],
-                    "error": {"message": f"Failed to load uploaded image: {str(e)}"},
+                    "error": {"message": f"Invalid image: {str(e)}"},
                     "metadata": {
                         "processing_time": round(time.time() - start_time, 3),
                         "model_info": {"framework": "ExifTool + PIL + OpenCV + NumPy"}
@@ -984,12 +978,12 @@ def analyze():
                     }
                 }), 400
             
-            # Load image from URL or file
+            # Load raw bytes from URL or file
             try:
                 if url:
-                    image = download_image_from_url(url)
+                    image_bytes = download_image_bytes(url)
                 elif file_path:
-                    image = validate_image_file(file_path)
+                    image_bytes = load_image_bytes(file_path)
             except Exception as e:
                 return jsonify({
                     "service": "metadata",
@@ -1003,7 +997,7 @@ def analyze():
                 }), 400
         
         # Step 2: Call processing function
-        result = process_image_for_metadata(image)
+        result = process_image_for_metadata(image_bytes)
         processing_time = time.time() - start_time
         
         # Step 3: Handle processing result
