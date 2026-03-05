@@ -1,0 +1,19 @@
+[Unit]
+Description=RT-DETR v2 Object Detection REST API Service
+After=network.target
+StartLimitBurst=3
+StartLimitIntervalSec=300
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+User=sd
+WorkingDirectory=/home/sd/animal-farm/rtdetr2
+ExecStart=/home/sd/animal-farm/rtdetr2/rtdetr2.sh
+EnvironmentFile=/home/sd/animal-farm/rtdetr2/.env
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
