@@ -1,0 +1,20 @@
+[Unit]
+Description=YOLOv8 Object Detection REST API Service
+After=network.target
+StartLimitBurst=3
+StartLimitIntervalSec=300
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=5
+User=hailo
+Group=hailo
+WorkingDirectory=/home/hailo/hailo-YOLO
+ExecStart=/home/hailo/hailo-YOLO/yolo.sh
+EnvironmentFile=/home/hailo/hailo-YOLO/.env
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
