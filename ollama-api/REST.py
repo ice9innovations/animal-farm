@@ -3,6 +3,7 @@ import base64
 import json
 import requests
 import os
+import sys
 import uuid
 import time
 import logging
@@ -10,6 +11,7 @@ import random
 import nltk
 from nltk.tokenize import MWETokenizer
 from typing import Dict, Any, Optional, List
+
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -221,7 +223,7 @@ def lookup_text_for_emojis(text: str) -> Dict[str, Any]:
                 # Strip punctuation from each word
                 clean_token = token.strip('.,!?;:"()[]{}\'`')
                 if clean_token:
-                    word_tokens.append(clean_token)
+                    word_tokens.append(clean_token.lower())
         
         tokens = emoji_tokenizer.tokenize(word_tokens)
 
@@ -325,7 +327,7 @@ async def get_available_models() -> Dict[str, List[str]]:
     try:
         client = AsyncClient(host=OLLAMA_HOST)
         models_response = await client.list()
-        available_models = [model['name'] for model in models_response.get('models', [])]
+        available_models = [model.model for model in models_response.models]
         
         # Categorize models
         categorized = {
@@ -395,7 +397,7 @@ def process_image_for_ollama(image: Image.Image, prompt: str = None, model: str 
         
         # Extract emojis from response
         emoji_list = get_emojis_for_text(output)
-        
+
         return {
             "success": True,
             "data": {
