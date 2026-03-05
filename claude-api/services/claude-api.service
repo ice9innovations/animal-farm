@@ -1,0 +1,15 @@
+[Unit]
+Description=Claude API Vision REST Service
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+User=sd
+WorkingDirectory=/home/sd/animal-farm/claude-api
+ExecStart=/home/sd/animal-farm/claude-api/rest.sh
+
+[Install]
+WantedBy=multi-user.target
