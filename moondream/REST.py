@@ -8,7 +8,9 @@ import nltk
 from nltk.tokenize import MWETokenizer
 from typing import List, Optional, Dict, Any
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_SERVICE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _SERVICE_DIR)
+
 
 from dotenv import load_dotenv
 
@@ -49,7 +51,7 @@ PORT = int(PORT_STR)
 # Optional configuration with defaults
 MODEL_ID = os.getenv('MODEL_ID', 'vikhyatk/moondream2')
 MODEL_REVISION = os.getenv('MODEL_REVISION') or None
-CAPTION_LENGTH = os.getenv('CAPTION_LENGTH', 'normal')
+CAPTION_LENGTH = os.getenv('CAPTION_LENGTH', 'short') # short, normal, long
 
 if CAPTION_LENGTH not in ('short', 'normal', 'long'):
     raise ValueError("CAPTION_LENGTH must be 'short', 'normal', or 'long'")
@@ -213,7 +215,7 @@ def lookup_text_for_emojis(text: str) -> Dict[str, Any]:
         for token in text.split():
             token = token.strip('.,!?;:"()[]{}\'`')
             if token:
-                word_tokens.append(token)
+                word_tokens.append(token.lower())
 
         tokens = emoji_tokenizer.tokenize(word_tokens)
 
