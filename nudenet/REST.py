@@ -82,11 +82,17 @@ def initialize_detector() -> bool:
         nude_detector = NudeDetector()
 
         # The nudenet library has a bug where it accepts but ignores the providers parameter.
-        # We must recreate the ONNX session with GPU providers explicitly.
+        # We must recreate the ONNX session with the correct providers explicitly.
         import onnxruntime
         import nudenet
         model_path = os.path.join(os.path.dirname(nudenet.__file__), "320n.onnx")
-        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+        device = os.getenv('DEVICE', 'gpu').lower()
+        if device == 'cpu':
+            providers = ['CPUExecutionProvider']
+            logger.info("Device: cpu (DEVICE=cpu)")
+        else:
+            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+            logger.info("Device: gpu (DEVICE=gpu or unset)")
         nude_detector.onnx_session = onnxruntime.InferenceSession(model_path, providers=providers)
 
         actual_providers = nude_detector.onnx_session.get_providers()
