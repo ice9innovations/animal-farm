@@ -1,0 +1,15 @@
+[Unit]
+Description=GPT Nano Vision REST Service
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+User=sd
+WorkingDirectory=/home/sd/animal-farm/gpt-nano
+ExecStart=/home/sd/animal-farm/gpt-nano/rest.sh
+
+[Install]
+WantedBy=multi-user.target
