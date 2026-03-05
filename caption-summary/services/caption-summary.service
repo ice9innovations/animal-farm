@@ -1,0 +1,15 @@
+[Unit]
+Description=Caption Summary REST API
+After=network.target qwen-cpp-server.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+User=sd
+WorkingDirectory=/home/sd/animal-farm/caption-summary
+ExecStart=/home/sd/animal-farm/caption-summary/rest.sh
+
+[Install]
+WantedBy=multi-user.target
