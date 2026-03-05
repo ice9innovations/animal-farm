@@ -18,8 +18,12 @@ from nltk.tokenize import MWETokenizer
 from typing import List, Optional, Dict, Any
 from io import BytesIO
 
-# Add current directory to Python path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add current directory and shared module directory to Python path
+_SERVICE_DIR = os.path.dirname(os.path.abspath(__file__))
+_SHARED_DIR = os.path.join(_SERVICE_DIR, '..', 'shared')
+sys.path.insert(0, _SERVICE_DIR)
+sys.path.insert(0, _SHARED_DIR)
+
 
 from dotenv import load_dotenv
 
@@ -238,7 +242,7 @@ def lookup_text_for_emojis(text: str) -> Dict[str, Any]:
             # Remove common punctuation
             token = token.strip('.,!?;:"()[]{}')
             if token:
-                word_tokens.append(token)
+                word_tokens.append(token.lower())
         
         tokens = emoji_tokenizer.tokenize(word_tokens)
         
@@ -290,12 +294,12 @@ def get_emojis_and_mappings_for_caption(caption: str) -> tuple[List[str], Dict[s
 def create_blip2_response(caption: str, processing_time: float, word_mappings: Dict[str, str] = None) -> Dict[str, Any]:
     """Create standardized BLIP2 response with metadata"""
     is_shiny, shiny_roll = check_shiny()
-    
+
     # Create prediction in Animal Farm format
     prediction = {
         "text": caption
     }
-    
+
     # Add emoji mappings in BLIP format if provided
     if word_mappings:
         emoji_mappings = []
@@ -305,12 +309,12 @@ def create_blip2_response(caption: str, processing_time: float, word_mappings: D
                 "word": word
             })
         prediction["emoji_mappings"] = emoji_mappings
-    
+
     # Add shiny flag for rare detections
     if is_shiny:
         prediction["shiny"] = True
         logger.info(f"✨ SHINY CAPTION GENERATED! Roll: {shiny_roll} ✨")
-    
+
     return {
         "service": "blip2",
         "status": "success",
