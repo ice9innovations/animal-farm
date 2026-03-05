@@ -1,0 +1,15 @@
+[Unit]
+Description=Qwen3-VL Vision REST API (llama.cpp)
+After=network.target qwen-cpp-server.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+User=sd
+WorkingDirectory=/home/sd/animal-farm/qwen-cpp
+ExecStart=/home/sd/animal-farm/qwen-cpp/rest.sh
+
+[Install]
+WantedBy=multi-user.target

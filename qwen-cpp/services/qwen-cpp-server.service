@@ -1,0 +1,15 @@
+[Unit]
+Description=llama.cpp llama-server (Qwen3-VL)
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+User=sd
+WorkingDirectory=/home/sd/animal-farm/qwen-cpp
+ExecStart=/home/sd/animal-farm/qwen-cpp/llama-server.sh
+
+[Install]
+WantedBy=multi-user.target
