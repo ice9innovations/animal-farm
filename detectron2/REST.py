@@ -48,8 +48,6 @@ from detectron2_analyzer import Detectron2Analyzer
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# No more mirror-stage dependencies - using direct emoji file loading
-
 # Configuration
 UPLOAD_FOLDER = './uploads'
 MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB

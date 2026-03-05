@@ -34,8 +34,6 @@ from blip_analyzer import BlipAnalyzer
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# No more mirror-stage dependencies - using direct emoji file loading
-
 # Configuration
 IMAGE_SIZE = 384
 UPLOAD_FOLDER = './uploads'
@@ -299,8 +297,6 @@ def get_emojis_and_mappings_for_caption(caption: str) -> tuple[List[str], Dict[s
     # Return empty lists if service fails
     logger.debug("BLIP: No emojis found")
     return [], {}
-
-# Removed old mirror-stage lookup function - using local file now
 
 def preprocess_image(image: Image.Image) -> Optional[torch.Tensor]:
     """Preprocess PIL Image for BLIP model"""
