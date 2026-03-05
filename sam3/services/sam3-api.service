@@ -1,0 +1,20 @@
+[Unit]
+Description=SAM3 REST API Service
+After=network.target
+StartLimitBurst=3
+StartLimitIntervalSec=300
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=5
+User=sd
+Group=sd
+WorkingDirectory=/home/sd/animal-farm/sam3
+ExecStart=/home/sd/animal-farm/sam3/start.sh
+EnvironmentFile=/home/sd/animal-farm/sam3/.env
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,374 @@
+#!/usr/bin/env python3
+"""
+SAM3 REST API - Text-prompted image segmentation.
+
+Accepts an image and a list of nouns (typically from noun_consensus),
+runs SAM3 with batched text prompts, and returns bounding boxes and
+confidence scores for all detected instances of each noun.
+
+Uses the batched inference API (create_empty_datapoint / collate /
+model forward) so all nouns are processed in a single decoder pass.
+"""
+
+import io
+import os
+import sys
+import json
+import base64
+import logging
+import time
+
+import numpy as np
+import requests
+import torch
+from dotenv import load_dotenv
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from PIL import Image
+
+load_dotenv()
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+SAM3_PATH = os.getenv('SAM3_PATH')
+if not SAM3_PATH:
+    raise RuntimeError("SAM3_PATH must be set in .env")
+SAM3_CHECKPOINT = os.getenv('SAM3_CHECKPOINT')
+PORT = int(os.getenv('PORT'))
+PRIVATE = os.getenv('PRIVATE', 'true').lower() in ('true', '1', 'yes')
+CONFIDENCE_THRESHOLD = float(os.getenv('CONFIDENCE_THRESHOLD'))
+
+sys.path.insert(0, SAM3_PATH)
+
+# ---------------------------------------------------------------------------
+# Model + batched inference components (loaded once at startup)
+# ---------------------------------------------------------------------------
+
+_model = None
+_transform = None
+_postprocessor = None
+_device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+# Counter for unique query IDs in the batched API
+_query_counter = 0
+
+
+def load_model():
+    global _model, _transform, _postprocessor
+    try:
+        from sam3 import build_sam3_image_model
+        from sam3.train.transforms.basic_for_api import (
+            ComposeAPI, RandomResizeAPI, ToTensorAPI, NormalizeAPI,
+        )
+        from sam3.eval.postprocessors import PostProcessImage
+
+        logger.info("Loading SAM3 model on %s ...", _device)
+
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+
+        _model = build_sam3_image_model(
+            device=_device,
+            checkpoint_path=SAM3_CHECKPOINT,
+            load_from_HF=(SAM3_CHECKPOINT is None),
+        )
+
+        _transform = ComposeAPI(transforms=[
+            RandomResizeAPI(sizes=1008, max_size=1008, square=True, consistent_transform=False),
+            ToTensorAPI(),
+            NormalizeAPI(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+        ])
+
+        _postprocessor = PostProcessImage(
+            max_dets_per_img=-1,
+            iou_type="segm",
+            use_original_sizes_box=True,
+            use_original_sizes_mask=True,
+            convert_mask_to_rle=False,
+            detection_threshold=CONFIDENCE_THRESHOLD,
+            to_cpu=True,
+        )
+
+        logger.info("SAM3 model loaded successfully (batched inference)")
+        return True
+    except Exception as e:
+        logger.error("Failed to load SAM3 model: %s", e)
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Inference (batched)
+# ---------------------------------------------------------------------------
+
+def _mask_to_rle(mask_tensor):
+    """Convert a boolean [H, W] mask tensor to a simple RLE list [count0, count1, ...]."""
+    flat = mask_tensor.cpu().numpy().astype(bool).flatten()
+    rle = []
+    if len(flat) == 0:
+        return rle
+    current = flat[0]
+    count = 1
+    for val in flat[1:]:
+        if val == current:
+            count += 1
+        else:
+            rle.append(int(count))
+            current = val
+            count = 1
+    rle.append(int(count))
+    return rle
+
+
+def segment_nouns(image: Image.Image, nouns: list[str]) -> dict:
+    """
+    Run SAM3 text-prompted segmentation for all nouns in a single
+    batched forward pass.
+
+    Returns a dict keyed by noun with detected instances (boxes, scores,
+    and optional RLE masks).
+    """
+    global _query_counter
+
+    if not _model:
+        raise RuntimeError("SAM3 model not loaded")
+
+    from sam3.train.data.sam3_image_dataset import (
+        InferenceMetadata, FindQueryLoaded,
+        Image as SAMImage, Datapoint,
+    )
+    from sam3.train.data.collator import collate_fn_api as collate
+    from sam3.model.utils.misc import copy_data_to_device
+
+    if image.mode != 'RGB':
+        image = image.convert('RGB')
+
+    # Clean and deduplicate nouns while preserving order
+    clean_nouns = []
+    for n in nouns:
+        n = n.strip().lower()
+        if n and n not in clean_nouns:
+            clean_nouns.append(n)
+
+    if not clean_nouns:
+        return {}
+
+    # Build a single datapoint with all text prompts
+    w, h = image.size
+    datapoint = Datapoint(find_queries=[], images=[])
+    datapoint.images = [SAMImage(data=image, objects=[], size=[h, w])]
+
+    # Map query_id → noun for result retrieval
+    id_to_noun = {}
+    for noun in clean_nouns:
+        _query_counter += 1
+        qid = _query_counter
+        datapoint.find_queries.append(FindQueryLoaded(
+            query_text=noun,
+            image_id=0,
+            object_ids_output=[],
+            is_exhaustive=True,
+            query_processing_order=0,
+            inference_metadata=InferenceMetadata(
+                coco_image_id=qid,
+                original_image_id=qid,
+                original_category_id=1,
+                original_size=[w, h],
+                object_id=0,
+                frame_index=0,
+            ),
+        ))
+        id_to_noun[qid] = noun
+
+    # Transform, collate, move to device
+    datapoint = _transform(datapoint)
+    batch = collate([datapoint], dict_key="sam3")["sam3"]
+    batch = copy_data_to_device(batch, torch.device(_device), non_blocking=True)
+
+    # Single forward pass for all nouns
+    with torch.inference_mode(), torch.autocast(_device, dtype=torch.bfloat16):
+        output = _model(batch)
+
+    # Post-process: returns {query_id: {scores, boxes, masks, labels}}
+    processed = _postprocessor.process_results(output, batch.find_metadatas)
+
+    # Convert to API output format
+    results = {}
+    for qid, noun in id_to_noun.items():
+        detection = processed.get(qid)
+        if detection is None:
+            results[noun] = {'instances': []}
+            continue
+
+        scores = detection['scores']
+        boxes = detection['boxes']
+        masks = detection.get('masks')
+
+        if scores is None or len(scores) == 0:
+            results[noun] = {'instances': []}
+            continue
+
+        instances = []
+        for i in range(len(scores)):
+            box = boxes[i].tolist()  # [x0, y0, x1, y1] pixel coords
+            score = float(scores[i].item())
+
+            instance = {
+                'score': round(score, 4),
+                'bbox': {
+                    'x': round(box[0]),
+                    'y': round(box[1]),
+                    'width': round(box[2] - box[0]),
+                    'height': round(box[3] - box[1]),
+                },
+            }
+
+            if masks is not None and i < len(masks):
+                mask_hw = masks[i].squeeze(0)  # [1, H, W] → [H, W]
+                instance['mask_rle'] = _mask_to_rle(mask_hw)
+                instance['mask_shape'] = [mask_hw.shape[0], mask_hw.shape[1]]
+
+            instances.append(instance)
+
+        instances.sort(key=lambda x: x['score'], reverse=True)
+        results[noun] = {'instances': instances}
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Image loading helpers
+# ---------------------------------------------------------------------------
+
+def _load_image_from_request(req) -> Image.Image:
+    """Extract a PIL image from a Flask request (file upload, URL, or base64)."""
+    if req.content_type and 'multipart/form-data' in req.content_type:
+        f = req.files.get('file')
+        if not f:
+            raise ValueError("No file in multipart request")
+        return Image.open(io.BytesIO(f.read()))
+
+    data = req.get_json(silent=True) or {}
+
+    if 'image_url' in data:
+        resp = requests.get(data['image_url'], timeout=15)
+        resp.raise_for_status()
+        return Image.open(io.BytesIO(resp.content))
+
+    if 'image_b64' in data:
+        raw = base64.b64decode(data['image_b64'])
+        return Image.open(io.BytesIO(raw))
+
+    if 'file' in data:
+        path = data['file']
+        if not os.path.exists(path):
+            raise ValueError(f"File not found: {path}")
+        return Image.open(path)
+
+    raise ValueError("Provide image via file upload, 'image_url', 'image_b64', or 'file' path")
+
+
+# ---------------------------------------------------------------------------
+# Flask app
+# ---------------------------------------------------------------------------
+
+app = Flask(__name__)
+CORS(app, origins=['*'])
+
+
+@app.route('/health', methods=['GET'])
+def health():
+    loaded = _model is not None
+    return jsonify({
+        'status': 'healthy' if loaded else 'unhealthy',
+        'model': 'SAM3',
+        'device': _device,
+        'model_loaded': loaded,
+        'confidence_threshold': CONFIDENCE_THRESHOLD,
+        'inference_mode': 'batched',
+    }), 200 if loaded else 503
+
+
+@app.route('/analyze', methods=['POST'])
+def analyze():
+    """
+    Segment objects described by text nouns.
+
+    Accepts multipart/form-data with 'file' + 'nouns' (JSON array or
+    comma-separated string), or JSON with image source + 'nouns'.
+
+    Returns per-noun detected instances with bounding boxes and scores.
+    """
+    start = time.time()
+
+    try:
+        # --- resolve nouns ---
+        nouns = None
+        if request.content_type and 'multipart/form-data' in request.content_type:
+            raw = request.form.get('nouns', '')
+            try:
+                nouns = json.loads(raw) if raw.startswith('[') else [n.strip() for n in raw.split(',')]
+            except Exception:
+                nouns = [n.strip() for n in raw.split(',')]
+        else:
+            data = request.get_json(silent=True) or {}
+            nouns_val = data.get('nouns', [])
+            if isinstance(nouns_val, str):
+                nouns = [n.strip() for n in nouns_val.split(',')]
+            else:
+                nouns = list(nouns_val)
+
+        nouns = [n for n in nouns if n]
+        if not nouns:
+            return jsonify({'error': "Provide 'nouns' as a JSON array or comma-separated string"}), 400
+
+        # --- resolve image ---
+        try:
+            image = _load_image_from_request(request)
+        except Exception as e:
+            return jsonify({'error': str(e)}), 400
+
+        # --- run SAM3 ---
+        results = segment_nouns(image, nouns)
+
+        processing_time = round(time.time() - start, 3)
+        total_instances = sum(len(v['instances']) for v in results.values())
+
+        logger.info(
+            "SAM3: %d nouns, %d instances total, %.3fs",
+            len(nouns), total_instances, processing_time
+        )
+
+        return jsonify({
+            'service': 'sam3',
+            'status': 'success',
+            'nouns_queried': nouns,
+            'results': results,
+            'image_dimensions': {'width': image.width, 'height': image.height},
+            'metadata': {
+                'processing_time': processing_time,
+                'confidence_threshold': CONFIDENCE_THRESHOLD,
+                'total_instances': total_instances,
+            },
+        })
+
+    except Exception as e:
+        logger.error("SAM3 analyze error: %s", e, exc_info=True)
+        return jsonify({'error': str(e), 'processing_time': round(time.time() - start, 3)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+if __name__ == '__main__':
+    if not load_model():
+        logger.error("SAM3 model failed to load — service will return 503")
+
+    host = '127.0.0.1' if PRIVATE else '0.0.0.0'
+    logger.info("Starting SAM3 service on %s:%d", host, PORT)
+    app.run(host=host, port=PORT, debug=False, use_reloader=False, threaded=False)
