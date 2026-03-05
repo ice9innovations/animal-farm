@@ -2,6 +2,7 @@ import base64
 import json
 import requests
 import os
+import sys
 import time
 import logging
 import random
@@ -14,6 +15,10 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 from PIL import Image
+
+_SERVICE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _SERVICE_DIR)
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -169,7 +174,7 @@ def lookup_text_for_emojis(text: str) -> Dict[str, Any]:
             if token:
                 clean_token = token.strip('.,!?;:"()[]{}\'`')
                 if clean_token:
-                    word_tokens.append(clean_token)
+                    word_tokens.append(clean_token.lower())
 
         tokens = emoji_tokenizer.tokenize(word_tokens)
 
