@@ -1,0 +1,120 @@
+# Dockerfile for Jetson Orin - BLIP2 Service
+# Based on JetPack 6.2 with CUDA 12.6 support
+# Using dusty-nv/jetson-containers compatible base
+FROM dustynv/l4t-pytorch:r36.2.0
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies including ffmpeg for moviepy
+RUN apt-get update && apt-get install -y \
+    git \
+    wget \
+    build-essential \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    ffmpeg \
+    libavcodec-dev \
+    libavformat-dev \
+    libjpeg-dev \
+    zlib1g-dev \
+    libpython3-dev \
+    libopenblas-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install cuSPARSELt (required for Jetson PyTorch)
+RUN wget https://developer.download.nvidia.com/compute/cusparselt/redist/libcusparse_lt/linux-aarch64/libcusparse_lt-linux-aarch64-0.8.0.4_cuda12-archive.tar.xz \
+    && tar -xf libcusparse_lt-linux-aarch64-0.8.0.4_cuda12-archive.tar.xz \
+    && cp -a libcusparse_lt-linux-aarch64-0.8.0.4_cuda12-archive/include/* /usr/local/cuda/include/ \
+    && cp -a libcusparse_lt-linux-aarch64-0.8.0.4_cuda12-archive/lib/* /usr/local/cuda/lib64/ \
+    && ldconfig \
+    && rm -rf libcusparse_lt-linux-aarch64-0.8.0.4_cuda12-archive.tar.xz libcusparse_lt-linux-aarch64-0.8.0.4_cuda12-archive/
+
+# Install Jetson-compatible PyTorch (pre-built wheel)
+RUN pip3 install --no-cache https://developer.download.nvidia.com/compute/redist/jp/v61/pytorch/torch-2.5.0a0+872d972e41.nv24.08.17622132-cp310-cp310-linux_aarch64.whl
+
+# Build torchvision from source for Jetson compatibility
+RUN git clone --branch release/0.20 https://github.com/pytorch/vision torchvision \
+    && cd torchvision \
+    && export BUILD_VERSION=0.20.0 \
+    && python3 setup.py install \
+    && cd .. && rm -rf torchvision
+
+# Clone LAVIS repository
+RUN git clone https://github.com/salesforce/LAVIS.git /app/LAVIS
+
+# Set LAVIS as working directory for installation
+WORKDIR /app/LAVIS
+
+# Install core ML dependencies with Jetson-compatible versions
+RUN pip3 install \
+    "numpy<2" \
+    transformers==4.25.0 \
+    peft==0.4.0 \
+    huggingface-hub==0.15.1 \
+    accelerate==0.20.3 \
+    tokenizers==0.13.3 \
+    safetensors==0.6.2
+
+# Install other critical dependencies
+RUN pip3 install \
+    pillow==11.3.0 \
+    scipy \
+    nltk==3.9.1 \
+    Flask==3.1.2 \
+    flask-cors==6.0.1 \
+    python-dotenv==1.1.1 \
+    requests==2.32.5 \
+    einops==0.8.1 \
+    omegaconf==2.3.0 \
+    timm==0.4.12
+
+# Install LAVIS dependencies manually (avoiding version conflicts)
+RUN pip3 install \
+    decord==0.6.0 \
+    fairscale==0.4.4 \
+    pycocoevalcap==1.2 \
+    webdataset==1.0.2 \
+    iopath==0.1.10 \
+    open3d==0.19.0 \
+    imageio==2.37.0 \
+    imageio-ffmpeg==0.6.0 \
+    moviepy==1.0.3 \
+    easydict==1.9 \
+    diffusers==0.16.0 \
+    spacy==3.8.7 \
+    h5py==3.14.0
+
+# Install LAVIS without dependencies to avoid version conflicts
+RUN pip3 install -e . --no-deps
+
+# Install OpenCV with same version as your working environment
+RUN pip3 install opencv-python-headless==4.12.0.88
+
+# Download NLTK data
+RUN python3 -c "import nltk; nltk.download('punkt')"
+
+# Create uploads directory
+RUN mkdir -p /app/uploads
+
+# Copy our working code files
+COPY REST.py /app/
+COPY blip2_analyzer.py /app/
+COPY .env /app/
+
+# Set final working directory
+WORKDIR /app
+
+# Expose port
+EXPOSE 7777
+
+# Set environment variables for Jetson
+ENV PYTHONPATH="/app/LAVIS"
+ENV CUDA_LAUNCH_BLOCKING=1
+ENV TORCH_CUDA_ARCH_LIST="8.7"
+
+# Run the service
+CMD ["python3", "REST.py"]
