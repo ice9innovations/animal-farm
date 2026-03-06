@@ -36059,8 +36059,6 @@ look_up
 look_up_to
 look_upon
 lookdown_fish
-looking_at
-looking_for
 looking_glass
 looking_glass_tree
 looking-glass_plant
