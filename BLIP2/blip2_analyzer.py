@@ -91,7 +91,7 @@ class Blip2Analyzer:
                 caption_list = self.model.generate({"image": processed_image})
             
             # Extract the first caption
-            caption = caption_list[0] if caption_list else "No caption generated"
+            caption = caption_list[0].capitalize() if caption_list else "No caption generated"
             
             return {
                 'success': True,
