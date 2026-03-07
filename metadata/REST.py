@@ -19,6 +19,7 @@ from PIL import Image, ExifTags, ImageStat, ImageFilter
 from PIL.ExifTags import TAGS, GPSTAGS
 from fractions import Fraction
 import exiftool
+import imagehash
 
 load_dotenv()
 
@@ -135,6 +136,11 @@ def get_file_hash(filepath: str) -> str:
             return img_hash.hexdigest()
     except Exception:
         return ""
+
+def compute_phash(filepath: str) -> str:
+    """Compute perceptual hash of image using imagehash.phash()"""
+    img = Image.open(filepath)
+    return str(imagehash.phash(img))
 
 def extract_basic_file_info(filepath: str) -> Dict[str, Any]:
     """Extract basic file system information"""
@@ -299,7 +305,8 @@ def extract_comprehensive_metadata(image_file: str, cleanup: bool = True) -> Dic
         # Basic file information
         file_info = extract_basic_file_info(full_path)
         file_hash = get_file_hash(full_path)
-        
+        phash = compute_phash(full_path)
+
         # PIL metadata extraction
         pil_metadata = extract_pil_metadata(full_path)
         
@@ -345,6 +352,7 @@ def extract_comprehensive_metadata(image_file: str, cleanup: bool = True) -> Dic
             "metadata": {
                 "file_info": serialized_file_info,
                 "file_hash": file_hash,
+                "phash": phash,
                 "summary": {
                     "total_metadata_tags": total_tags,
                     "categories_found": categories_found,
@@ -816,14 +824,23 @@ def format_metadata_response(metadata_result: Dict[str, Any]) -> Dict[str, Any]:
             }
         }
         
+        # Include hashes
+        phash = metadata_data.get('phash')
+        if phash:
+            prediction["phash"] = phash
+
+        file_hash = metadata_data.get('file_hash')
+        if file_hash:
+            prediction["file_hash"] = file_hash
+
         # Include GPS data if available
         if has_gps and gps_data:
             prediction["gps_data"] = {k: v for k, v in gps_data.items() if v is not None}
-        
+
         # Include EXIF data if available
         if has_exif and exif_data:
             prediction["exif_data"] = exif_data
-        
+
         return prediction
         
     except Exception as e:
