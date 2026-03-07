@@ -47889,6 +47889,8 @@ ralph_waldo_emerson
 ram_disk
 ram_down
 ram_home
+ram_module
+ram_modules
 ram's_horn
 ram's-head_lady's_slipper
 ramble_on
