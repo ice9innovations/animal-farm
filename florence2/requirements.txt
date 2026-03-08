@@ -1,0 +1,33 @@
+# Florence-2 Multi-Task Vision Service
+# Torch: match confirmed working version from moondream_venv
+# Install torch first before the rest:
+#   pip install torch==2.10.0+cu128 torchvision==0.25.0+cu128 \
+#       --index-url https://download.pytorch.org/whl/cu128
+
+# Core ML
+torch==2.10.0+cu128
+torchvision==0.25.0+cu128
+
+# Florence-2 via Hugging Face (requires trust_remote_code=True)
+# 4.56.1: confirmed working. Requires attn_implementation="eager" (bypasses flash_attn).
+# 4.44.x: DO NOT USE — triggers flash_attn install requirement from the cached model file.
+# use_cache=False required: transformers 4.56 EncoderDecoderCache is incompatible with
+# Florence-2's custom prepare_inputs_for_generation, and use_cache=False is actually
+# faster (0.29s vs 1.46s for DENSE_REGION_CAPTION) due to cache management overhead.
+transformers==4.56.1
+
+# Florence-2 vision backbone dependency
+timm==1.0.25
+
+# Tensor manipulation used by Florence-2 internals
+einops==0.8.2
+
+# Web service
+flask==3.1.3
+flask-cors==6.0.2
+
+# Config and utilities
+python-dotenv
+requests
+Pillow
+nltk
