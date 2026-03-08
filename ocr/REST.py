@@ -62,7 +62,7 @@ os.makedirs(FOLDER, exist_ok=True)
 
 # Initialize PaddleOCR (run once)
 print("Initializing PaddleOCR...")
-ocr_engine = PaddleOCR(lang='en')
+ocr_engine = PaddleOCR(lang='en', use_angle_cls=True)
 print("PaddleOCR initialized successfully")
 
 def create_ocr_response(data: Dict[str, Any], processing_time: float) -> Dict[str, Any]:
