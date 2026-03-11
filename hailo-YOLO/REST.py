@@ -227,8 +227,8 @@ def initialize_hailo_model(model_path: str = None) -> bool:
 
         logger.info(f"HAILO YOLO model loaded successfully!")
         logger.info(f"Model device: HAILO-8L Hardware Acceleration")
-        logger.info(f"Input shape: [{INPUT_SIZE}, {INPUT_SIZE}, 3]")
-        logger.info(f"Output shape: [40080]")
+        logger.info(f"Input layer: {list(input_vstreams_params.keys())}")
+        logger.info(f"Output layers: {list(output_vstreams_params.keys())}")
 
         hailo_model = hef
         return True
@@ -339,7 +339,8 @@ def process_hailo_results(hailo_output, scale: float, pad_x: int, pad_y: int,
 
                         for detection_data in class_detections:
                             try:
-                                x1_norm, y1_norm, x2_norm, y2_norm, confidence = detection_data
+                                # Hailo NMS post-processor outputs [y_min, x_min, y_max, x_max, confidence]
+                                y1_norm, x1_norm, y2_norm, x2_norm, confidence = detection_data
                                 logger.debug(f"Class {class_idx} ({class_name}): "
                                              f"norm=[{x1_norm:.3f}, {y1_norm:.3f}, {x2_norm:.3f}, {y2_norm:.3f}], "
                                              f"conf={confidence:.3f}")
@@ -518,7 +519,8 @@ def process_image_for_yolo(image: Image.Image) -> Dict[str, Any]:
         img_array, scale, pad_x, pad_y = letterbox_image(image)
         logger.debug(f"Letterboxed: scale={scale:.4f}, pad=({pad_x},{pad_y})")
 
-        input_name = 'yolov8s/input_layer1'
+        input_name = list(input_vstreams_params.keys())[0]
+        logger.debug(f"Input layer name: {input_name}")
         input_data = {input_name: np.expand_dims(img_array, axis=0)}
 
         with InferVStreams(network_group, input_vstreams_params, output_vstreams_params) as infer_pipeline:
