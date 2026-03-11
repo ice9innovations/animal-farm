@@ -36,6 +36,7 @@ PORT_STR = os.getenv('PORT')
 LLAMA_SERVER_HOST = os.getenv('LLAMA_SERVER_HOST')
 TEMPERATURE_STR = os.getenv('TEMPERATURE')
 VISION_PROMPT = os.getenv('PROMPT')
+MODEL_NAME = os.getenv('MODEL_NAME')
 
 if not PRIVATE_STR:
     raise ValueError("PRIVATE environment variable is required")
@@ -47,6 +48,8 @@ if not TEMPERATURE_STR:
     raise ValueError("TEMPERATURE environment variable is required")
 if not VISION_PROMPT:
     raise ValueError("PROMPT environment variable is required")
+if not MODEL_NAME:
+    raise ValueError("MODEL_NAME environment variable is required")
 
 PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
 PORT = int(PORT_STR)
@@ -246,7 +249,7 @@ def process_image_with_llamacpp(image: Image.Image, prompt: str = None, temperat
         jpg_buffer.close()
 
         payload = {
-            "model": "qwen3-vl",
+            "model": MODEL_NAME,
             "messages": [{
                 "role": "user",
                 "content": [
