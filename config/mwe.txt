@@ -1,3 +1,5 @@
+confederate_flag
+confederate_flags
 qr_code
 golden_retriever
 train_track
