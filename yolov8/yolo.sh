@@ -1,5 +1,8 @@
 #!/bin/bash
-cd "$(dirname "$0")"
-source yolo-venv/bin/activate
-source .env
-python3 REST.py
+
+# YOLOv8 REST API service
+CURRENT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}" )" && pwd)"
+cd "$CURRENT_DIR"
+
+# Start the service
+yolo-venv/bin/python REST.py
