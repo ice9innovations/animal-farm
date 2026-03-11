@@ -217,20 +217,20 @@ def extract_exiftool_metadata(filepath: str) -> Dict[str, Any]:
     try:
         with exiftool.ExifTool() as et:
             metadata = et.get_metadata(filepath)
-            
+
             # Remove the SourceFile entry
             if 'SourceFile' in metadata:
                 del metadata['SourceFile']
-            
+
             # Define fields to exclude (large binary data that's rarely useful)
             exclude_fields = {
                 'ICC_Profile:BlueTRC',
-                'ICC_Profile:GreenTRC', 
+                'ICC_Profile:GreenTRC',
                 'ICC_Profile:RedTRC',
                 'PIL:icc_profile',
                 'PIL:exif',  # Raw EXIF binary - we get this parsed elsewhere
             }
-            
+
             # Process metadata to handle different data types
             processed = {}
             for key, value in metadata.items():
@@ -238,13 +238,135 @@ def extract_exiftool_metadata(filepath: str) -> Dict[str, Any]:
                 if key in exclude_fields:
                     processed[key] = "<Excluded: Large binary data>"
                     continue
-                
+
                 processed[key] = serialize_metadata_value(value)
-            
+
             return processed
-            
+
     except Exception as e:
         return {"error": f"ExifTool extraction failed: {str(e)}"}
+
+def detect_ai_generation_markers(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Detect AI-generation markers in image metadata.
+
+    Checks for:
+    - C2PA (Coalition for Content Provenance and Authenticity) metadata
+    - IPTC Digital Source Type fields
+    - XMP creator/tool information indicating AI generation
+    - Known AI software signatures
+
+    Returns:
+        dict with:
+        - ai_generated: bool or None (True if markers detected, False if explicitly not AI, None if unknown)
+        - confidence: str ("high", "medium", "low")
+        - markers: dict of detected markers with their values
+        - detection_method: str describing what was detected
+    """
+    result = {
+        "ai_generated": None,
+        "confidence": "none",
+        "markers": {},
+        "detection_method": []
+    }
+
+    if not metadata or "error" in metadata:
+        return result
+
+    # Known AI tool names/patterns to check in software/creator fields
+    ai_tool_patterns = [
+        'midjourney', 'dall-e', 'dalle', 'stable diffusion', 'stablediffusion',
+        'firefly', 'adobe firefly', 'openai', 'chatgpt', 'gpt-',
+        'runway', 'leonardo.ai', 'lexica', 'nightcafe', 'artbreeder',
+        'craiyon', 'blue willow', 'canva ai', 'jasper art', 'photosonic',
+        'dreamstudio', 'ai image', 'ai-generated', 'ai generated',
+        'neural', 'gan', 'diffusion model', 'synthetic'
+    ]
+
+    # 1. Check C2PA metadata
+    c2pa_fields = {k: v for k, v in metadata.items() if 'c2pa' in k.lower() or 'contentcredentials' in k.lower()}
+    if c2pa_fields:
+        result["markers"]["c2pa"] = c2pa_fields
+        result["ai_generated"] = True
+        result["confidence"] = "high"
+        result["detection_method"].append("C2PA metadata detected")
+
+    # 2. Check IPTC Digital Source Type
+    iptc_digital_source_keys = [
+        'IPTC:DigitalSourceType',
+        'XMP-iptcExt:DigitalSourceType',
+        'XMP-plus:DigitalSourceType'
+    ]
+
+    for key in iptc_digital_source_keys:
+        if key in metadata:
+            value = str(metadata[key]).lower()
+            result["markers"]["digital_source_type"] = {key: metadata[key]}
+
+            # IPTC standard values for AI content
+            if 'trainedalgorithmicmedia' in value.replace(' ', ''):
+                result["ai_generated"] = True
+                result["confidence"] = "high"
+                result["detection_method"].append("IPTC Digital Source Type: trainedAlgorithmicMedia")
+            elif 'compositewithtrainedalgorithmicmedia' in value.replace(' ', ''):
+                result["ai_generated"] = True
+                result["confidence"] = "high"
+                result["detection_method"].append("IPTC Digital Source Type: compositeWithTrainedAlgorithmicMedia")
+            elif 'algorithmicmedia' in value:
+                result["ai_generated"] = True
+                result["confidence"] = "medium"
+                result["detection_method"].append("IPTC Digital Source Type: algorithmicMedia")
+
+    # 3. Check XMP and EXIF software/creator fields
+    software_fields = [
+        'EXIF:Software',
+        'XMP-xmp:CreatorTool',
+        'XMP-dc:Creator',
+        'XMP-tiff:Software',
+        'IFD0:Software',
+        'XMP-photoshop:Creator'
+    ]
+
+    detected_ai_tools = []
+    for field in software_fields:
+        if field in metadata:
+            value_str = str(metadata[field]).lower()
+
+            # Check against known AI tool patterns
+            for pattern in ai_tool_patterns:
+                if pattern in value_str:
+                    detected_ai_tools.append({
+                        "field": field,
+                        "value": metadata[field],
+                        "matched_pattern": pattern
+                    })
+
+    if detected_ai_tools:
+        result["markers"]["ai_software_detected"] = detected_ai_tools
+
+        # Only set ai_generated if not already set by more authoritative sources
+        if result["ai_generated"] is None:
+            result["ai_generated"] = True
+            result["confidence"] = "medium"
+            result["detection_method"].append(f"AI software signature detected in metadata")
+
+    # 4. Check for explicit "not AI" indicators
+    if result["ai_generated"] is None:
+        # Look for IPTC values that explicitly indicate NOT AI
+        for key in iptc_digital_source_keys:
+            if key in metadata:
+                value = str(metadata[key]).lower()
+                if any(x in value for x in ['digitalcapture', 'negativefilm', 'positivefilm', 'print', 'minorscan']):
+                    result["ai_generated"] = False
+                    result["confidence"] = "medium"
+                    result["detection_method"].append(f"IPTC indicates non-AI source: {value}")
+                    break
+
+    # 5. Set final confidence level
+    if not result["detection_method"]:
+        result["confidence"] = "none"
+
+    return result
 
 def categorize_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
     """Categorize metadata into logical groups"""
@@ -309,10 +431,13 @@ def extract_comprehensive_metadata(image_file: str, cleanup: bool = True) -> Dic
 
         # PIL metadata extraction
         pil_metadata = extract_pil_metadata(full_path)
-        
+
         # ExifTool metadata extraction (most comprehensive)
         exiftool_metadata = extract_exiftool_metadata(full_path)
-        
+
+        # AI generation detection (analyze ExifTool metadata for markers)
+        ai_detection = detect_ai_generation_markers(exiftool_metadata)
+
         # Merge all metadata sources
         all_metadata = {}
         
@@ -353,6 +478,7 @@ def extract_comprehensive_metadata(image_file: str, cleanup: bool = True) -> Dic
                 "file_info": serialized_file_info,
                 "file_hash": file_hash,
                 "phash": phash,
+                "ai_detection": ai_detection,
                 "summary": {
                     "total_metadata_tags": total_tags,
                     "categories_found": categories_found,
@@ -832,6 +958,16 @@ def format_metadata_response(metadata_result: Dict[str, Any]) -> Dict[str, Any]:
         file_hash = metadata_data.get('file_hash')
         if file_hash:
             prediction["file_hash"] = file_hash
+
+        # Include AI generation detection
+        ai_detection = metadata_data.get('ai_detection')
+        if ai_detection:
+            prediction["ai_detection"] = {
+                "ai_generated": ai_detection.get("ai_generated"),
+                "confidence": ai_detection.get("confidence"),
+                "detection_method": ai_detection.get("detection_method", []),
+                "markers": ai_detection.get("markers", {})
+            }
 
         # Include GPS data if available
         if has_gps and gps_data:
