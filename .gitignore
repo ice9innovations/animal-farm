@@ -1,4 +1,7 @@
 # Byte-compiled / optimized / DLL files
+yolov8/yolo-venv/
+qwen-cpp/models/
+yolov8/emoji_mappings.json
 yolo_365/365.json
 yolo_oi7/i7.json
 CLAUDE.md
