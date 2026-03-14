@@ -329,6 +329,7 @@ def health_check():
 
 
 @app.route('/analyze', methods=['GET', 'POST'])
+@app.route('/v3/analyze', methods=['GET', 'POST'])
 def analyze():
     """Unified analyze endpoint - accepts file upload, URL, or local file path.
 
