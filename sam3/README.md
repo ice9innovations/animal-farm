@@ -252,6 +252,33 @@ approximately 6–8GB depending on image resolution.
 | `sam3: null` in API results | Queried before SAM3 finished | Check `/results/<image_id>` after `sam3_complete: true` in status |
 | Model not loading | Checkpoint path wrong | Verify `SAM3_CHECKPOINT` in `.env` points to `sam3.pt` |
 
+## Docker
+
+```bash
+# Build (clones SAM3 from GitHub at build time)
+docker build -t sam3 /home/sd/animal-farm/sam3/
+
+# Run (mounts checkpoint dir; overrides host paths in .env)
+docker run -d \
+  --name sam3 \
+  --gpus all \
+  -v /home/sd/sam3/checkpoints:/app/sam3/checkpoints:ro \
+  -e PORT=9779 \
+  -e PRIVATE=true \
+  -e SAM3_CHECKPOINT=/app/sam3/checkpoints/sam3.pt \
+  -e CONFIDENCE_THRESHOLD=0.5 \
+  -p 9779:9779 \
+  sam3
+
+# Test
+curl -s http://localhost:9779/health | python3 -m json.tool
+
+# Delete
+docker stop sam3 && docker rm sam3 && docker rmi sam3
+```
+
+> `-e` flags are used instead of `--env-file` because the `.env` contains host-specific paths that differ inside the container.
+
 ---
 
 **Last Updated**: 2026-02-20

@@ -242,6 +242,30 @@ Switch to `ViT-B/32` in `.env` — it uses roughly half the VRAM.
 **Problem**: Low scores on clearly correct captions
 Ensure `CLIP_MODEL` matches the model used when scores were originally calibrated. Scores are not comparable across model variants.
 
+## Docker
+
+```bash
+# Build
+docker build -t clip-score /home/sd/animal-farm/clip-score/
+
+# Run
+docker run -d \
+  --name clip-score \
+  --gpus all \
+  --env-file /home/sd/animal-farm/clip-score/.env \
+  -p 7798:7798 \
+  clip-score
+
+# Test
+curl -s http://localhost:7798/health | python3 -m json.tool
+curl -s "http://localhost:7798/v3/score?caption=a+dog+in+the+park&url=https://example.com/image.jpg" | python3 -m json.tool
+
+# Delete
+docker stop clip-score && docker rm clip-score && docker rmi clip-score
+```
+
+> CLIP model is downloaded from OpenAI's GitHub at build time. No volume mount required.
+
 ---
 
 **Last Updated**: 2026-02-20

@@ -552,6 +552,31 @@ Changes take effect after service restart.
 
 ---
 
+## Docker
+
+```bash
+# Build
+docker build -t nudenet /home/sd/animal-farm/nudenet/
+
+# Run (mounts model cache to avoid re-downloading on restart)
+docker run -d \
+  --name nudenet \
+  --gpus all \
+  --env-file /home/sd/animal-farm/nudenet/.env \
+  -v /home/sd/.NudeNet:/root/.NudeNet \
+  -p 7789:7789 \
+  nudenet
+
+# Test (model downloads on first run)
+curl -s http://localhost:7789/health | python3 -m json.tool
+curl -s "http://localhost:7789/v3/analyze?url=https://example.com/image.jpg" | python3 -m json.tool
+
+# Delete
+docker stop nudenet && docker rm nudenet && docker rmi nudenet
+```
+
+---
+
 **Documentation Version**: 1.0
 **Last Updated**: 2025-12-30
 **Service Version**: Production

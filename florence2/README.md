@@ -320,3 +320,26 @@ curl "http://localhost:7803/v3/analyze?file=/path/to/image.jpg&task=DETAILED_CAP
 - Subsequent inferences: ~0.4-1.2s depending on task and image size on a mid-range GPU
 - `Florence-2-base` (~230MB) is significantly faster but produces lower-quality outputs
 - The model uses `float16` on GPU automatically; falls back to `float32` on CPU
+
+## Docker
+
+```bash
+# Build
+docker build -t florence2 /home/sd/animal-farm/florence2/
+
+# Run (mounts HF cache to avoid re-downloading the ~1.5GB model on restart)
+docker run -d \
+  --name florence2 \
+  --gpus all \
+  --env-file /home/sd/animal-farm/florence2/.env \
+  -v /home/sd/.cache/huggingface:/root/.cache/huggingface \
+  -p 7803:7803 \
+  florence2
+
+# Test (model downloads on first run — allow a minute)
+curl -s http://localhost:7803/health | python3 -m json.tool
+curl -s "http://localhost:7803/v3/analyze?url=https://example.com/image.jpg" | python3 -m json.tool
+
+# Delete
+docker stop florence2 && docker rm florence2 && docker rmi florence2
+```

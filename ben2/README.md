@@ -353,6 +353,34 @@ netstat -tlnp | grep 7769
 
 ---
 
+## Docker
+
+```bash
+# Build
+docker build -t ben2 /home/sd/animal-farm/ben2/
+
+# Run
+docker run -d \
+  --name ben2 \
+  --gpus all \
+  --env-file /home/sd/animal-farm/ben2/.env \
+  -v /home/sd/bkg/BEN2_Base.pth:/home/sd/bkg/BEN2_Base.pth:ro \
+  -p 7769:7769 \
+  ben2
+
+# Test
+curl -s http://localhost:7769/health | python3 -m json.tool
+curl -s -X POST -F "file=@/path/to/image.jpg" http://localhost:7769/v3/analyze | python3 -m json.tool
+
+# Delete
+docker stop ben2 && docker rm ben2 && docker rmi ben2
+```
+
+> `BEN2_CODE_DIR` defaults to `/app/BEN2` (cloned from GitHub at build time).
+> `BEN2_MODEL_PATH` in `.env` must match the volume mount path above.
+
+---
+
 **Documentation Version**: 1.0
 **Last Updated**: 2026-03-11
 **Service Version**: Production

@@ -369,6 +369,29 @@ echo "PORT=7802" > .env
 - **No Data Retention**: Images are processed in memory and not stored
 - **Input Validation**: File paths and URLs are validated before use
 
+## Docker
+
+```bash
+# Build
+docker build -t qr /home/sd/animal-farm/qr/
+
+# Run
+docker run -d \
+  --name qr \
+  --env-file /home/sd/animal-farm/qr/.env \
+  -p 7801:7801 \
+  qr
+
+# Test
+curl -s http://localhost:7801/health | python3 -m json.tool
+curl -s -X POST -F "file=@/home/sd/animal-farm/qr/qr.jpg" http://localhost:7801/v3/analyze | python3 -m json.tool
+
+# Delete
+docker stop qr && docker rm qr && docker rmi qr
+```
+
+> No GPU required. `libzbar0` is installed in the image.
+
 ---
 
 **Framework Version**: pyzbar 0.1.9+

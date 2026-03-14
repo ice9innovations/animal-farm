@@ -192,3 +192,26 @@ sudo journalctl -u moondream-api -f
 
 **Problem**: Slow first startup
 **Solution**: Model downloads ~1.8GB on first run. Subsequent starts use the local cache.
+
+## Docker
+
+```bash
+# Build
+docker build -t moondream /home/sd/animal-farm/moondream/
+
+# Run (mounts HF cache to avoid re-downloading the model on restart)
+docker run -d \
+  --name moondream \
+  --gpus all \
+  --env-file /home/sd/animal-farm/moondream/.env \
+  -v /home/sd/.cache/huggingface:/root/.cache/huggingface \
+  -p 7795:7795 \
+  moondream
+
+# Test (model downloads on first run — allow a minute)
+curl -s http://localhost:7795/health | python3 -m json.tool
+curl -s "http://localhost:7795/v3/analyze?url=https://example.com/image.jpg" | python3 -m json.tool
+
+# Delete
+docker stop moondream && docker rm moondream && docker rmi moondream
+```
