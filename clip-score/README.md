@@ -81,21 +81,21 @@ GET /health
 ### Score Caption
 
 ```bash
-GET /v3/score?caption=<text>&url=<image_url>
-GET /v3/score?caption=<text>&file=<file_path>
-POST /v3/score  (multipart: caption + file)
+GET /score?caption=<text>&url=<image_url>
+GET /score?caption=<text>&file=<file_path>
+POST /score  (multipart: caption + file)
 ```
 
-Also available at `/score` (no version prefix).
+> `/v3/score` is deprecated but remains functional.
 
 #### URL Example
 ```bash
-curl "http://localhost:7776/v3/score?caption=a+dog+in+the+park&url=http://example.com/image.jpg"
+curl "http://localhost:7776/score?caption=a+dog+in+the+park&url=http://example.com/image.jpg"
 ```
 
 #### File Path Example
 ```bash
-curl "http://localhost:7776/v3/score?caption=a+dog+in+the+park&file=/path/to/image.jpg"
+curl "http://localhost:7776/score?caption=a+dog+in+the+park&file=/path/to/image.jpg"
 ```
 
 #### Multipart Upload Example
@@ -103,7 +103,7 @@ curl "http://localhost:7776/v3/score?caption=a+dog+in+the+park&file=/path/to/ima
 curl -X POST \
   -F "caption=a dog in the park" \
   -F "file=@/path/to/image.jpg" \
-  http://localhost:7776/v3/score
+  http://localhost:7776/score
 ```
 
 **Input Validation:**
@@ -118,6 +118,8 @@ curl -X POST \
   "status": "success",
   "similarity_score": 0.2814,
   "caption": "a dog in the park",
+  "image_embedding": [0.012, -0.034, ...],
+  "text_embedding": [0.021, 0.008, ...],
   "metadata": {
     "processing_time": 0.183,
     "model_info": {
@@ -141,6 +143,97 @@ curl -X POST \
   "metadata": {"processing_time": 0.001}
 }
 ```
+
+### Get Image Embedding
+
+```bash
+POST /embed/image
+```
+
+Returns the normalized CLIP image embedding without requiring a caption. Use this when you need the embedding for vector search or storage and don't need a similarity score.
+
+
+#### URL Example
+```bash
+curl -X POST http://localhost:7776/embed/image \
+  -H "Content-Type: application/json" \
+  -d '{"url": "http://example.com/image.jpg"}'
+```
+
+#### File Path Example
+```bash
+curl -X POST http://localhost:7776/embed/image \
+  -H "Content-Type: application/json" \
+  -d '{"file": "/path/to/image.jpg"}'
+```
+
+#### Multipart Upload Example
+```bash
+curl -X POST \
+  -F "file=@/path/to/image.jpg" \
+  http://localhost:7776/embed/image
+```
+
+**Input Validation:**
+- Exactly one image source must be provided (`url`, `file`, or multipart upload)
+- Cannot provide both `url` and `file`
+
+**Response Format:**
+```json
+{
+  "service": "clip-score",
+  "status": "success",
+  "image_embedding": [0.012, -0.034, ...],
+  "metadata": {
+    "processing_time": 0.042,
+    "model_info": {
+      "framework": "openai-clip",
+      "model": "ViT-L/14",
+      "device": "cuda"
+    }
+  }
+}
+```
+
+### Batch Text Embeddings
+
+```bash
+POST /embed/text
+```
+
+Returns CLIP text embeddings for a batch of terms (max 500). No image required. Embeddings are L2-normalized and identical to the `text_embedding` returned by `/score`.
+
+> `/v3/embed/text` is deprecated but remains functional.
+
+```bash
+curl -X POST http://localhost:7776/embed/text \
+  -H "Content-Type: application/json" \
+  -d '{"terms": ["dog", "cat", "truck"]}'
+```
+
+**Response Format:**
+```json
+{
+  "service": "clip-score",
+  "status": "success",
+  "embeddings": {
+    "dog": [0.021, -0.003, ...],
+    "cat": [0.018, 0.011, ...],
+    "truck": [-0.007, 0.034, ...]
+  },
+  "metadata": {
+    "processing_time": 0.031,
+    "term_count": 3,
+    "model_info": {
+      "framework": "openai-clip",
+      "model": "ViT-L/14",
+      "device": "cuda"
+    }
+  }
+}
+```
+
+---
 
 ## Service Management
 
@@ -181,7 +274,7 @@ import requests
 
 # Score a caption against a URL
 response = requests.get(
-    "http://localhost:7776/v3/score",
+    "http://localhost:7776/score",
     params={
         "caption": "a man walking a dog",
         "url": "https://example.com/image.jpg"
@@ -190,15 +283,21 @@ response = requests.get(
 result = response.json()
 print(result["similarity_score"])  # e.g. 0.2814
 
-# Score a caption via multipart upload
-with open("/path/to/image.jpg", "rb") as f:
-    response = requests.post(
-        "http://localhost:7776/v3/score",
-        data={"caption": "a man walking a dog"},
-        files={"file": f}
-    )
+# Get image embedding only
+response = requests.post(
+    "http://localhost:7776/embed/image",
+    json={"url": "https://example.com/image.jpg"}
+)
 result = response.json()
-print(result["similarity_score"])
+print(len(result["image_embedding"]))  # e.g. 768 for ViT-L/14
+
+# Batch text embeddings
+response = requests.post(
+    "http://localhost:7776/embed/text",
+    json={"terms": ["dog", "cat", "truck"]}
+)
+result = response.json()
+print(result["embeddings"]["dog"])
 ```
 
 ### JavaScript
@@ -206,21 +305,19 @@ print(result["similarity_score"])
 ```javascript
 // URL-based scoring
 const response = await fetch(
-  'http://localhost:7776/v3/score?caption=a+man+walking+a+dog&url=https://example.com/image.jpg'
+  'http://localhost:7776/score?caption=a+man+walking+a+dog&url=https://example.com/image.jpg'
 );
 const result = await response.json();
 console.log(result.similarity_score);
 
-// Multipart upload
-const formData = new FormData();
-formData.append('caption', 'a man walking a dog');
-formData.append('file', fileInput.files[0]);
-const response = await fetch('http://localhost:7776/v3/score', {
+// Get image embedding only
+const response = await fetch('http://localhost:7776/embed/image', {
   method: 'POST',
-  body: formData
+  headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({url: 'https://example.com/image.jpg'})
 });
 const result = await response.json();
-console.log(result.similarity_score);
+console.log(result.image_embedding.length);
 ```
 
 ## Troubleshooting
@@ -258,7 +355,7 @@ docker run -d \
 
 # Test
 curl -s http://localhost:7798/health | python3 -m json.tool
-curl -s "http://localhost:7798/v3/score?caption=a+dog+in+the+park&url=https://example.com/image.jpg" | python3 -m json.tool
+curl -s "http://localhost:7798/score?caption=a+dog+in+the+park&url=https://example.com/image.jpg" | python3 -m json.tool
 
 # Delete
 docker stop clip-score && docker rm clip-score && docker rmi clip-score

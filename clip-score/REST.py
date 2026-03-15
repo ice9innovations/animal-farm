@@ -47,6 +47,39 @@ if device == "cuda":
 logger.info(f"CLIP model {CLIP_MODEL} ready")
 
 
+def encode_image_only(image: Image.Image) -> Optional[list]:
+    """Return a normalized CLIP image embedding as a plain Python list.
+
+    Suitable for pgvector storage. Returns None on failure.
+    """
+    try:
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+
+        image_tensor = preprocess(image).unsqueeze(0).to(device)
+        if device == "cuda" and model.dtype == torch.float16:
+            image_tensor = image_tensor.half()
+
+        with torch.no_grad():
+            if device == "cuda" and model.dtype == torch.float16:
+                with torch.amp.autocast('cuda'):
+                    image_features = model.encode_image(image_tensor)
+            else:
+                image_features = model.encode_image(image_tensor)
+
+            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+            image_embedding = image_features.squeeze().float().cpu().tolist()
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        return image_embedding
+
+    except Exception as e:
+        logger.error(f"encode_image_only failed: {e}")
+        return None
+
+
 def score_caption(image: Image.Image, caption: str) -> Optional[tuple]:
     """Compute cosine similarity between a PIL Image and a caption string.
 
@@ -103,12 +136,15 @@ def health_check():
         "device": device,
         "endpoints": [
             "GET /health",
-            "GET,POST /v3/score - caption + (url | file | multipart)",
-            "POST /v3/embed/text - batch text-only embeddings",
+            "GET,POST /score - caption + (url | file | multipart)",
+            "POST /embed/image - image embedding only (url | file | multipart)",
+            "POST /embed/text - batch text-only embeddings",
+            "(deprecated) /v3/score, /v3/embed/text",
         ]
     })
 
 
+@app.route('/embed/text', methods=['POST'])
 @app.route('/v3/embed/text', methods=['POST'])
 def embed_text():
     """Return CLIP text embeddings for a batch of terms.
@@ -186,6 +222,89 @@ def embed_text():
 
     except Exception as e:
         logger.error(f"embed_text endpoint error: {e}")
+        return error_response(f"Internal error: {str(e)}", 500)
+
+
+@app.route('/embed/image', methods=['POST'])
+def embeddings():
+    start_time = time.time()
+
+    def error_response(message: str, status_code: int = 400):
+        return jsonify({
+            "service": "clip-score",
+            "status": "error",
+            "error": {"message": message},
+            "metadata": {"processing_time": round(time.time() - start_time, 3)}
+        }), status_code
+
+    try:
+        image = None
+
+        if 'file' in request.files:
+            uploaded_file = request.files['file']
+            if uploaded_file.filename == '':
+                return error_response("No file selected")
+            uploaded_file.seek(0, 2)
+            if uploaded_file.tell() > MAX_FILE_SIZE:
+                return error_response("File too large (max 8MB)")
+            uploaded_file.seek(0)
+            try:
+                image = Image.open(BytesIO(uploaded_file.read())).convert('RGB')
+            except Exception as e:
+                return error_response(f"Failed to open uploaded image: {e}", 500)
+
+        else:
+            if request.is_json:
+                data = request.get_json()
+                url = data.get('url')
+                file_path = data.get('file')
+            else:
+                url = request.form.get('url') or request.args.get('url')
+                file_path = request.form.get('file') or request.args.get('file')
+
+            if not url and not file_path:
+                return error_response("Must provide image via multipart upload, 'url', or 'file' parameter")
+            if url and file_path:
+                return error_response("Cannot provide both 'url' and 'file' parameters")
+
+            if url:
+                try:
+                    r = requests.get(url, timeout=15)
+                    r.raise_for_status()
+                    if len(r.content) > MAX_FILE_SIZE:
+                        return error_response("Downloaded image too large (max 8MB)")
+                    image = Image.open(BytesIO(r.content)).convert('RGB')
+                except Exception as e:
+                    return error_response(f"Failed to download image: {e}")
+            else:
+                if not os.path.exists(file_path):
+                    return error_response(f"File not found: {file_path}")
+                try:
+                    image = Image.open(file_path).convert('RGB')
+                except Exception as e:
+                    return error_response(f"Failed to open image file: {e}", 500)
+
+        image_embedding = encode_image_only(image)
+
+        if image_embedding is None:
+            return error_response("Failed to compute image embedding", 500)
+
+        return jsonify({
+            "service": "clip-score",
+            "status": "success",
+            "image_embedding": image_embedding,
+            "metadata": {
+                "processing_time": round(time.time() - start_time, 3),
+                "model_info": {
+                    "framework": "openai-clip",
+                    "model": CLIP_MODEL,
+                    "device": device,
+                }
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"embeddings endpoint error: {e}")
         return error_response(f"Internal error: {str(e)}", 500)
 
 
