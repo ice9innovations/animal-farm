@@ -186,7 +186,6 @@ def analyze():
             "service": "rembg",
             "status": "success",
             "mask": image_to_base64(result['mask']),
-            "rgba": image_to_base64(result['rgba']),
             "metadata": {
                 "processing_time": round(time.time() - start_time, 3),
                 "width": result['width'],
