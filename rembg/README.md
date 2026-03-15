@@ -1,58 +1,19 @@
 # rembg Background Removal Service
 
 **Port**: 7768
-**Framework**: rembg 2.0.61 + ONNX Runtime
-**Purpose**: AI-powered background removal returning RGBA images and alpha masks
+**Purpose**: Background removal returning alpha masks
 **Status**: Active
 
 ## Overview
 
-rembg removes image backgrounds using the rembg library with ONNX Runtime inference. Unlike BEN2 which uses a PyTorch model, rembg supports a wide range of pre-trained ONNX models via a simple session name. The default model is `birefnet-general`, which provides strong general-purpose results.
+The rembg service provides background removal with two selectable backends, chosen at startup via the `BACKEND` environment variable:
 
-The service returns both an RGBA image (original pixels + alpha mask composited) and a standalone grayscale mask, both base64-encoded PNG.
+| Backend | Runtime | Device | Description |
+|---------|---------|--------|-------------|
+| `rembg` | ONNX Runtime | CPU or GPU | rembg 2.0.61 with configurable ONNX session models |
+| `ben2` | PyTorch | GPU | BEN2 (Background Extraction Network 2) with soft float alpha mattes |
 
-## Features
-
-- **Multiple Models**: Switch between rembg-supported models via `MODEL_NAME` in `.env`
-- **Soft Alpha Mattes**: Float alpha channel for clean edges on hair, fur, and complex subjects
-- **RGBA + Mask Output**: Both composited RGBA and isolated alpha mask returned
-- **GPU or CPU**: Default Dockerfile uses `onnxruntime-gpu`; a CPU variant (`Dockerfile.cpu`) is available
-- **Unified Input Handling**: Single endpoint for URL, file path, and file upload
-- **Security**: File validation, 16MB size limit, type checking
-
-## Available Models
-
-rembg supports several session models. Set `MODEL_NAME` in `.env` to switch:
-
-| Model | Description |
-|-------|-------------|
-| `birefnet-general` | General-purpose, strong on most subjects (default) |
-| `birefnet-portrait` | Optimized for human portraits |
-| `u2net` | Original U²-Net, good all-around |
-| `u2net_human_seg` | U²-Net trained for human segmentation |
-| `isnet-general-use` | IS-Net, high quality general use |
-| `silueta` | Compact, fast model |
-
-Models are downloaded automatically on first use to `~/.u2net/`.
-
-## Installation
-
-### Prerequisites
-
-- Python 3.11+
-- GPU: ONNX Runtime GPU (`onnxruntime-gpu`) — recommended
-- CPU: ONNX Runtime (`onnxruntime`) — use `Dockerfile.cpu` for Docker
-
-### Setup
-
-```bash
-cd /home/sd/animal-farm/rembg
-
-python3 -m venv rembg_venv
-source rembg_venv/bin/activate
-
-pip install -r requirements.txt
-```
+Both backends return an identical API response — a grayscale alpha mask as a base64-encoded PNG.
 
 ## Configuration
 
@@ -62,15 +23,61 @@ pip install -r requirements.txt
 PORT=7768
 PRIVATE=false
 
-# rembg session model name
+# Backend selector
+BACKEND=rembg
+
+# rembg backend
 MODEL_NAME=birefnet-general
+
+# ben2 backend
+BEN2_MODEL_PATH=/home/sd/bkg/BEN2_Base.pth
+BEN2_CODE_DIR=/home/sd/ComfyUI/models/RMBG/BEN2
+# REFINE_FOREGROUND=false
 ```
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `PORT` | Yes | Service port |
-| `PRIVATE` | Yes | `true` = localhost only |
-| `MODEL_NAME` | Yes | rembg session model name |
+| Variable | Required | When |
+|----------|----------|------|
+| `PORT` | Yes | Always |
+| `PRIVATE` | Yes | Always |
+| `BACKEND` | Yes | Always — `rembg` or `ben2` |
+| `MODEL_NAME` | Yes | `BACKEND=rembg` |
+| `BEN2_MODEL_PATH` | Yes | `BACKEND=ben2` |
+| `BEN2_CODE_DIR` | Yes | `BACKEND=ben2` |
+| `REFINE_FOREGROUND` | No | `BACKEND=ben2` — enables refined foreground estimation (slower, better edges) |
+
+### rembg Models
+
+Set `MODEL_NAME` in `.env` to switch models. Models download automatically to `~/.u2net/` on first use.
+
+| Model | Description |
+|-------|-------------|
+| `birefnet-general` | General-purpose (default) |
+| `birefnet-portrait` | Optimized for human portraits |
+| `u2net` | Original U²-Net |
+| `u2net_human_seg` | U²-Net for human segmentation |
+| `isnet-general-use` | IS-Net, high quality general use |
+| `silueta` | Compact, fast |
+
+## Installation
+
+### rembg backend
+
+```bash
+cd /home/sd/animal-farm/rembg
+python3 -m venv rembg_venv
+source rembg_venv/bin/activate
+pip install -r requirements.txt
+```
+
+### ben2 backend
+
+```bash
+cd /home/sd/animal-farm/rembg
+python3 -m venv rembg_venv
+source rembg_venv/bin/activate
+pip install -r requirements.txt
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+```
 
 ## API Endpoints
 
@@ -83,9 +90,10 @@ GET /health
 ```json
 {
   "status": "healthy",
-  "session_status": "loaded",
-  "model": "birefnet-general",
-  "device": "cpu"
+  "backend": "rembg",
+  "backend_status": "loaded",
+  "device": "cpu",
+  "model": "birefnet-general"
 }
 ```
 
@@ -105,7 +113,6 @@ Also available at `/analyze` (no version prefix).
   "service": "rembg",
   "status": "success",
   "mask": "<base64-encoded grayscale PNG>",
-  "rgba": "<base64-encoded RGBA PNG>",
   "metadata": {
     "processing_time": 0.612,
     "width": 1920,
@@ -117,9 +124,6 @@ Also available at `/analyze` (no version prefix).
   }
 }
 ```
-
-- **`rgba`**: Original pixels composited with the soft alpha mask — ready to place on any background
-- **`mask`**: Grayscale PNG of the alpha channel alone — use for compositing, inpainting, or segmentation
 
 ## Service Management
 
@@ -142,22 +146,19 @@ systemctl status rembg-api
 
 ## Docker
 
-Two Dockerfiles are provided:
+Three Dockerfiles are provided:
 
-| File | Runtime | Use case |
-|------|---------|----------|
-| `Dockerfile` | `onnxruntime-gpu` | Default — GPU acceleration |
-| `Dockerfile.cpu` | `onnxruntime` | CPU-only environments |
+| File | Backend | Runtime |
+|------|---------|---------|
+| `Dockerfile.gpu` | `rembg` | `onnxruntime-gpu` |
+| `Dockerfile.cpu` | `rembg` | `onnxruntime` (CPU only) |
+| `Dockerfile.ben2` | `ben2` | PyTorch + CUDA |
 
-rembg downloads its model weights to `~/.u2net/` on first run. Mount a host directory to cache them across container restarts.
-
-### GPU (default)
+### rembg GPU (default)
 
 ```bash
-# Build
 docker build -t rembg-gpu /home/sd/animal-farm/rembg/
 
-# Run
 docker run -d \
   --name rembg-gpu \
   --gpus all \
@@ -165,22 +166,13 @@ docker run -d \
   -v /home/sd/.u2net:/root/.u2net \
   -p 7768:7768 \
   rembg-gpu
-
-# Test (model downloads on first run)
-curl -s http://localhost:7768/health | python3 -m json.tool
-curl -s -X POST -F "file=@/path/to/image.jpg" http://localhost:7768/v3/analyze | python3 -m json.tool
-
-# Delete
-docker stop rembg-gpu && docker rm rembg-gpu && docker rmi rembg-gpu
 ```
 
-### CPU
+### rembg CPU
 
 ```bash
-# Build
 docker build -t rembg-cpu -f /home/sd/animal-farm/rembg/Dockerfile.cpu /home/sd/animal-farm/rembg/
 
-# Run (no --gpus flag)
 docker run -d \
   --name rembg-cpu \
   --env-file /home/sd/animal-farm/rembg/.env \
@@ -189,20 +181,33 @@ docker run -d \
   rembg-cpu
 ```
 
+### ben2
+
+```bash
+docker build -t rembg-ben2 -f /home/sd/animal-farm/rembg/Dockerfile.ben2 /home/sd/animal-farm/rembg/
+
+docker run -d \
+  --name rembg-ben2 \
+  --gpus all \
+  --env-file /home/sd/animal-farm/rembg/.env \
+  -v /home/sd/bkg:/models \
+  -p 7768:7768 \
+  rembg-ben2
+```
+
+Model weights are large — mount them via volume rather than baking into the image.
+
 ## Troubleshooting
 
-**Problem**: Service slow on first request after startup
-The model is being downloaded to `~/.u2net/`. Mount the volume as shown above to cache it.
+**Problem**: `BACKEND environment variable is required`
+The `.env` file was not loaded or `BACKEND` is missing.
 
-**Problem**: `MODEL_NAME environment variable is required`
-The `.env` file was not loaded. Verify it exists and contains `MODEL_NAME`.
+**Problem**: `BEN2_MODEL_PATH does not exist`
+The weights file path in `.env` is wrong or the file has not been downloaded.
 
-**Problem**: GPU not used despite `onnxruntime-gpu` installed
-`onnxruntime-gpu` selects `CUDAExecutionProvider` automatically when a GPU is available. Verify `nvidia-smi` shows the GPU and `--gpus all` was passed to `docker run`.
+**Problem**: Service slow on first request (rembg backend)
+The model is being downloaded to `~/.u2net/`. Mount the volume as shown above to cache it across restarts.
 
 ---
 
-**Documentation Version**: 1.0
-**Last Updated**: 2026-03-13
-**Service Version**: Production
-**Maintainer**: Animal Farm ML Team
+**Last Updated**: 2026-03-15

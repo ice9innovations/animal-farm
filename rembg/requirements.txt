@@ -6,3 +6,9 @@ python-dotenv
 requests
 pillow
 numpy
+# ben2 backend
+opencv-python
+timm
+einops
+# torch/torchvision must be installed separately with CUDA support:
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128

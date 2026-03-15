@@ -32,17 +32,16 @@ RUN pip install \
     requests
 
 # Model weights are large — mount via volume at runtime
-# Default path matches BEN2_MODEL_PATH in .env
 RUN mkdir -p /app/models
 
-COPY REST.py /app/
+COPY rembg_analyzer.py /app/
 COPY ben2_analyzer.py /app/
+COPY REST.py /app/
 COPY .env /app/
 
-EXPOSE 7769
+EXPOSE 7768
 
 ENV TORCH_CUDA_ARCH_LIST="6.0;6.1;7.0;7.5;8.0;8.6+PTX"
-# BEN2 code is cloned above; override BEN2_CODE_DIR in .env if needed
 ENV BEN2_CODE_DIR=/app/BEN2
 
 CMD ["python", "REST.py"]

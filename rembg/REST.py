@@ -13,8 +13,6 @@ from PIL import Image
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-from rembg_analyzer import RembgAnalyzer
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -24,17 +22,37 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
 # Required configuration — fail fast
 PRIVATE_STR = os.getenv('PRIVATE')
 PORT_STR = os.getenv('PORT')
-MODEL_NAME = os.getenv('MODEL_NAME')
+BACKEND = os.getenv('BACKEND')
 
 if not PRIVATE_STR:
     raise ValueError("PRIVATE environment variable is required")
 if not PORT_STR:
     raise ValueError("PORT environment variable is required")
-if not MODEL_NAME:
-    raise ValueError("MODEL_NAME environment variable is required")
+if not BACKEND:
+    raise ValueError("BACKEND environment variable is required")
+if BACKEND not in ('rembg', 'ben2'):
+    raise ValueError(f"BACKEND must be 'rembg' or 'ben2', got: {BACKEND!r}")
 
 PRIVATE = PRIVATE_STR.lower() == 'true'
 PORT = int(PORT_STR)
+
+# Backend-specific config — validate only what the chosen backend needs
+if BACKEND == 'rembg':
+    MODEL_NAME = os.getenv('MODEL_NAME')
+    if not MODEL_NAME:
+        raise ValueError("MODEL_NAME environment variable is required when BACKEND=rembg")
+else:
+    BEN2_MODEL_PATH = os.getenv('BEN2_MODEL_PATH')
+    BEN2_CODE_DIR = os.getenv('BEN2_CODE_DIR')
+    if not BEN2_MODEL_PATH:
+        raise ValueError("BEN2_MODEL_PATH environment variable is required when BACKEND=ben2")
+    if not BEN2_CODE_DIR:
+        raise ValueError("BEN2_CODE_DIR environment variable is required when BACKEND=ben2")
+    if not os.path.exists(BEN2_MODEL_PATH):
+        raise FileNotFoundError(f"BEN2_MODEL_PATH does not exist: {BEN2_MODEL_PATH}")
+    if not os.path.exists(BEN2_CODE_DIR):
+        raise FileNotFoundError(f"BEN2_CODE_DIR does not exist: {BEN2_CODE_DIR}")
+    REFINE_FOREGROUND = os.getenv('REFINE_FOREGROUND', 'false').lower() == 'true'
 
 # Global analyzer — initialized once at startup
 analyzer = None
@@ -43,12 +61,23 @@ analyzer = None
 def initialize_analyzer() -> bool:
     global analyzer
     try:
-        logger.info(f"rembg: Initializing analyzer with model '{MODEL_NAME}'...")
-        analyzer = RembgAnalyzer(model_name=MODEL_NAME)
+        if BACKEND == 'rembg':
+            from rembg_analyzer import RembgAnalyzer
+            logger.info(f"rembg: Initializing rembg backend with model '{MODEL_NAME}'...")
+            analyzer = RembgAnalyzer(model_name=MODEL_NAME)
+        else:
+            from ben2_analyzer import BEN2Analyzer
+            logger.info("rembg: Initializing ben2 backend...")
+            analyzer = BEN2Analyzer(
+                model_path=BEN2_MODEL_PATH,
+                code_dir=BEN2_CODE_DIR,
+                refine_foreground=REFINE_FOREGROUND,
+            )
+
         if not analyzer.initialize():
-            logger.error("rembg: Analyzer initialization returned False")
+            logger.error(f"rembg: {BACKEND} analyzer initialization returned False")
             return False
-        logger.info("rembg: Analyzer ready")
+        logger.info(f"rembg: {BACKEND} analyzer ready")
         return True
     except Exception as e:
         logger.error(f"rembg: Error during initialization: {e}")
@@ -113,12 +142,20 @@ def internal_error(e):
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    session_status = "loaded" if analyzer and analyzer.session else "not_loaded"
+    if BACKEND == 'rembg':
+        backend_status = "loaded" if analyzer and analyzer.session else "not_loaded"
+        device = "cpu"
+        model = MODEL_NAME
+    else:
+        backend_status = "loaded" if analyzer and analyzer.model else "not_loaded"
+        device = str(analyzer.device) if analyzer and analyzer.device else "unknown"
+        model = "BEN2_Base"
     return jsonify({
         "status": "healthy",
-        "session_status": session_status,
-        "model": MODEL_NAME,
-        "device": "cpu",
+        "backend": BACKEND,
+        "backend_status": backend_status,
+        "device": device,
+        "model": model,
     })
 
 
@@ -182,6 +219,11 @@ def analyze():
             return error_response(result['error'], 500)
 
         # Step 3: Encode and return
+        if BACKEND == 'rembg':
+            model_info = {"model": MODEL_NAME, "device": "cpu"}
+        else:
+            model_info = {"model": "BEN2_Base", "refine_foreground": REFINE_FOREGROUND}
+
         return jsonify({
             "service": "rembg",
             "status": "success",
@@ -190,10 +232,7 @@ def analyze():
                 "processing_time": round(time.time() - start_time, 3),
                 "width": result['width'],
                 "height": result['height'],
-                "model_info": {
-                    "model": MODEL_NAME,
-                    "device": "cpu",
-                }
+                "model_info": model_info,
             }
         })
 
@@ -215,7 +254,7 @@ if __name__ == '__main__':
 
     logger.info(f"rembg: Starting on {host}:{PORT}")
     logger.info(f"rembg: Private mode: {PRIVATE}")
-    logger.info(f"rembg: Model: {MODEL_NAME}")
+    logger.info(f"rembg: Backend: {BACKEND}")
 
     app.run(
         host=host,
