@@ -1,12 +1,18 @@
 import os
+from dotenv import load_dotenv
 
-# Set CUDA environment variables BEFORE importing any ML libraries
-os.environ['CUDA_HOME'] = '/usr/local/cuda-12.2'
-os.environ['PATH'] = '/usr/local/cuda-12.2/bin:' + os.environ.get('PATH', '')
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+load_dotenv()
+
+# Must be set before importing TensorFlow
+MODE_STR = os.getenv('MODE')
+if not MODE_STR:
+    raise ValueError("MODE environment variable is required (cpu or gpu)")
+MODE = MODE_STR.lower()
+if MODE not in ('cpu', 'gpu'):
+    raise ValueError(f"MODE must be 'cpu' or 'gpu', got: {MODE_STR!r}")
+
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1' if MODE == 'cpu' else '0'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
-# CUDA paths are set by nsfw2.sh script
 
 import json
 import requests
@@ -22,32 +28,31 @@ import opennsfw2 as n2
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from PIL import Image
-from dotenv import load_dotenv
 
 tf.get_logger().setLevel('ERROR')
 absl_logging.set_verbosity(absl_logging.ERROR)
 
-# Enable optimizations only if GPU is available
-try:
-    gpus = tf.config.list_physical_devices('GPU')
-    for gpu in gpus:
-        tf.config.experimental.set_memory_growth(gpu, True)
-
-    if gpus:
-        tf.config.optimizer.set_jit(True)  # Enable XLA compilation
-        tf.config.optimizer.set_experimental_options({"auto_mixed_precision": True})
-        print(f"GPU optimization enabled for {len(gpus)} GPU(s)")
-    else:
-        print("Running on CPU - GPU optimizations disabled")
-except Exception as e:
-    print(f"GPU setup warning: {e}")
-
-load_dotenv()
+if MODE == 'gpu':
+    try:
+        gpus = tf.config.list_physical_devices('GPU')
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        if gpus:
+            tf.config.optimizer.set_jit(True)
+            tf.config.optimizer.set_experimental_options({"auto_mixed_precision": True})
+            print(f"GPU optimization enabled for {len(gpus)} GPU(s)")
+        else:
+            print("MODE=gpu but no GPU devices found")
+    except Exception as e:
+        print(f"GPU setup warning: {e}")
+else:
+    print("Running on CPU (MODE=cpu)")
 
 # Step 1: Load as strings (no fallbacks)
 PORT_STR = os.getenv('PORT')
 PRIVATE_STR = os.getenv('PRIVATE')
 NSFW_THRESHOLD_STR = os.getenv('NSFW_THRESHOLD')
+# MODE already validated at startup before TF import
 
 # Step 2: Validate critical environment variables
 if not PORT_STR:
