@@ -80,11 +80,10 @@ def encode_image_only(image: Image.Image) -> Optional[list]:
         return None
 
 
-def score_caption(image: Image.Image, caption: str) -> Optional[tuple]:
+def score_caption(image: Image.Image, caption: str) -> Optional[float]:
     """Compute cosine similarity between a PIL Image and a caption string.
 
-    Returns (similarity, image_embedding, text_embedding) where embeddings are
-    normalized float32 vectors as plain Python lists, suitable for pgvector storage.
+    Returns the similarity score as a float, or None on failure.
     """
     try:
         if image.mode != 'RGB':
@@ -110,13 +109,10 @@ def score_caption(image: Image.Image, caption: str) -> Optional[tuple]:
 
             similarity = (image_features @ text_features.T).item()
 
-            image_embedding = image_features.squeeze().float().cpu().tolist()
-            text_embedding = text_features.squeeze().float().cpu().tolist()
-
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        return similarity, image_embedding, text_embedding
+        return similarity
 
     except Exception as e:
         logger.error(f"score_caption failed: {e}")
@@ -381,20 +377,16 @@ def score():
                 except Exception as e:
                     return error_response(f"Failed to open image file: {e}", 500)
 
-        result = score_caption(image, caption)
+        similarity = score_caption(image, caption)
 
-        if result is None:
+        if similarity is None:
             return error_response("Failed to compute similarity score", 500)
-
-        similarity, image_embedding, text_embedding = result
 
         return jsonify({
             "service": "clip-score",
             "status": "success",
             "similarity_score": round(float(similarity), 4),
             "caption": caption,
-            "image_embedding": image_embedding,
-            "text_embedding": text_embedding,
             "metadata": {
                 "processing_time": round(time.time() - start_time, 3),
                 "model_info": {

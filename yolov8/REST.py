@@ -34,6 +34,7 @@ AUTO_UPDATE_STR = os.getenv('AUTO_UPDATE', 'true')
 PORT_STR = os.getenv('PORT')
 PRIVATE_STR = os.getenv('PRIVATE')
 CONFIDENCE_THRESHOLD_STR = os.getenv('CONFIDENCE_THRESHOLD')
+YOLO_MODEL_PATH = os.getenv('YOLO_MODEL_PATH')
 
 # Validate critical environment variables
 if not PORT_STR:
@@ -712,7 +713,7 @@ if __name__ == '__main__':
     # Initialize model
     logger.info("Starting YOLOv8 service...")
     
-    model_loaded = initialize_yolo_model()
+    model_loaded = initialize_yolo_model(YOLO_MODEL_PATH)
     
     
     if not model_loaded:

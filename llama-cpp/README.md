@@ -183,9 +183,13 @@ Also available at `/analyze` (no version prefix).
 
 ## Docker
 
-The Docker image contains only the Flask REST wrapper. `llama-server` runs on the host and is reached via `--network=host`.
+There are two Dockerfiles. Use `Dockerfile` (the default) when `llama-server` runs on the host. Use `Dockerfile.server` when you need a fully self-contained image that builds and runs `llama-server` itself — e.g. RunPod or any environment where you can't rely on a host-side binary.
 
-> For full containerization of `llama-server` itself, see `issues/containerize-llama-server-binary.md`.
+> Consolidating these into a single Dockerfile is tracked in `issues/containerize-llama-server-binary.md`.
+
+### Dockerfile — Flask wrapper only (default)
+
+`llama-server` runs on the host as `llama-cpp-server.service` and is reached via `--network=host`.
 
 ```bash
 # Ensure llama-server is running first
@@ -209,6 +213,32 @@ curl -s -X POST -F "file=@/path/to/image.jpg" \
 
 # Delete
 docker stop llama-cpp && docker rm llama-cpp && docker rmi llama-cpp
+```
+
+### Dockerfile.server — self-contained (llama-server + Flask)
+
+Builds `llama-server` from source in a CUDA devel stage, then packages it with the Flask wrapper. No host binary required. Models are volume-mounted at runtime.
+
+The `CUDA_ARCH` build arg defaults to `80;86;89;90` (A100, RTX 3090/4090, L40). Override for your specific GPU to reduce binary size and build time.
+
+```bash
+# Build (default multi-arch)
+docker build -f Dockerfile.server -t llama-cpp-server /home/sd/animal-farm/llama-cpp/
+
+# Build for a specific GPU (e.g. RTX 3090 = SM 8.6)
+docker build -f Dockerfile.server --build-arg CUDA_ARCH=86 -t llama-cpp-server /home/sd/animal-farm/llama-cpp/
+
+# Run (models volume-mounted, GPU passthrough required)
+docker run -d \
+  --name llama-cpp-server \
+  --gpus all \
+  --env-file /home/sd/animal-farm/llama-cpp/.env \
+  -v /home/sd/animal-farm/llama-cpp/models:/app/models:ro \
+  -p 7782:7782 \
+  llama-cpp-server
+
+# Delete
+docker stop llama-cpp-server && docker rm llama-cpp-server && docker rmi llama-cpp-server
 ```
 
 ## Troubleshooting

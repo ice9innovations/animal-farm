@@ -197,11 +197,15 @@ We encourage modern development practices that lead to reliable, maintainable co
 7. **Document** - Update relevant documentation if needed
 8. **Follow DRY principles** - Extract any duplicated logic into reusable functions
 
-### Pull Request Guidelines
+### Issue Guidelines
 - Describe what you changed and why
 - Include steps to test the changes
 - Note any data format changes (these need special approval)
 - Reference any issues or requirements addressed
+- Do not put code or proposed solutions in the issues please
+- Only humans can resolve issues. 
+- Do not mark issues as complete without specific guidance to do so.
+- Do update issues with the work you've done as you've completed it.
 
 ### Code Review Process
 All changes go through code review to ensure:

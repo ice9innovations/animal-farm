@@ -1,6 +1,12 @@
 # Stage 1: build llama-server with CUDA
 FROM nvidia/cuda:12.2.0-devel-ubuntu22.04 AS builder
 
+# Override at build time for your target GPU:
+#   docker build --build-arg CUDA_ARCH=80 ...   (A100)
+#   docker build --build-arg CUDA_ARCH=89 ...   (RTX 4090 / L40)
+# Default covers the most common RunPod GPUs.
+ARG CUDA_ARCH=80;86;89;90
+
 RUN apt-get update && apt-get install -y \
     git \
     cmake \
@@ -17,7 +23,7 @@ RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/lib
 RUN CC=/usr/bin/gcc-11 CXX=/usr/bin/g++-11 \
     cmake -B build \
     -DGGML_CUDA=ON \
-    -DCMAKE_CUDA_ARCHITECTURES=86 \
+    -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCH}" \
     -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
     -DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-11 \
     -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath-link,/usr/local/cuda/lib64/stubs" \

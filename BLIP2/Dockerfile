@@ -82,7 +82,9 @@ RUN mkdir -p /app/uploads
 # Copy our working code files
 COPY REST.py /app/
 COPY blip2_analyzer.py /app/
-COPY .env /app/
+
+# .env is NOT copied — pass all vars via environment: in docker-compose
+# or --env-file at runtime. See .env.sample for required variables.
 
 # Set final working directory
 WORKDIR /app
