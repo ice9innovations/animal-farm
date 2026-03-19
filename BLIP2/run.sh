@@ -1,6 +1,6 @@
 #!/bin/bash
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
-LAVIS_DIR="$(realpath "$SCRIPT_DIR/../LAVIS")"
+LAVIS_DIR="$SCRIPT_DIR/LAVIS"
 
 source "$SCRIPT_DIR/venv/bin/activate"
 source "$SCRIPT_DIR/.env"

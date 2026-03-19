@@ -11,7 +11,7 @@
 set -e
 
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
-LAVIS_DIR="$(realpath "$SCRIPT_DIR/../LAVIS")"
+LAVIS_DIR="$SCRIPT_DIR/LAVIS"
 SERVICE_NAME="blip2"
 CURRENT_USER="$(whoami)"
 
