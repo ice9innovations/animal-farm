@@ -51,10 +51,13 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
-    device_requests:
-      - driver: nvidia
-        count: 1
-        capabilities: ["gpu"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
 
   florence2:
     build:
@@ -81,10 +84,13 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
-    device_requests:
-      - driver: nvidia
-        count: 1
-        capabilities: ["gpu"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
 
   moondream:
     build:
@@ -111,10 +117,13 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
-    device_requests:
-      - driver: nvidia
-        count: 1
-        capabilities: ["gpu"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
 
   llama-cpp:
     build:
@@ -143,10 +152,13 @@ services:
       timeout: 10s
       retries: 5
       start_period: 120s
-    device_requests:
-      - driver: nvidia
-        count: 1
-        capabilities: ["gpu"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
 
   qwen-cpp:
     build:
@@ -175,10 +187,13 @@ services:
       timeout: 10s
       retries: 5
       start_period: 120s
-    device_requests:
-      - driver: nvidia
-        count: 1
-        capabilities: ["gpu"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
 
   # ── External API (no local models — keys via .env files) ────────────────────
 
@@ -261,10 +276,13 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-    device_requests:
-      - driver: nvidia
-        count: 1
-        capabilities: ["gpu"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
 
   # ── Content Moderation ───────────────────────────────────────────────────────
 
@@ -283,10 +301,13 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-    device_requests:
-      - driver: nvidia
-        count: 1
-        capabilities: ["gpu"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
 
   # ── Background Removal ───────────────────────────────────────────────────────
 
@@ -312,10 +333,13 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-    device_requests:
-      - driver: nvidia
-        count: 1
-        capabilities: ["gpu"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
 
   # ── OCR ──────────────────────────────────────────────────────────────────────
 
@@ -340,10 +364,13 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-    device_requests:
-      - driver: nvidia
-        count: 1
-        capabilities: ["gpu"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
 
   # ── Body Analysis ────────────────────────────────────────────────────────────
 
