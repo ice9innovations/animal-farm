@@ -31,15 +31,32 @@ fi
 
 echo "--- HuggingFace: florence2 (microsoft/Florence-2-large) ---"
 python3 -c "
-from huggingface_hub import snapshot_download
-snapshot_download('microsoft/Florence-2-large', cache_dir='$MODELS_PATH/huggingface', token='${HF_TOKEN:-None}')
+import os
+from huggingface_hub import list_repo_files, hf_hub_download
+token = os.environ.get('HF_TOKEN') or None
+repo_id = 'microsoft/Florence-2-large'
+cache_dir = '$MODELS_PATH/huggingface'
+files = sorted(list_repo_files(repo_id, token=token))
+print(f'{len(files)} files to fetch')
+for i, f in enumerate(files, 1):
+    print(f'[{i}/{len(files)}] {f}')
+    hf_hub_download(repo_id=repo_id, filename=f, cache_dir=cache_dir, token=token)
 "
 
 echo ""
 echo "--- HuggingFace: moondream (vikhyatk/moondream2, rev 2025-06-21) ---"
 python3 -c "
-from huggingface_hub import snapshot_download
-snapshot_download('vikhyatk/moondream2', revision='2025-06-21', cache_dir='$MODELS_PATH/huggingface', token='${HF_TOKEN:-None}')
+import os
+from huggingface_hub import list_repo_files, hf_hub_download
+token = os.environ.get('HF_TOKEN') or None
+repo_id = 'vikhyatk/moondream2'
+revision = '2025-06-21'
+cache_dir = '$MODELS_PATH/huggingface'
+files = sorted(list_repo_files(repo_id, revision=revision, token=token))
+print(f'{len(files)} files to fetch')
+for i, f in enumerate(files, 1):
+    print(f'[{i}/{len(files)}] {f}')
+    hf_hub_download(repo_id=repo_id, filename=f, revision=revision, cache_dir=cache_dir, token=token)
 "
 
 echo ""
