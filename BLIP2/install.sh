@@ -33,13 +33,13 @@ mkdir -p "$TMPDIR"
 pip install --upgrade pip
 
 # PyTorch with CUDA 11.8 (works on CUDA 12.x hardware)
-pip install \
+pip install --no-cache-dir \
     torch==2.7.1+cu118 \
     torchvision==0.22.1+cu118 \
     torchaudio==2.7.1+cu118 \
     --index-url https://download.pytorch.org/whl/cu118
 
-pip install -r "$SCRIPT_DIR/requirements.txt"
+pip install --no-cache-dir -r "$SCRIPT_DIR/requirements.txt"
 
 # Install LAVIS itself (no deps — already installed above)
 pip install -e "$LAVIS_DIR" --no-deps

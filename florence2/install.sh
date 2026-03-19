@@ -24,13 +24,13 @@ mkdir -p "$TMPDIR"
 pip install --upgrade pip
 
 # PyTorch with CUDA 12.8 (confirmed working for Florence-2)
-pip install \
+pip install --no-cache-dir \
     torch==2.10.0+cu128 \
     torchvision==0.25.0+cu128 \
     --index-url https://download.pytorch.org/whl/cu128
 
 # All other dependencies (torch already installed above, pip will skip it)
-pip install -r "$SCRIPT_DIR/requirements.txt"
+pip install --no-cache-dir -r "$SCRIPT_DIR/requirements.txt"
 
 # Download required NLTK data
 python -c "import nltk; nltk.download('punkt')"
