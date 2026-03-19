@@ -18,6 +18,9 @@ echo "=== Animal Farm model download ==="
 echo "Target: $MODELS_PATH"
 echo ""
 
+echo "--- Installing huggingface_hub ---"
+pip install -q huggingface_hub
+
 echo "--- HuggingFace: florence2 (microsoft/Florence-2-large) ---"
 HF_HUB_CACHE="$MODELS_PATH/huggingface" huggingface-cli download \
     microsoft/Florence-2-large --local-dir-use-symlinks False
