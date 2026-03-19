@@ -60,8 +60,8 @@ for i, f in enumerate(files, 1):
 "
 
 echo ""
-echo "--- LAVIS: BLIP caption large (Salesforce CDN) ---"
-bash "$REPO_DIR/LAVIS/download_models.sh" "$MODELS_PATH/lavis"
+echo "--- BLIP2: BLIP caption large (Salesforce CDN) ---"
+bash "$REPO_DIR/BLIP2/download_models.sh" "$MODELS_PATH/lavis"
 
 echo ""
 echo "--- llama-cpp: llava-llama3 GGUFs ---"
