@@ -21,17 +21,25 @@ echo ""
 echo "--- Installing huggingface_hub ---"
 pip install -q huggingface_hub
 
+if [ -z "$HF_TOKEN" ] && [ -f "$HOME/.cache/huggingface/token" ]; then
+    export HF_TOKEN="$(cat "$HOME/.cache/huggingface/token")"
+    echo "HF_TOKEN loaded from $HOME/.cache/huggingface/token"
+fi
+if [ -z "$HF_TOKEN" ]; then
+    echo "WARNING: HF_TOKEN not set — downloads will be rate-limited. Set HF_TOKEN or log in with huggingface-cli."
+fi
+
 echo "--- HuggingFace: florence2 (microsoft/Florence-2-large) ---"
 python3 -c "
 from huggingface_hub import snapshot_download
-snapshot_download('microsoft/Florence-2-large', cache_dir='$MODELS_PATH/huggingface')
+snapshot_download('microsoft/Florence-2-large', cache_dir='$MODELS_PATH/huggingface', token='${HF_TOKEN:-None}')
 "
 
 echo ""
 echo "--- HuggingFace: moondream (vikhyatk/moondream2, rev 2025-06-21) ---"
 python3 -c "
 from huggingface_hub import snapshot_download
-snapshot_download('vikhyatk/moondream2', revision='2025-06-21', cache_dir='$MODELS_PATH/huggingface')
+snapshot_download('vikhyatk/moondream2', revision='2025-06-21', cache_dir='$MODELS_PATH/huggingface', token='${HF_TOKEN:-None}')
 "
 
 echo ""
