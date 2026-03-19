@@ -7,7 +7,7 @@ set -e
 MODELS_DIR="${1:-$(dirname "$0")/models}"
 mkdir -p "$MODELS_DIR"
 
-pip install -q paddlepaddle paddleocr
+pip install -q "paddlepaddle==2.5.2" "paddleocr==2.7.3"
 
 echo "Downloading PaddleOCR models (det/rec/cls, lang=en)..."
 # PaddleOCR downloads to ~/.paddleocr — redirect HOME so files land in MODELS_DIR
