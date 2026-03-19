@@ -1,11 +1,5 @@
 #!/bin/bash
-SCRIPT_DIR="$(dirname "$(realpath "$0")")"
-LAVIS_DIR="$(realpath "$SCRIPT_DIR/../LAVIS")"
-
-source "$SCRIPT_DIR/venv/bin/activate"
-source "$SCRIPT_DIR/.env"
-
-export PYTHONPATH="$LAVIS_DIR"
-
-cd "$SCRIPT_DIR"
+cd /home/sd/animal-farm/LAVIS
+source blip2_venv/bin/activate
+source .env
 python REST.py

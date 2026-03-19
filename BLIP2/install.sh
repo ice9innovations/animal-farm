@@ -7,7 +7,7 @@
 #
 # After install, start the service with:
 #   systemctl start blip2
-#   (or: bash BLIP2.sh)
+#   (or: bash run.sh)
 set -e
 
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
