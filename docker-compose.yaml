@@ -268,33 +268,6 @@ services:
         count: 1
         capabilities: ["gpu"]
 
-  sam3:
-    build:
-      context: ./sam3
-      dockerfile: Dockerfile
-    container_name: sam3
-    environment:
-      PORT: "9779"
-      PRIVATE: "false"
-      SAM3_CHECKPOINT: /models/sam3/sam3.pt
-    volumes:
-      - type: bind
-        source: ${MODELS_PATH}/sam3
-        target: /models/sam3
-        read_only: true
-    ports:
-      - "9779:9779"
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:9779/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-    device_requests:
-      - driver: nvidia
-        count: 1
-        capabilities: ["gpu"]
-
   # ── Content Moderation ───────────────────────────────────────────────────────
 
   nudenet:
