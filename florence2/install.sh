@@ -17,6 +17,10 @@ CURRENT_USER="$(whoami)"
 python3.11 -m venv "$SCRIPT_DIR/venv"
 source "$SCRIPT_DIR/venv/bin/activate"
 
+# Route pip temp files to network volume — CUDA wheels exhaust the overlay /tmp
+export TMPDIR="${TMPDIR:-/workspace/tmp}"
+mkdir -p "$TMPDIR"
+
 pip install --upgrade pip
 
 # PyTorch with CUDA 12.8 (confirmed working for Florence-2)
