@@ -7,6 +7,7 @@ set -e
 MODELS_DIR="${1:-$(dirname "$0")/models}"
 mkdir -p "$MODELS_DIR"
 
+export TMPDIR="${TMPDIR:-$MODELS_DIR}"
 pip install -q ultralytics
 
 echo "Downloading yolov8l.pt..."

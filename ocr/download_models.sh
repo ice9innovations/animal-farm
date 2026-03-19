@@ -7,6 +7,7 @@ set -e
 MODELS_DIR="${1:-$(dirname "$0")/models}"
 mkdir -p "$MODELS_DIR"
 
+export TMPDIR="${TMPDIR:-$MODELS_DIR}"
 pip install -q "paddleocr==2.7.3"
 
 echo "Downloading PaddleOCR models (det/rec/cls, lang=en)..."
