@@ -295,22 +295,22 @@ services:
   rembg:
     build:
       context: ./rembg
-      dockerfile: Dockerfile.gpu
+      dockerfile: Dockerfile.ben2
     container_name: rembg
     environment:
-      PORT: "7769"
+      PORT: "7768"
       PRIVATE: "false"
-      MODEL_NAME: birefnet-general
-      U2NET_HOME: /models/rembg
+      BACKEND: ben2
+      BEN2_MODEL_PATH: /models/rembg/BEN2_Base.pth
     volumes:
       - type: bind
         source: ${MODELS_PATH}/rembg
         target: /models/rembg
         read_only: true
     ports:
-      - "7769:7769"
+      - "7768:7768"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:7769/health"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:7768/health"]
       interval: 30s
       timeout: 10s
       retries: 5
