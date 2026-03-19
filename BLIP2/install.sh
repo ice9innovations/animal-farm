@@ -35,42 +35,7 @@ pip install \
     torchaudio==2.7.1+cu118 \
     --index-url https://download.pytorch.org/whl/cu118
 
-# Core ML dependencies (pinned to match working Dockerfile)
-pip install \
-    "numpy==2.2.6" \
-    transformers==4.25.0 \
-    peft==0.4.0 \
-    huggingface-hub==0.15.1 \
-    accelerate==0.20.3 \
-    tokenizers==0.13.3 \
-    safetensors==0.6.2
-
-# Service and LAVIS dependencies
-pip install \
-    pillow==11.3.0 \
-    scipy \
-    nltk==3.9.1 \
-    Flask==3.1.2 \
-    flask-cors==6.0.1 \
-    python-dotenv==1.1.1 \
-    requests==2.32.5 \
-    einops==0.8.1 \
-    omegaconf==2.3.0 \
-    timm==0.4.12 \
-    decord==0.6.0 \
-    fairscale==0.4.4 \
-    pycocoevalcap==1.2 \
-    webdataset==1.0.2 \
-    iopath==0.1.10 \
-    open3d==0.19.0 \
-    imageio==2.37.0 \
-    imageio-ffmpeg==0.6.0 \
-    moviepy==1.0.3 \
-    easydict==1.9 \
-    diffusers==0.16.0 \
-    spacy==3.8.7 \
-    h5py==3.14.0 \
-    opencv-python-headless==4.12.0.88
+pip install -r "$SCRIPT_DIR/requirements.txt"
 
 # Install LAVIS itself (no deps — already installed above)
 pip install -e "$LAVIS_DIR" --no-deps

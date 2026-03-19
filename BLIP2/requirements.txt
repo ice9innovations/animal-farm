@@ -1,38 +1,40 @@
-contexttimer
-decord
-diffusers<=0.16.0
-einops>=0.4.1
-fairscale==0.4.4
-ftfy
-iopath
-ipython
-omegaconf
-opencv-python-headless==4.5.5.64
-opendatasets
-packaging
-pandas
-plotly
-pre-commit
-pycocoevalcap
-pycocotools
-python-magic
-scikit-image
-sentencepiece
-streamlit
-timm==0.4.12
-torch>=1.10.0
-torchvision
-tqdm
-transformers==4.33.2
-webdataset
-wheel
-torchaudio
-soundfile
-moviepy
-nltk
-peft
+# BLIP2 Caption Service — complete dependency list
+# Install torch separately first (special index URL):
+#   pip install torch==2.7.1+cu118 torchvision==0.22.1+cu118 torchaudio==2.7.1+cu118 \
+#       --index-url https://download.pytorch.org/whl/cu118
 
+# Core ML
+numpy==2.2.6
+transformers==4.25.0
+peft==0.4.0
+huggingface-hub==0.15.1
+accelerate==0.20.3
+tokenizers==0.13.3
+safetensors==0.6.2
+
+# LAVIS dependencies
+einops==0.8.1
+omegaconf==2.3.0
+timm==0.4.12
+decord==0.6.0
+fairscale==0.4.4
+pycocoevalcap==1.2
+webdataset==1.0.2
+iopath==0.1.10
 easydict==1.9
-pyyaml_env_tag==0.1
-#open3d==0.13.0
-h5py
+diffusers==0.16.0
+h5py==3.14.0
+moviepy==1.0.3
+imageio==2.37.0
+imageio-ffmpeg==0.6.0
+scipy
+spacy==3.8.7
+opencv-python-headless==4.12.0.88
+
+# Service
+Flask==3.1.2
+flask-cors==6.0.1
+python-dotenv==1.1.1
+requests==2.32.5
+Pillow==11.3.0
+nltk==3.9.1
