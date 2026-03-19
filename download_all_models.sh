@@ -22,13 +22,17 @@ echo "--- Installing huggingface_hub ---"
 pip install -q huggingface_hub
 
 echo "--- HuggingFace: florence2 (microsoft/Florence-2-large) ---"
-HF_HUB_CACHE="$MODELS_PATH/huggingface" huggingface-cli download \
-    microsoft/Florence-2-large --local-dir-use-symlinks False
+python3 -c "
+from huggingface_hub import snapshot_download
+snapshot_download('microsoft/Florence-2-large', cache_dir='$MODELS_PATH/huggingface')
+"
 
 echo ""
 echo "--- HuggingFace: moondream (vikhyatk/moondream2, rev 2025-06-21) ---"
-HF_HUB_CACHE="$MODELS_PATH/huggingface" huggingface-cli download \
-    vikhyatk/moondream2 --revision 2025-06-21 --local-dir-use-symlinks False
+python3 -c "
+from huggingface_hub import snapshot_download
+snapshot_download('vikhyatk/moondream2', revision='2025-06-21', cache_dir='$MODELS_PATH/huggingface')
+"
 
 echo ""
 echo "--- LAVIS: BLIP caption large (Salesforce CDN) ---"
