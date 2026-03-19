@@ -29,10 +29,12 @@ service_pid() {
         pid=$(cat "$pid_file")
         if kill -0 "$pid" 2>/dev/null; then
             echo "$pid"
+            return 0
         else
             rm -f "$pid_file"
         fi
     fi
+    return 1
 }
 
 start_service() {
