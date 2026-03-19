@@ -88,6 +88,10 @@ echo "--- ocr: PaddleOCR det/rec/cls ---"
 bash "$REPO_DIR/ocr/download_models.sh" "$MODELS_PATH/paddleocr"
 
 echo ""
+echo "--- sam3: facebook/sam3 (restricted — requires HF_TOKEN) ---"
+bash "$REPO_DIR/sam3/download_models.sh" "$MODELS_PATH/sam3"
+
+echo ""
 echo "=== All models downloaded to $MODELS_PATH ==="
 echo "Start the stack with:"
 echo "  export MODELS_PATH=$MODELS_PATH"

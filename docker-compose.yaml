@@ -1,0 +1,485 @@
+version: "3.9"
+
+name: animal-farm
+
+# RunPod deployment compose file.
+#
+# Required: set MODELS_PATH before running, e.g.:
+#   export MODELS_PATH=/workspace
+#   docker compose up
+#
+# MODELS_PATH must point to a directory with the structure copied to NAS:
+#   $MODELS_PATH/huggingface/    — HuggingFace hub cache (florence2, moondream)
+#   $MODELS_PATH/lavis/          — LAVIS cache (blip caption model .pth files)
+#   $MODELS_PATH/llama-cpp/      — GGUF files for llama-cpp
+#   $MODELS_PATH/qwen-cpp/       — GGUF files for qwen-cpp
+#   $MODELS_PATH/yolov8/         — .pt model files
+#   $MODELS_PATH/rembg/          — birefnet ONNX files (nudenet is bundled in pip — no volume needed)
+#   $MODELS_PATH/sam3/           — sam3.pt checkpoint (facebook/sam3)
+#   $MODELS_PATH/paddleocr/      — PaddleOCR whl cache
+#
+# API-key services (haiku, gemini, gpt-nano, caption-summary) read keys
+# from their service .env files — copy .env.sample → .env and fill in keys.
+
+services:
+
+  # ── Captioning / VLM ────────────────────────────────────────────────────────
+
+  blip2:
+    build:
+      context: ./BLIP2
+      dockerfile: Dockerfile
+    container_name: blip2
+    environment:
+      PORT: "7777"
+      PRIVATE: "false"
+      HF_HUB_CACHE: /models/huggingface
+      HUGGINGFACE_HUB_CACHE: /models/huggingface
+      TRANSFORMERS_OFFLINE: "1"
+    volumes:
+      - type: bind
+        source: ${MODELS_PATH}/huggingface
+        target: /models/huggingface
+        read_only: true
+      - type: bind
+        source: ${MODELS_PATH}/lavis
+        target: /export/home/.cache/lavis
+        read_only: true
+    ports:
+      - "7777:7777"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7777/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    device_requests:
+      - driver: nvidia
+        count: 1
+        capabilities: ["gpu"]
+
+  florence2:
+    build:
+      context: ./florence2
+      dockerfile: Dockerfile
+    container_name: florence2
+    environment:
+      PORT: "7803"
+      PRIVATE: "false"
+      MODEL_NAME: "microsoft/Florence-2-large"
+      HF_HUB_CACHE: /models/huggingface
+      HUGGINGFACE_HUB_CACHE: /models/huggingface
+      TRANSFORMERS_OFFLINE: "1"
+    volumes:
+      - type: bind
+        source: ${MODELS_PATH}/huggingface
+        target: /models/huggingface
+        read_only: true
+    ports:
+      - "7803:7803"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7803/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    device_requests:
+      - driver: nvidia
+        count: 1
+        capabilities: ["gpu"]
+
+  moondream:
+    build:
+      context: ./moondream
+      dockerfile: Dockerfile
+    container_name: moondream
+    environment:
+      PORT: "7795"
+      PRIVATE: "false"
+      MODEL_REVISION: "2025-06-21"
+      HF_HUB_CACHE: /models/huggingface
+      HUGGINGFACE_HUB_CACHE: /models/huggingface
+      TRANSFORMERS_OFFLINE: "1"
+    volumes:
+      - type: bind
+        source: ${MODELS_PATH}/huggingface
+        target: /models/huggingface
+        read_only: true
+    ports:
+      - "7795:7795"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7795/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    device_requests:
+      - driver: nvidia
+        count: 1
+        capabilities: ["gpu"]
+
+  llama-cpp:
+    build:
+      context: ./llama-cpp
+      dockerfile: Dockerfile.server
+    container_name: llama-cpp
+    environment:
+      PORT: "7782"
+      PRIVATE: "false"
+      MODEL_PATH: /app/models/llava-llama-3-8b-v1_1-int4.gguf
+      MMPROJ_PATH: /app/models/llava-llama-3-8b-v1_1-mmproj-f16.gguf
+      MODEL_NAME: llava-llama3
+      LLAMA_SERVER_HOST: "http://127.0.0.1:11435"
+      LLAMA_SERVER_PORT: "11435"
+      N_GPU_LAYERS: "99"
+    volumes:
+      - type: bind
+        source: ${MODELS_PATH}/llama-cpp
+        target: /app/models
+        read_only: true
+    ports:
+      - "7782:7782"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7782/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    device_requests:
+      - driver: nvidia
+        count: 1
+        capabilities: ["gpu"]
+
+  qwen-cpp:
+    build:
+      context: ./qwen-cpp
+      dockerfile: Dockerfile.server
+    container_name: qwen-cpp
+    environment:
+      PORT: "7796"
+      PRIVATE: "false"
+      MODEL_PATH: /app/models/Qwen3VL-4B-Instruct-Q4_K_M.gguf
+      MMPROJ_PATH: /app/models/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf
+      MODEL_NAME: qwen3-vl-4b
+      LLAMA_SERVER_HOST: "http://127.0.0.1:11436"
+      LLAMA_SERVER_PORT: "11436"
+      N_GPU_LAYERS: "99"
+    volumes:
+      - type: bind
+        source: ${MODELS_PATH}/qwen-cpp
+        target: /app/models
+        read_only: true
+    ports:
+      - "7796:7796"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7796/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    device_requests:
+      - driver: nvidia
+        count: 1
+        capabilities: ["gpu"]
+
+  # ── External API (no local models — keys via .env files) ────────────────────
+
+  haiku:
+    build:
+      context: ./claude-api
+      dockerfile: Dockerfile
+    container_name: haiku
+    environment:
+      PORT: "7797"
+      PRIVATE: "false"
+    env_file:
+      - ./claude-api/.env
+    ports:
+      - "7797:7797"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7797/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  gemini:
+    build:
+      context: ./gemini-api
+      dockerfile: Dockerfile
+    container_name: gemini
+    environment:
+      PORT: "7767"
+      PRIVATE: "false"
+    env_file:
+      - ./gemini-api/.env
+    ports:
+      - "7767:7767"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7767/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  gpt-nano:
+    build:
+      context: ./gpt-nano
+      dockerfile: Dockerfile
+    container_name: gpt-nano
+    environment:
+      PORT: "7800"
+      PRIVATE: "false"
+    env_file:
+      - ./gpt-nano/.env
+    ports:
+      - "7800:7800"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7800/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ── Object Detection ─────────────────────────────────────────────────────────
+
+  yolov8:
+    build:
+      context: ./yolov8
+      dockerfile: Dockerfile
+    container_name: yolov8
+    environment:
+      PORT: "7773"
+      PRIVATE: "false"
+      YOLO_MODEL_PATH: /models/yolov8/yolov8l.pt
+      CONFIDENCE_THRESHOLD: "0.25"
+    volumes:
+      - type: bind
+        source: ${MODELS_PATH}/yolov8
+        target: /models/yolov8
+        read_only: true
+    ports:
+      - "7773:7773"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7773/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    device_requests:
+      - driver: nvidia
+        count: 1
+        capabilities: ["gpu"]
+
+  sam3:
+    build:
+      context: ./sam3
+      dockerfile: Dockerfile
+    container_name: sam3
+    environment:
+      PORT: "9779"
+      PRIVATE: "false"
+      SAM3_CHECKPOINT: /models/sam3/sam3.pt
+    volumes:
+      - type: bind
+        source: ${MODELS_PATH}/sam3
+        target: /models/sam3
+        read_only: true
+    ports:
+      - "9779:9779"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9779/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    device_requests:
+      - driver: nvidia
+        count: 1
+        capabilities: ["gpu"]
+
+  # ── Content Moderation ───────────────────────────────────────────────────────
+
+  nudenet:
+    build:
+      context: ./nudenet
+      dockerfile: Dockerfile
+    container_name: nudenet
+    environment:
+      PORT: "7789"
+      PRIVATE: "false"
+    ports:
+      - "7789:7789"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7789/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    device_requests:
+      - driver: nvidia
+        count: 1
+        capabilities: ["gpu"]
+
+  # ── Background Removal ───────────────────────────────────────────────────────
+
+  rembg:
+    build:
+      context: ./rembg
+      dockerfile: Dockerfile.gpu
+    container_name: rembg
+    environment:
+      PORT: "7769"
+      PRIVATE: "false"
+      MODEL_NAME: birefnet-general
+      U2NET_HOME: /models/rembg
+    volumes:
+      - type: bind
+        source: ${MODELS_PATH}/rembg
+        target: /models/rembg
+        read_only: true
+    ports:
+      - "7769:7769"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7769/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    device_requests:
+      - driver: nvidia
+        count: 1
+        capabilities: ["gpu"]
+
+  # ── OCR ──────────────────────────────────────────────────────────────────────
+
+  ocr:
+    build:
+      context: ./ocr
+      dockerfile: Dockerfile
+    container_name: ocr
+    environment:
+      PORT: "7775"
+      PRIVATE: "false"
+    volumes:
+      - type: bind
+        source: ${MODELS_PATH}/paddleocr
+        target: /root/.paddleocr
+        read_only: true
+    ports:
+      - "7775:7775"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7775/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    device_requests:
+      - driver: nvidia
+        count: 1
+        capabilities: ["gpu"]
+
+  # ── Body Analysis ────────────────────────────────────────────────────────────
+
+  pose:
+    build:
+      context: ./pose
+      dockerfile: Dockerfile
+    container_name: pose
+    environment:
+      PORT: "7786"
+      PRIVATE: "false"
+      POSE_MODEL_COMPLEXITY: "2"
+      POSE_MIN_DETECTION_CONFIDENCE: "0.5"
+      POSE_MIN_TRACKING_CONFIDENCE: "0.5"
+      ENABLE_SEGMENTATION: "true"
+    ports:
+      - "7786:7786"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7786/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  face:
+    build:
+      context: ./face
+      dockerfile: Dockerfile
+    container_name: face
+    environment:
+      PORT: "7772"
+      PRIVATE: "false"
+    ports:
+      - "7772:7772"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7772/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ── No-model services ────────────────────────────────────────────────────────
+
+  colors:
+    build:
+      context: ./colors
+      dockerfile: Dockerfile
+    container_name: colors
+    environment:
+      PORT: "7770"
+      PRIVATE: "false"
+    ports:
+      - "7770:7770"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7770/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  metadata:
+    build:
+      context: ./metadata
+      dockerfile: Dockerfile
+    container_name: metadata
+    environment:
+      PORT: "7781"
+      PRIVATE: "false"
+    ports:
+      - "7781:7781"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7781/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  qr:
+    build:
+      context: ./qr
+      dockerfile: Dockerfile
+    container_name: qr
+    environment:
+      PORT: "7801"
+      PRIVATE: "false"
+    ports:
+      - "7801:7801"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7801/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  caption-summary:
+    build:
+      context: ./caption-summary
+      dockerfile: Dockerfile
+    container_name: caption-summary
+    environment:
+      PORT: "7799"
+      PRIVATE: "false"
+    env_file:
+      - ./caption-summary/.env
+    ports:
+      - "7799:7799"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7799/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+networks:
+  default:
+    name: animal-farm-net
