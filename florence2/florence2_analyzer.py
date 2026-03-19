@@ -6,7 +6,13 @@ Handles Florence-2 model loading and inference across all supported tasks.
 Uses Microsoft Florence-2 via Hugging Face transformers with trust_remote_code.
 """
 
+import os
 import logging
+
+# Map MODEL_DIR → HF_HOME before transformers is imported
+if os.environ.get('MODEL_DIR'):
+    os.environ['HF_HOME'] = os.environ['MODEL_DIR']
+
 import torch
 from PIL import Image
 from typing import Dict, Any, Optional, List, Tuple
