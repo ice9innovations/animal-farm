@@ -7,16 +7,10 @@ set -e
 MODELS_DIR="${1:-$(dirname "$0")/models}"
 mkdir -p "$MODELS_DIR"
 
-export TMPDIR="${TMPDIR:-$MODELS_DIR}"
-pip install -q ultralytics
-
-echo "Downloading yolov8l.pt..."
-python3 - <<EOF
-import os
-from ultralytics import YOLO
-os.chdir("$MODELS_DIR")
-YOLO("yolov8l.pt")  # downloads to cwd if not present
-EOF
+echo "Connecting to github.com for yolov8l.pt (84MB)..."
+wget -c --connect-timeout=30 --progress=bar:force \
+    -O "$MODELS_DIR/yolov8l.pt" \
+    "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolov8l.pt"
 
 echo "Done. Files in $MODELS_DIR:"
 ls -lh "$MODELS_DIR"/*.pt

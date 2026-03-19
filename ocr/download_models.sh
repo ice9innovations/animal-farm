@@ -1,5 +1,5 @@
 #!/bin/bash
-# Download PaddleOCR model weights.
+# Download PaddleOCR model weights (det/rec/cls).
 # Run once on the RunPod volume before first container start.
 # Files are volume-mounted into the container at /root/.paddleocr.
 set -e
@@ -7,20 +7,32 @@ set -e
 MODELS_DIR="${1:-$(dirname "$0")/models}"
 mkdir -p "$MODELS_DIR"
 
-export TMPDIR="${TMPDIR:-$MODELS_DIR}"
-pip install -q "paddleocr==2.7.3"
+download_and_extract() {
+    local url="$1"
+    local dest_dir="$2"
+    local filename
+    filename=$(basename "$url")
+    mkdir -p "$dest_dir"
+    echo "Connecting to $(echo "$url" | cut -d/ -f3)..."
+    wget -c --connect-timeout=30 --progress=bar:force -P "$dest_dir" "$url"
+    tar -xf "$dest_dir/$filename" -C "$dest_dir"
+    rm "$dest_dir/$filename"
+}
 
-echo "Downloading PaddleOCR models (det/rec/cls, lang=en)..."
-# PaddleOCR downloads to ~/.paddleocr — redirect HOME so files land in MODELS_DIR
-FAKE_HOME=$(mktemp -d)
-ln -s "$MODELS_DIR" "$FAKE_HOME/.paddleocr"
+echo "Downloading PaddleOCR det model (en_PP-OCRv3, 4MB)..."
+download_and_extract \
+    "https://paddleocr.bj.bcebos.com/PP-OCRv3/english/en_PP-OCRv3_det_infer.tar" \
+    "$MODELS_DIR/whl/det/en"
 
-HOME="$FAKE_HOME" python3 -c "
-from paddleocr import PaddleOCR
-PaddleOCR(lang='en', use_angle_cls=True)
-"
+echo "Downloading PaddleOCR rec model (en_PP-OCRv4, 10MB)..."
+download_and_extract \
+    "https://paddleocr.bj.bcebos.com/PP-OCRv4/english/en_PP-OCRv4_rec_infer.tar" \
+    "$MODELS_DIR/whl/rec/en"
 
-rm -rf "$FAKE_HOME"
+echo "Downloading PaddleOCR cls model (2MB)..."
+download_and_extract \
+    "https://paddleocr.bj.bcebos.com/dygraph_v2.0/ch/ch_ppocr_mobile_v2.0_cls_infer.tar" \
+    "$MODELS_DIR/whl/cls"
 
 echo "Done. Files in $MODELS_DIR:"
-ls -lh "$MODELS_DIR"
+ls -lhR "$MODELS_DIR/whl"
