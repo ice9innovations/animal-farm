@@ -53,8 +53,16 @@ start_service() {
 
     mkdir -p "$LOG_DIR" "$PID_DIR"
     nohup bash "$dir/run.sh" >> "$LOG_DIR/${name}.log" 2>&1 &
-    echo $! > "$PID_DIR/${name}.pid"
-    echo "✅ Started $name (PID $!)"
+    local pid=$!
+    echo $pid > "$PID_DIR/${name}.pid"
+    sleep 2
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "✅ Started $name (PID $pid)"
+    else
+        rm -f "$PID_DIR/${name}.pid"
+        echo "❌ $name failed to start — check logs/${name}.log"
+        return 1
+    fi
 }
 
 stop_service() {
