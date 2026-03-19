@@ -14,6 +14,10 @@ MODELS_PATH="${1:?Usage: $0 <models_path>  e.g. $0 /workspace}"
 
 REPO_DIR="$(dirname "$0")"
 
+# Stage downloads on the network volume, not the container's overlay disk
+export TMPDIR="$MODELS_PATH/tmp"
+mkdir -p "$TMPDIR"
+
 echo "=== Animal Farm model download ==="
 echo "Target: $MODELS_PATH"
 echo ""
