@@ -23,7 +23,10 @@ get_all_services() {
 
 service_pid() {
     local name="$1"
+    local dir="$SCRIPT_DIR/$name"
     local pid_file="$PID_DIR/${name}.pid"
+
+    # Check PID file first
     if [ -f "$pid_file" ]; then
         local pid
         pid=$(cat "$pid_file")
@@ -34,6 +37,15 @@ service_pid() {
             rm -f "$pid_file"
         fi
     fi
+
+    # Fall back to pgrep on the service's venv python — catches manually-started instances
+    local pid
+    pid=$(pgrep -f "$dir/venv/bin/python" 2>/dev/null | head -1)
+    if [ -n "$pid" ]; then
+        echo "$pid"
+        return 0
+    fi
+
     return 1
 }
 
@@ -84,11 +96,14 @@ stop_service() {
         kill "$pid" 2>/dev/null
     fi
 
+    # Also kill any matching venv python processes (handles untracked instances)
+    local dir="$SCRIPT_DIR/$name"
+    pkill -f "$dir/venv/bin/python" 2>/dev/null || true
+
     sleep 3
 
-    if service_pid "$name" >/dev/null; then
-        kill -9 "$pid" 2>/dev/null
-    fi
+    # Force kill anything still alive
+    pkill -9 -f "$dir/venv/bin/python" 2>/dev/null || true
 
     rm -f "$PID_DIR/${name}.pid"
     echo "✅ Stopped $name"
