@@ -24,8 +24,12 @@ if [ -f "$BINARY" ]; then
     exit 0
 fi
 
-echo "Cloning llama.cpp to $BUILD_DIR..."
-git clone https://github.com/ggerganov/llama.cpp "$BUILD_DIR"
+if [ ! -d "$BUILD_DIR" ]; then
+    echo "Cloning llama.cpp to $BUILD_DIR..."
+    git clone https://github.com/ggerganov/llama.cpp "$BUILD_DIR"
+else
+    echo "llama.cpp source already at $BUILD_DIR — skipping clone, building..."
+fi
 
 cd "$BUILD_DIR"
 
