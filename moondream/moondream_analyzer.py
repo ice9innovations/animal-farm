@@ -8,7 +8,13 @@ AutoModelForCausalLM with trust_remote_code=True.
 Model source: vikhyatk/moondream2 (cached via HuggingFace)
 """
 
+import os
 import logging
+
+# Map MODEL_DIR → HF_HOME before transformers is imported
+if os.environ.get('MODEL_DIR'):
+    os.environ['HF_HOME'] = os.environ['MODEL_DIR']
+
 import torch
 from PIL import Image
 from typing import Dict, Any, Optional
