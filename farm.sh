@@ -213,7 +213,7 @@ start_all() {
 
 stop_all() {
     echo "Stopping all services..."
-    for name in $(get_all_services); do
+    for name in $(get_enabled_services); do
         stop_service "$name"
     done
 }
