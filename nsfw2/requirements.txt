@@ -11,5 +11,3 @@ matplotlib>=3.0.0
 numpy>=1.22.0
 opencv-python>=4.0.0.0
 scikit-image>=0.21.0
-nvidia-cublas-cu12==12.9.1.4
-nvidia-cudnn-cu12==9.11.0.98
