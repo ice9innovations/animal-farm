@@ -14,6 +14,7 @@ SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 SERVICE_NAME="florence2"
 CURRENT_USER="$(whoami)"
 
+rm -rf "$SCRIPT_DIR/venv"
 python3.11 -m venv "$SCRIPT_DIR/venv"
 source "$SCRIPT_DIR/venv/bin/activate"
 

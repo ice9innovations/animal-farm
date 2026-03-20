@@ -23,6 +23,7 @@ else
     echo "LAVIS already present at $LAVIS_DIR"
 fi
 
+rm -rf "$SCRIPT_DIR/venv"
 python3.11 -m venv "$SCRIPT_DIR/venv"
 source "$SCRIPT_DIR/venv/bin/activate"
 
