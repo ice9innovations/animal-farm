@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build llama-server binary with CUDA support.
-# Run once per pod before starting this service.
-# qwen-cpp has its own copy of this script.
+# Run once per pod before starting llama-cpp or qwen-cpp services.
+# The binary is shared by both services.
 #
 # Output: /workspace/llama-cpp/build/bin/llama-server
 #
