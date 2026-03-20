@@ -19,6 +19,7 @@ load_dotenv()
 PORT_STR = os.getenv('PORT')
 PRIVATE_STR = os.getenv('PRIVATE')
 DETECTION_THRESHOLD_STR = os.getenv('DETECTION_THRESHOLD')
+AUTO_UPDATE_STR = os.getenv('AUTO_UPDATE')
 
 # Step 2: Validate critical environment variables
 if not PORT_STR:
@@ -27,11 +28,16 @@ if not PRIVATE_STR:
     raise ValueError("PRIVATE environment variable is required")
 if not DETECTION_THRESHOLD_STR:
     raise ValueError("DETECTION_THRESHOLD environment variable is required")
+if not AUTO_UPDATE_STR:
+    raise ValueError("AUTO_UPDATE environment variable is required")
 
 # Step 3: Convert to appropriate types after validation
 PORT = int(PORT_STR)
 PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
 DETECTION_THRESHOLD = float(DETECTION_THRESHOLD_STR)
+AUTO_UPDATE = AUTO_UPDATE_STR.lower() in ['true', '1', 'yes']
+
+_SERVICE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
 
@@ -48,20 +54,39 @@ except ImportError as e:
     logger.error("Install with: pip install nudenet")
     NUDENET_AVAILABLE = False
 
-# Load emoji mappings from local JSON file
+# Load emoji mappings from GitHub or local cache
 def load_emoji_mappings() -> Dict[str, str]:
-    """Load emoji mappings from local JSON file"""
-    local_cache_path = os.path.join(os.path.dirname(__file__), 'emoji_mappings.json')
+    local_cache_path = os.path.join(_SERVICE_DIR, 'emoji_mappings.json')
+
+    if AUTO_UPDATE:
+        github_url = "https://raw.githubusercontent.com/ice9innovations/animal-farm/refs/heads/main/config/emoji_mappings.json"
+        try:
+            logger.info("NudeNet: Loading emoji mappings from GitHub")
+            response = requests.get(github_url, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            try:
+                with open(local_cache_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+            except Exception as cache_error:
+                logger.warning(f"NudeNet: Failed to cache emoji mappings: {cache_error}")
+            logger.info("NudeNet: Emoji mappings loaded from GitHub")
+            return data
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"NudeNet: GitHub emoji load failed: {e}")
+    else:
+        logger.info("NudeNet: AUTO_UPDATE disabled, using local emoji cache")
 
     try:
-        logger.info(f"Loading emoji mappings from: {local_cache_path}")
         with open(local_cache_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        logger.info("✅ Successfully loaded emoji mappings")
+        logger.info("NudeNet: Emoji mappings loaded from local cache")
         return data
     except (FileNotFoundError, json.JSONDecodeError) as e:
-        logger.error(f"❌ Failed to load emoji mappings from {local_cache_path}: {e}")
-        raise Exception(f"Failed to load emoji mappings: {e}")
+        logger.error(f"NudeNet: Failed to load emoji mappings: {e}")
+        if AUTO_UPDATE:
+            raise Exception(f"Failed to load emoji mappings from GitHub and local cache: {e}")
+        raise Exception(f"Failed to load emoji mappings - no local cache and AUTO_UPDATE=False: {e}")
 
 # Load emoji mappings on startup
 emoji_mappings = load_emoji_mappings()
