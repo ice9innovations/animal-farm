@@ -1,9 +1,8 @@
 #!/bin/bash
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 source "$SCRIPT_DIR/.env"
-source "$SCRIPT_DIR/venv/bin/activate"
 
-LLAMA_BIN="${LLAMA_SERVER_BIN:-llama-server}"
+LLAMA_BIN="${LLAMA_SERVER_BIN}"
 
 # Start llama-server in the background
 "$LLAMA_BIN" \
@@ -25,4 +24,4 @@ done
 echo "llama-server ready."
 
 cd "$SCRIPT_DIR"
-exec python REST.py
+exec "$SCRIPT_DIR/venv/bin/python" REST.py
