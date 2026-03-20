@@ -21,6 +21,13 @@ CURRENT_USER="$(whoami)"
 export TMPDIR=/workspace/tmp
 mkdir -p "$TMPDIR"
 
+# Read BACKEND from .env to download only what's needed
+BACKEND="all"
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    _backend=$(grep -s '^BACKEND=' "$SCRIPT_DIR/.env" | cut -d= -f2 | tr -d ' \r')
+    [ -n "$_backend" ] && BACKEND="$_backend"
+fi
+
 # Clone BEN2 model code to network volume
 BEN2_CODE_DIR="/workspace/rembg/BEN2"
 if [ ! -f "$BEN2_CODE_DIR/BEN2.py" ]; then
@@ -32,7 +39,7 @@ else
 fi
 
 # Download model weights
-bash "$SCRIPT_DIR/download_models.sh" /workspace/rembg/models
+bash "$SCRIPT_DIR/download_models.sh" /workspace/rembg/models "$BACKEND"
 
 rm -rf "$SCRIPT_DIR/venv"
 python3.11 -m venv "$SCRIPT_DIR/venv"
