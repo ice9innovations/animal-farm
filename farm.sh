@@ -7,9 +7,11 @@
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 LOG_DIR="$SCRIPT_DIR/logs"
 PID_DIR="$SCRIPT_DIR/.pids"
+STATE_FILE="$SCRIPT_DIR/.farm_state"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
+YELLOW='\033[1;33m'
 NC='\033[0m'
 
 ACTION="$1"
@@ -19,6 +21,45 @@ get_all_services() {
     for run_sh in "$SCRIPT_DIR"/*/run.sh; do
         [ -f "$run_sh" ] && basename "$(dirname "$run_sh")"
     done | sort
+}
+
+state_add() {
+    local name="$1"
+    touch "$STATE_FILE"
+    if ! grep -qx "$name" "$STATE_FILE"; then
+        echo "$name" >> "$STATE_FILE"
+    fi
+}
+
+state_remove() {
+    local name="$1"
+    if [ -f "$STATE_FILE" ]; then
+        grep -vx "$name" "$STATE_FILE" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
+    fi
+}
+
+get_enabled_services() {
+    if [ -f "$STATE_FILE" ] && [ -s "$STATE_FILE" ]; then
+        cat "$STATE_FILE"
+    fi
+}
+
+bootstrap_state_from_running() {
+    echo "  No state file found — scanning running processes to build initial state..."
+    local found=0
+    for name in $(get_all_services); do
+        local dir="$SCRIPT_DIR/$name"
+        if pgrep -f "$dir/venv/bin/python" >/dev/null 2>&1; then
+            state_add "$name"
+            echo "  Found running: $name"
+            found=$((found + 1))
+        fi
+    done
+    if [ "$found" -eq 0 ]; then
+        echo -e "${YELLOW}  No running services found. Use './farm.sh start <service>' to enable services.${NC}"
+    else
+        echo "  State file initialized with $found service(s)."
+    fi
 }
 
 service_pid() {
@@ -64,6 +105,7 @@ start_service() {
     fi
 
     mkdir -p "$LOG_DIR" "$PID_DIR"
+    state_add "$name"
     nohup bash "$dir/run.sh" >> "$LOG_DIR/${name}.log" 2>&1 &
     local pid=$!
     echo $pid > "$PID_DIR/${name}.pid"
@@ -106,6 +148,7 @@ stop_service() {
     pkill -9 -f "$dir/venv/bin/python" 2>/dev/null || true
 
     rm -f "$PID_DIR/${name}.pid"
+    state_remove "$name"
     echo "✅ Stopped $name"
 }
 
@@ -125,8 +168,22 @@ status_all() {
 
 start_all() {
     mkdir -p "$LOG_DIR" "$PID_DIR"
-    echo "Starting all services..."
-    for name in $(get_all_services); do
+
+    if [ ! -f "$STATE_FILE" ]; then
+        bootstrap_state_from_running
+    fi
+
+    local enabled
+    enabled=$(get_enabled_services)
+
+    if [ -z "$enabled" ]; then
+        echo -e "${YELLOW}⚠️  No enabled services on this machine.${NC}"
+        echo "    Use './farm.sh start <service>' to enable services."
+        return
+    fi
+
+    echo "Starting enabled services..."
+    for name in $enabled; do
         start_service "$name"
     done
 }
