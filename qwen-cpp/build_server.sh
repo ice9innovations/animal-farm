@@ -3,7 +3,7 @@
 # Run once per pod before starting llama-cpp or qwen-cpp services.
 # The binary is shared by both services.
 #
-# Output: /workspace/llama-cpp/build/bin/llama-server
+# Output: /workspace/llama-server/build/bin/llama-server
 #
 # Usage:
 #   bash build_server.sh [CUDA_ARCH]
@@ -15,8 +15,13 @@
 #   bash build_server.sh 90    # H100
 set -e
 
+if ! command -v cmake &>/dev/null; then
+    echo "cmake not found — installing..."
+    apt-get update -qq && apt-get install -y cmake
+fi
+
 CUDA_ARCH="${1:-80;86;89;90}"
-BUILD_DIR="/workspace/llama-cpp"
+BUILD_DIR="/workspace/llama-server"
 BINARY="$BUILD_DIR/build/bin/llama-server"
 
 if [ -f "$BINARY" ]; then
