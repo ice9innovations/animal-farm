@@ -15,7 +15,7 @@ download_and_extract() {
     mkdir -p "$dest_dir"
     echo "Connecting to $(echo "$url" | cut -d/ -f3)..."
     wget -c --connect-timeout=30 --progress=bar:force -P "$dest_dir" "$url"
-    tar -xf "$dest_dir/$filename" -C "$dest_dir"
+    tar --no-same-owner -xf "$dest_dir/$filename" -C "$dest_dir"
     rm "$dest_dir/$filename"
 }
 
