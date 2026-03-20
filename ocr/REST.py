@@ -33,6 +33,7 @@ PORT_STR = os.getenv('PORT')
 PRIVATE_STR = os.getenv('PRIVATE')
 TIMEOUT_STR = os.getenv('TIMEOUT')
 AUTO_UPDATE_STR = os.getenv('AUTO_UPDATE')
+MODEL_DIR = os.getenv('MODEL_DIR')
 
 # Step 2: Validate critical environment variables
 if not PORT_STR:
@@ -43,6 +44,8 @@ if not TIMEOUT_STR:
     raise ValueError("TIMEOUT environment variable is required")
 if not AUTO_UPDATE_STR:
     raise ValueError("AUTO_UPDATE environment variable is required")
+if not MODEL_DIR:
+    raise ValueError("MODEL_DIR environment variable is required")
 
 # Step 3: Convert to appropriate types after validation
 PORT = int(PORT_STR)
@@ -62,7 +65,13 @@ os.makedirs(FOLDER, exist_ok=True)
 
 # Initialize PaddleOCR (run once)
 print("Initializing PaddleOCR...")
-ocr_engine = PaddleOCR(lang='en', use_angle_cls=True)
+ocr_engine = PaddleOCR(
+    lang='en',
+    use_angle_cls=True,
+    det_model_dir=os.path.join(MODEL_DIR, 'whl/det/en'),
+    rec_model_dir=os.path.join(MODEL_DIR, 'whl/rec/en'),
+    cls_model_dir=os.path.join(MODEL_DIR, 'whl/cls'),
+)
 print("PaddleOCR initialized successfully")
 
 def create_ocr_response(data: Dict[str, Any], processing_time: float) -> Dict[str, Any]:
