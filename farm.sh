@@ -171,7 +171,6 @@ stop_service() {
     fi
 
     rm -f "$PID_DIR/${name}.pid"
-    state_remove "$name"
     echo "✅ Stopped $name"
 }
 
@@ -229,6 +228,7 @@ case "$ACTION" in
     stop)
         if [ -n "$TARGET" ]; then
             stop_service "$TARGET"
+            state_remove "$TARGET"
         else
             stop_all
         fi
