@@ -121,31 +121,54 @@ start_service() {
 
 stop_service() {
     local name="$1"
+    local dir="$SCRIPT_DIR/$name"
+    local stopped=0
+
+    # Kill via PID file or pgrep
     local pid
     pid=$(service_pid "$name")
+    if [ -n "$pid" ]; then
+        local pgid
+        pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')
+        if [ -n "$pgid" ] && [ "$pgid" != "0" ]; then
+            kill -- -"$pgid" 2>/dev/null
+        else
+            kill "$pid" 2>/dev/null
+        fi
+        stopped=1
+    fi
 
-    if [ -z "$pid" ]; then
+    # Kill any venv python processes (handles untracked instances)
+    if pkill -f "$dir/venv/bin/python" 2>/dev/null; then
+        stopped=1
+    fi
+
+    # Kill anything holding the service's port (handles pre-venv-path instances)
+    local port
+    port=$(grep -s '^PORT=' "$dir/.env" | cut -d= -f2 | tr -d ' \r')
+    if [ -n "$port" ]; then
+        local port_pid
+        port_pid=$(ss -tlnp "sport = :$port" 2>/dev/null | awk 'NR>1 {match($0, /pid=([0-9]+)/, a); if (a[1]) print a[1]}')
+        if [ -n "$port_pid" ]; then
+            kill "$port_pid" 2>/dev/null
+            stopped=1
+        fi
+    fi
+
+    if [ "$stopped" -eq 0 ]; then
         echo "❌ $name not running"
         return 1
     fi
 
-    # Kill the process group so the python child dies with the bash wrapper
-    local pgid
-    pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')
-    if [ -n "$pgid" ] && [ "$pgid" != "0" ]; then
-        kill -- -"$pgid" 2>/dev/null
-    else
-        kill "$pid" 2>/dev/null
-    fi
+    sleep 2
 
-    # Also kill any matching venv python processes (handles untracked instances)
-    local dir="$SCRIPT_DIR/$name"
-    pkill -f "$dir/venv/bin/python" 2>/dev/null || true
-
-    sleep 3
-
-    # Force kill anything still alive
+    # Force kill anything still alive on the venv path or port
     pkill -9 -f "$dir/venv/bin/python" 2>/dev/null || true
+    if [ -n "$port" ]; then
+        local port_pid
+        port_pid=$(ss -tlnp "sport = :$port" 2>/dev/null | awk 'NR>1 {match($0, /pid=([0-9]+)/, a); if (a[1]) print a[1]}')
+        [ -n "$port_pid" ] && kill -9 "$port_pid" 2>/dev/null || true
+    fi
 
     rm -f "$PID_DIR/${name}.pid"
     state_remove "$name"
