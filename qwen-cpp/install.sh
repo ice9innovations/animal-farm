@@ -18,6 +18,8 @@ SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 SERVICE_NAME="qwen-cpp"
 CURRENT_USER="$(whoami)"
 
+bash "$(dirname "$(realpath "$0")")/../llama-cpp/build_server.sh"
+
 rm -rf "$SCRIPT_DIR/venv"
 python3.11 -m venv "$SCRIPT_DIR/venv"
 source "$SCRIPT_DIR/venv/bin/activate"

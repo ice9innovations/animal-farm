@@ -17,9 +17,14 @@ set -e
 
 CUDA_ARCH="${1:-80;86;89;90}"
 BUILD_DIR="/workspace/llama-cpp"
+BINARY="$BUILD_DIR/build/bin/llama-server"
+
+if [ -f "$BINARY" ]; then
+    echo "llama-server already built at $BINARY — skipping."
+    exit 0
+fi
 
 echo "Cloning llama.cpp to $BUILD_DIR..."
-rm -rf "$BUILD_DIR"
 git clone https://github.com/ggerganov/llama.cpp "$BUILD_DIR"
 
 cd "$BUILD_DIR"
