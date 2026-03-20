@@ -55,7 +55,7 @@ PRIVATE=true
 XAI_API_KEY=xai-...
 
 # Model to use — see https://docs.x.ai/docs/models
-MODEL=grok-2-vision-1212
+MODEL=grok-4-1-fast-non-reasoning
 
 # Vision prompt sent with every image
 PROMPT="Briefly describe this image in a single short sentence including the number and type of people if any are present and what they are doing and any text included in the image, also mentioning nudity and explicit content if applicable."
@@ -89,7 +89,7 @@ GET /health
 {
   "status": "healthy",
   "service": "xAI Grok Vision",
-  "model": "grok-2-vision-1212"
+  "model": "grok-4-1-fast-non-reasoning"
 }
 ```
 
@@ -123,7 +123,7 @@ An optional `prompt` parameter overrides the default vision prompt for a single 
     "processing_time": 1.243,
     "model_info": {
       "framework": "xai",
-      "model": "grok-2-vision-1212",
+      "model": "grok-4-1-fast-non-reasoning",
       "input_tokens": 312,
       "output_tokens": 14
     }
