@@ -348,12 +348,12 @@ def health_check():
         return jsonify({
             "status": status,
             "reason": f"llama-server unreachable: {str(e)}",
-            "service": "Qwen3-VL Vision API",
+            "service": f"{MODEL_NAME} Vision API",
         }), 503
 
     return jsonify({
         "status": status,
-        "service": "Qwen3-VL Vision API",
+        "service": f"{MODEL_NAME} Vision API",
         "llama_server": {
             "host": LLAMA_SERVER_HOST,
             "status": server_status.get("status"),
@@ -448,7 +448,7 @@ def analyze():
 
 
 if __name__ == '__main__':
-    logger.info("Starting Qwen3-VL vision service (llama.cpp)...")
+    logger.info(f"Starting {MODEL_NAME} vision service (llama.cpp)...")
     logger.info(f"Port: {PORT}")
     logger.info(f"llama-server: {LLAMA_SERVER_HOST}")
     logger.info(f"Private mode: {PRIVATE}")
