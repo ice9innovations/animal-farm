@@ -148,7 +148,7 @@ stop_service() {
     port=$(grep -s '^PORT=' "$dir/.env" | cut -d= -f2 | tr -d ' \r')
     if [ -n "$port" ]; then
         local port_pid
-        port_pid=$(ss -tlnp "sport = :$port" 2>/dev/null | awk 'NR>1 {match($0, /pid=([0-9]+)/, a); if (a[1]) print a[1]}')
+        port_pid=$(ss -tlnp "sport = :$port" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
         if [ -n "$port_pid" ]; then
             kill "$port_pid" 2>/dev/null
             stopped=1
@@ -166,7 +166,7 @@ stop_service() {
     pkill -9 -f "$dir/venv/bin/python" 2>/dev/null || true
     if [ -n "$port" ]; then
         local port_pid
-        port_pid=$(ss -tlnp "sport = :$port" 2>/dev/null | awk 'NR>1 {match($0, /pid=([0-9]+)/, a); if (a[1]) print a[1]}')
+        port_pid=$(ss -tlnp "sport = :$port" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
         [ -n "$port_pid" ] && kill -9 "$port_pid" 2>/dev/null || true
     fi
 
