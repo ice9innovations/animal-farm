@@ -33,7 +33,7 @@ pip install --no-cache-dir \
 pip install --no-cache-dir -r "$SCRIPT_DIR/requirements.txt"
 
 # Download required NLTK data
-python -c "import nltk; nltk.download('punkt')"
+"$SCRIPT_DIR/venv/bin/python" -c "import nltk; nltk.download('punkt')"
 
 # Generate systemd service file
 SERVICE_FILE="$SCRIPT_DIR/$SERVICE_NAME.service"

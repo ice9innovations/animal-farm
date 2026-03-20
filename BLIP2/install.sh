@@ -45,7 +45,7 @@ pip install --no-cache-dir -r "$SCRIPT_DIR/requirements.txt"
 pip install -e "$LAVIS_DIR" --no-deps
 
 # Download required NLTK data
-python -c "import nltk; nltk.download('punkt')"
+"$SCRIPT_DIR/venv/bin/python" -c "import nltk; nltk.download('punkt')"
 
 # Generate systemd service file
 SERVICE_FILE="$SCRIPT_DIR/$SERVICE_NAME.service"
