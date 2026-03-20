@@ -13,7 +13,7 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 ACTION="$1"
-TARGET="$2"
+TARGET="${2%/}"
 
 get_all_services() {
     for run_sh in "$SCRIPT_DIR"/*/run.sh; do
