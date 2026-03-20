@@ -1,0 +1,41 @@
+#!/bin/bash
+# Build llama-server binary with CUDA support.
+# Run once per pod before starting llama-cpp or qwen-cpp services.
+# The binary is shared by both services.
+#
+# Output: /workspace/llama-cpp/build/bin/llama-server
+#
+# Usage:
+#   bash build_server.sh [CUDA_ARCH]
+#
+# CUDA_ARCH defaults to 80;86;89;90 (covers A100, RTX 3090/4090, A40, H100).
+# Override for your specific GPU:
+#   bash build_server.sh 86    # RTX 3090 / A40
+#   bash build_server.sh 89    # RTX 4090 / L40
+#   bash build_server.sh 90    # H100
+set -e
+
+CUDA_ARCH="${1:-80;86;89;90}"
+BUILD_DIR="/workspace/llama-cpp"
+
+echo "Cloning llama.cpp to $BUILD_DIR..."
+rm -rf "$BUILD_DIR"
+git clone https://github.com/ggerganov/llama.cpp "$BUILD_DIR"
+
+cd "$BUILD_DIR"
+
+# Conda puts a stub nvcc and wrong gcc on PATH — use system compilers explicitly
+CC=/usr/bin/gcc-11 CXX=/usr/bin/g++-11 \
+    cmake -B build \
+    -DGGML_CUDA=ON \
+    -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCH}" \
+    -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
+    -DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-11 \
+    -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath-link,/usr/local/cuda/lib64/stubs" \
+    -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-rpath-link,/usr/local/cuda/lib64/stubs"
+
+cmake --build build --config Release -j$(nproc) --target llama-server
+
+echo ""
+echo "Built: $BUILD_DIR/build/bin/llama-server"
+echo "Set LLAMA_SERVER_BIN=$BUILD_DIR/build/bin/llama-server in .env"
