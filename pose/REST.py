@@ -49,7 +49,7 @@ AUTO_UPDATE = AUTO_UPDATE_STR.lower() == 'true'
 POSE_MIN_DETECTION_CONFIDENCE = float(os.getenv('POSE_MIN_DETECTION_CONFIDENCE', '0.5'))
 POSE_MIN_TRACKING_CONFIDENCE = float(os.getenv('POSE_MIN_TRACKING_CONFIDENCE', '0.5'))
 POSE_MODEL_COMPLEXITY = int(os.getenv('POSE_MODEL_COMPLEXITY', '2'))
-ENABLE_SEGMENTATION = os.getenv('ENABLE_SEGMENTATION', 'true').lower() == 'true'
+ENABLE_SEGMENTATION = os.getenv('ENABLE_SEGMENTATION', 'false').lower() == 'true'
 USE_GPU = os.getenv('USE_GPU', 'true').lower() == 'true'
 
 # Global emoji mappings - loaded from API on startup
