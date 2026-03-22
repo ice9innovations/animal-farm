@@ -70,7 +70,7 @@ logger.info(f"Using device: {device}")
 # Global variables for model and data
 model = None
 
-# Load emoji mappings from central API
+# Load emoji mappings from GitHub with local cache fallback
 emoji_mappings = {}
 
 def load_emoji_mappings():
@@ -378,7 +378,7 @@ def process_yolo_results(results) -> List[Dict[str, Any]]:
             
             # Only include detections above confidence threshold
             if confidence >= CONFIDENCE_THRESHOLD:
-                # Look up emoji from central API
+                # Look up emoji from the local mapping set
                 try:
                     emoji = lookup_emoji(class_name)
                 except RuntimeError as e:

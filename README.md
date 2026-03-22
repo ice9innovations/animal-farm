@@ -33,12 +33,6 @@ Animal Farm consists of multiple specialized AI services that work together in a
 | **yolo_oi7** | 7791 | YOLO object detection with OpenImages v7 dataset |
 | **yolov8** | 7773 | Real-time object detection |
 
-## Central API
-
-| Service | Port | Description |
-|---------|------|-------------|
-| **api** | 8080 | Central coordination API, emoji mappings, and voting system |
-
 ## Quick Start
 
 ### Prerequisites
@@ -98,11 +92,10 @@ This creates an intelligent democracy where consensus amplifies evidence rather 
 
 ## API Integration
 
-Services are designed to work together through a centralized API architecture:
+Services are designed to work independently or as part of a larger distributed deployment:
 
-- **Central API (port 8080)**: Provides emoji mappings, voting coordination, and system-wide configuration
 - **Service APIs**: Each AI service exposes unified `/analyze` endpoints supporting URL, file, and POST inputs
-- **Unified Response Format**: All services follow consistent JSON response schemas with metadata, predictions, and processing times
+- **Unified Response Format**: Services follow consistent JSON response schemas with metadata, predictions, and processing times
 - **In-Memory Processing**: Services process images entirely in RAM using PIL Images for security and performance
 
 ### Example API Usage
@@ -164,7 +157,7 @@ curl -X POST -F "file=@/path/to/image.jpg" http://192.168.0.101:7777/analyze | j
 
 - **Port Allocation**: Each service has a dedicated port (see table above)
 - **Environment Configuration**: Use `.env` files for configuration
-- **API Integration**: Connect to central API (port 8080) for emoji mappings
+- **API Integration**: Expose a consistent HTTP interface for downstream consumers and orchestrators
 - **Error Handling**: Comprehensive error handling with detailed logging
 - **Documentation**: Complete README with setup instructions and API documentation
 
