@@ -9,7 +9,6 @@ import os
 import io
 import time
 import logging
-import tempfile
 import uuid
 import json
 import random
@@ -432,99 +431,8 @@ def analyze_v3_compat():
 
 @app.route('/v3/analyze_old', methods=['GET', 'POST'])
 def analyze_v3():
-    """Unified V3 API endpoint for both URL and file path analysis"""
-    start_time = time.time()
-    
-    try:
-        # Handle POST file upload
-        if request.method == 'POST':
-            # Check for file upload
-            if 'file' not in request.files:
-                return build_error_response("No file provided in POST request", start_time, 400)
-            
-            file = request.files['file']
-            if file.filename == '':
-                return build_error_response("No file selected", start_time, 400)
-            
-            # Validate file size
-            file.seek(0, 2)  # Seek to end
-            file_size = file.tell()
-            file.seek(0)     # Seek back to beginning
-            
-            if file_size > MAX_FILE_SIZE:
-                return build_error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB", start_time, 400)
-            
-            # Process uploaded file
-            try:
-                # Save to temporary file for processing
-                with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
-                    temp_path = temp_file.name
-                    file.save(temp_path)
-                
-                # Use the new unified analyze function
-                try:
-                    image = Image.open(temp_path).convert('RGB')
-                    result = process_image_for_faces(image)
-                    if not result["success"]:
-                        return build_error_response(result["error"], start_time, 500)
-                    return jsonify(create_face_response(result["data"], result["processing_time"]))
-                except Exception as e:
-                    return build_error_response(f"Failed to process image: {str(e)}", start_time, 500)
-                
-            except Exception as e:
-                return build_error_response(f"Failed to process uploaded image: {str(e)}", start_time, 500)
-            finally:
-                # Clean up temporary file
-                try:
-                    if 'temp_path' in locals() and os.path.exists(temp_path):
-                        os.unlink(temp_path)
-                except Exception as e:
-                    logger.warning(f"Could not clean up temp file: {e}")
-        
-        # Handle GET requests
-        # Get parameters from query string
-        url = request.args.get('url')
-        file_path = request.args.get('file')
-        
-        # Validate input - exactly one parameter required
-        if not url and not file_path:
-            return build_error_response("Must provide either 'url' or 'file' parameter", start_time, 400)
-        
-        if url and file_path:
-            return build_error_response("Cannot provide both 'url' and 'file' parameters - choose one", start_time, 400)
-        
-        # Handle URL input
-        if url:
-            try:
-                image = download_image_from_url(url)
-                result = process_image_for_faces(image)
-                if not result["success"]:
-                    return build_error_response(result["error"], start_time, 500)
-                return jsonify(create_face_response(result["data"], result["processing_time"]))
-            except Exception as e:
-                return build_error_response(f"Failed to process URL: {str(e)}", start_time, 500)
-
-        # Handle file path input
-        elif file_path:
-            # Validate file path
-            if not os.path.exists(file_path):
-                return build_error_response(f"File not found: {file_path}", start_time, 404)
-
-            if not allowed_file(file_path):
-                return build_error_response("File type not allowed", start_time, 400)
-
-            try:
-                image = Image.open(file_path).convert('RGB')
-                result = process_image_for_faces(image)
-                if not result["success"]:
-                    return build_error_response(result["error"], start_time, 500)
-                return jsonify(create_face_response(result["data"], result["processing_time"]))
-            except Exception as e:
-                return build_error_response(f"Failed to process file: {str(e)}", start_time, 500)
-        
-    except Exception as e:
-        logger.error(f"Error in V3 analysis: {str(e)}")
-        return build_error_response(str(e), start_time, 500)
+    """Legacy V3 alias for the unified in-memory analyze endpoint."""
+    return analyze()
 
 @app.route('/v2/analyze_file', methods=['GET'])
 def analyze_file_v2_compat():

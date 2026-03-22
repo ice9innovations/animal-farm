@@ -34,5 +34,4 @@ ENV PRIVATE=false \
 
 EXPOSE 7781
 
-CMD ["python3", "REST.py"]
-
+CMD ["sh", "-c", "install -d -m 700 /dev/shm/animal-farm-metadata && exec python3 REST.py"]

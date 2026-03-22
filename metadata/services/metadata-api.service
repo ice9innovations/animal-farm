@@ -1,6 +1,7 @@
 [Unit]
 Description=Metadata Extraction REST API Service
 After=network.target
+RequiresMountsFor=/dev/shm
 StartLimitIntervalSec=0
 
 [Service]
@@ -9,6 +10,7 @@ Restart=always
 RestartSec=10
 User=sd
 WorkingDirectory=/home/sd/animal-farm/metadata
+ExecStartPre=/usr/bin/install -d -m 700 /dev/shm/animal-farm-metadata
 ExecStart=/home/sd/animal-farm/metadata/metadata.sh
 
 [Install]

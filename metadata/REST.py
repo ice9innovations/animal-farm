@@ -38,10 +38,14 @@ PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
 PORT = int(PORT_STR)
 
 FOLDER = './uploads'
+if not os.path.isdir('/dev/shm'):
+    raise ValueError("metadata service requires /dev/shm for non-persistent temp storage")
+TEMP_FOLDER = '/dev/shm/animal-farm-metadata'
 MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
 
 # Ensure upload directory exists
 os.makedirs(FOLDER, exist_ok=True)
+os.makedirs(TEMP_FOLDER, exist_ok=True)
 
 def cleanup_file(filepath: str) -> None:
     """Safely remove temporary file"""
@@ -420,8 +424,12 @@ def categorize_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
 
 def extract_comprehensive_metadata(image_file: str, cleanup: bool = True) -> Dict[str, Any]:
     """Extract maximum possible metadata from image using multiple methods"""
-    start_time = time.time()
     full_path = os.path.join(FOLDER, image_file)
+    return extract_comprehensive_metadata_from_path(full_path, cleanup=cleanup)
+
+def extract_comprehensive_metadata_from_path(full_path: str, cleanup: bool = True) -> Dict[str, Any]:
+    """Extract maximum possible metadata from a file path."""
+    start_time = time.time()
     
     try:
         # Basic file information
@@ -760,9 +768,8 @@ def load_image_bytes(file_path: str) -> bytes:
 
 def process_image_for_metadata(image_bytes: bytes) -> dict:
     """Main processing function - takes raw image bytes, returns metadata data.
-    Writes original bytes directly to disk so ExifTool sees the real embedded metadata."""
+    Uses a private per-request temporary directory under /dev/shm for ExifTool."""
     import tempfile
-    temp_filename = None
     try:
         # Detect original format for the correct file extension
         with Image.open(io.BytesIO(image_bytes)) as img:
@@ -771,13 +778,14 @@ def process_image_for_metadata(image_bytes: bytes) -> dict:
                    'GIF': '.gif', 'TIFF': '.tif', 'BMP': '.bmp'}
         suffix = ext_map.get(fmt, '.jpg')
 
-        # Write original bytes — preserves EXIF and original encoding
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=FOLDER) as tmp_file:
-            temp_filename = os.path.basename(tmp_file.name)
-            tmp_file.write(image_bytes)
-        
-        # Extract metadata using existing function
-        result = extract_comprehensive_metadata(temp_filename, cleanup=True)
+        # ExifTool requires a real path. Keep it in a private tmpfs-backed directory
+        # and unlink the file as soon as extraction completes.
+        with tempfile.TemporaryDirectory(dir=TEMP_FOLDER, prefix='req-') as temp_dir:
+            temp_path = os.path.join(temp_dir, f'image{suffix}')
+            with open(temp_path, 'wb') as tmp_file:
+                tmp_file.write(image_bytes)
+
+            result = extract_comprehensive_metadata_from_path(temp_path, cleanup=True)
         
         if result.get('status') == 'error':
             return {
@@ -793,11 +801,6 @@ def process_image_for_metadata(image_bytes: bytes) -> dict:
         }
         
     except Exception as e:
-        # Clean up temp file on error if it exists
-        if temp_filename:
-            temp_path = os.path.join(FOLDER, temp_filename)
-            cleanup_file(temp_path)
-        
         return {
             'success': False,
             'data': {},

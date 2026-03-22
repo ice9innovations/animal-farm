@@ -124,122 +124,7 @@ class RTMDetAnalyzer:
                         "error": "RTMDet analyzer unavailable: MMDetection dependencies not properly installed"
                     }
 
-                # Run RTMDet inference
-                result = inference_detector(self.model, image_path)
-
-                # Debug: Log the result structure
-                logger.info(f"RTMDet inference result type: {type(result)}")
-                logger.info(f"RTMDet inference result attributes: {dir(result) if hasattr(result, '__dict__') else 'No attributes'}")
-
-                # Process results - handle new MMDetection format
-                detections = []
-
-                # Check if result is the new DetDataSample format
-                if hasattr(result, 'pred_instances'):
-                    # New format: DetDataSample with pred_instances
-                    pred_instances = result.pred_instances
-
-                    bboxes = pred_instances.bboxes.cpu().numpy()
-                    scores = pred_instances.scores.cpu().numpy()
-                    labels = pred_instances.labels.cpu().numpy()
-
-                    logger.info(f"RTMDet found {len(bboxes)} raw detections")
-                    if len(scores) > 0:
-                        logger.info(f"Confidence scores range: {scores.min():.3f} to {scores.max():.3f}")
-                        logger.info(f"Confidence threshold: {self.confidence_threshold}")
-
-                        # Count how many pass threshold
-                        above_threshold = (scores >= self.confidence_threshold).sum()
-                        logger.info(f"Detections above threshold: {above_threshold}")
-
-                    for i in range(len(bboxes)):
-                        confidence = float(scores[i])
-                        logger.debug(f"Detection {i}: confidence={confidence:.3f}, threshold={self.confidence_threshold}")
-                        if confidence < self.confidence_threshold:
-                            continue
-
-                        class_idx = int(labels[i])
-                        if class_idx >= len(self.coco_classes):
-                            continue
-
-                        class_name = self.coco_classes[class_idx]
-
-                        x1, y1, x2, y2 = bboxes[i]
-
-                        bbox = {
-                            "x1": int(x1),
-                            "y1": int(y1),
-                            "width": int(x2 - x1),
-                            "height": int(y2 - y1)
-                        }
-
-                        det = {
-                            "class_name": class_name,
-                            "confidence": confidence,
-                            "bbox": bbox
-                        }
-
-                        detections.append(det)
-
-                else:
-                    # Old format: list of arrays (one per class)
-                    # Each array contains [x1, y1, x2, y2, confidence]
-                    for class_idx, class_detections in enumerate(result):
-                        if len(class_detections) == 0:
-                            continue
-
-                        if class_idx >= len(self.coco_classes):
-                            continue
-
-                        class_name = self.coco_classes[class_idx]
-
-                        # Filter by confidence threshold
-                        for detection in class_detections:
-                            confidence = float(detection[4])
-                            if confidence < self.confidence_threshold:
-                                continue
-
-                            x1, y1, x2, y2 = detection[:4]
-
-                            bbox = {
-                                "x1": int(x1),
-                                "y1": int(y1),
-                                "width": int(x2 - x1),
-                                "height": int(y2 - y1)
-                            }
-
-                            det = {
-                                "class_name": class_name,
-                                "confidence": confidence,
-                                "bbox": bbox
-                            }
-
-                            detections.append(det)
-
-                # Sort by confidence (highest first)
-                detections.sort(key=lambda x: x['confidence'], reverse=True)
-
-                # Limit number of detections
-                detections = detections[:self.max_detections]
-
-                processing_time = time.time() - start_time
-
-                return {
-                    "status": "success",
-                    "detections": detections,
-                    "total_detections": len(detections),
-                    "image_dimensions": {
-                        "width": img_width,
-                        "height": img_height
-                    },
-                    "model_info": {
-                        "name": "RTMDet",
-                        "framework": "MMDetection",
-                        "confidence_threshold": self.confidence_threshold,
-                        "device": self.device
-                    },
-                    "processing_time": processing_time
-                }
+                return self._analyze_inference_input(image_path, img_width, img_height, start_time)
 
         except Exception as e:
             logger.error(f"Error in RTMDet analysis: {e}")
@@ -249,25 +134,115 @@ class RTMDetAnalyzer:
             }
 
     def analyze_from_pil_image(self, image: Image.Image) -> Dict[str, Any]:
-        """Analyze PIL Image object (requires temporary file for RTMDet)"""
-        import tempfile
-        temp_filepath = None
-
+        """Analyze PIL Image object directly in memory."""
         try:
-            # RTMDet requires file path, so save temporarily
-            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
-                temp_filepath = temp_file.name
-                image.save(temp_filepath, 'JPEG')
+            with self.model_lock:
+                start_time = time.time()
 
-            # Use file path analysis
-            result = self.analyze_from_file_path(temp_filepath)
+                if self.model is None or not MMDET_AVAILABLE:
+                    return {
+                        "status": "error",
+                        "error": "RTMDet analyzer unavailable: MMDetection dependencies not properly installed"
+                    }
 
-            return result
+                image_rgb = image.convert('RGB')
+                img_width, img_height = image_rgb.size
+                image_array = np.array(image_rgb)
 
-        finally:
-            # Clean up temporary file
-            if temp_filepath and os.path.exists(temp_filepath):
-                try:
-                    os.remove(temp_filepath)
-                except Exception as e:
-                    logger.warning(f"Failed to cleanup temp file {temp_filepath}: {e}")
+                return self._analyze_inference_input(image_array, img_width, img_height, start_time)
+
+        except Exception as e:
+            logger.error(f"Error in RTMDet analysis: {e}")
+            return {
+                "status": "error",
+                "error": f"Analysis failed: {str(e)}"
+            }
+
+    def _analyze_inference_input(self, image_input: Any, img_width: int, img_height: int, start_time: float) -> Dict[str, Any]:
+        """Run RTMDet inference on a file path or in-memory image array."""
+        result = inference_detector(self.model, image_input)
+
+        logger.info(f"RTMDet inference result type: {type(result)}")
+        logger.info(f"RTMDet inference result attributes: {dir(result) if hasattr(result, '__dict__') else 'No attributes'}")
+
+        detections = []
+
+        if hasattr(result, 'pred_instances'):
+            pred_instances = result.pred_instances
+
+            bboxes = pred_instances.bboxes.cpu().numpy()
+            scores = pred_instances.scores.cpu().numpy()
+            labels = pred_instances.labels.cpu().numpy()
+
+            logger.info(f"RTMDet found {len(bboxes)} raw detections")
+            if len(scores) > 0:
+                logger.info(f"Confidence scores range: {scores.min():.3f} to {scores.max():.3f}")
+                logger.info(f"Confidence threshold: {self.confidence_threshold}")
+                above_threshold = (scores >= self.confidence_threshold).sum()
+                logger.info(f"Detections above threshold: {above_threshold}")
+
+            for i in range(len(bboxes)):
+                confidence = float(scores[i])
+                logger.debug(f"Detection {i}: confidence={confidence:.3f}, threshold={self.confidence_threshold}")
+                if confidence < self.confidence_threshold:
+                    continue
+
+                class_idx = int(labels[i])
+                if class_idx >= len(self.coco_classes):
+                    continue
+
+                class_name = self.coco_classes[class_idx]
+                x1, y1, x2, y2 = bboxes[i]
+                detections.append({
+                    "class_name": class_name,
+                    "confidence": confidence,
+                    "bbox": {
+                        "x1": int(x1),
+                        "y1": int(y1),
+                        "width": int(x2 - x1),
+                        "height": int(y2 - y1)
+                    }
+                })
+        else:
+            for class_idx, class_detections in enumerate(result):
+                if len(class_detections) == 0 or class_idx >= len(self.coco_classes):
+                    continue
+
+                class_name = self.coco_classes[class_idx]
+                for detection in class_detections:
+                    confidence = float(detection[4])
+                    if confidence < self.confidence_threshold:
+                        continue
+
+                    x1, y1, x2, y2 = detection[:4]
+                    detections.append({
+                        "class_name": class_name,
+                        "confidence": confidence,
+                        "bbox": {
+                            "x1": int(x1),
+                            "y1": int(y1),
+                            "width": int(x2 - x1),
+                            "height": int(y2 - y1)
+                        }
+                    })
+
+        detections.sort(key=lambda x: x['confidence'], reverse=True)
+        detections = detections[:self.max_detections]
+        processing_time = time.time() - start_time
+
+        return {
+            "status": "success",
+            "detections": detections,
+            "total_detections": len(detections),
+            "image_dimensions": {
+                "width": img_width,
+                "height": img_height
+            },
+            "model_info": {
+                "name": "RTMDet",
+                "framework": "MMDetection",
+                "confidence_threshold": self.confidence_threshold,
+                "device": self.device
+            },
+            "processing_time": processing_time
+        }
