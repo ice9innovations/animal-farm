@@ -151,12 +151,10 @@ Returns `503` with reason if `llama-server` is unreachable.
 ### Analyze Image
 
 ```bash
-GET  /v3/analyze?url=<image_url>[&prompt=<text>][&temperature=<float>]
-GET  /v3/analyze?file=<file_path>
-POST /v3/analyze   (multipart file upload)
+GET  /analyze?url=<image_url>[&prompt=<text>][&temperature=<float>]
+GET  /analyze?file=<file_path>
+POST /analyze   (multipart file upload)
 ```
-
-Also available at `/analyze` (no version prefix).
 
 **Response:**
 ```json
@@ -209,7 +207,7 @@ docker run -d \
 curl -s http://localhost:7782/health | python3 -m json.tool
 
 curl -s -X POST -F "file=@/path/to/image.jpg" \
-  http://localhost:7782/v3/analyze | python3 -m json.tool
+  http://localhost:7782/analyze | python3 -m json.tool
 
 # Delete
 docker stop llama-cpp && docker rm llama-cpp && docker rmi llama-cpp

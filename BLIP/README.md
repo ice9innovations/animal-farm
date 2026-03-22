@@ -80,10 +80,9 @@ Create a `.env` file in the BLIP directory:
 PORT=7777                    # Service port (default: 7777)
 PRIVATE=False               # Access mode (False=public, True=localhost-only)
 
-# API Configuration (Required for emoji mapping)
-API_HOST=localhost          # Host for emoji API
-API_PORT=8080              # Port for emoji API  
-API_TIMEOUT=2.0            # Timeout for emoji API requests
+# Configuration Updates (GitHub-first pattern)
+AUTO_UPDATE=true           # Refresh emoji/MWE config from GitHub on startup
+TIMEOUT=10.0               # Timeout for remote config downloads (seconds)
 
 
 ```
@@ -94,9 +93,8 @@ API_TIMEOUT=2.0            # Timeout for emoji API requests
 |----------|----------|---------|-------------|
 | `PORT` | Yes | - | Service listening port |
 | `PRIVATE` | Yes | - | Access control (False=public, True=localhost-only) |
-| `API_HOST` | Yes | - | Host for emoji mapping API |
-| `API_PORT` | Yes | - | Port for emoji mapping API |
-| `API_TIMEOUT` | Yes | - | Timeout for emoji API requests |
+| `AUTO_UPDATE` | No | `true` | Refresh emoji/MWE config from GitHub on startup, then cache locally |
+| `TIMEOUT` | No | `10.0` | Timeout for remote config downloads |
 
 ### Model Selection
 
@@ -378,11 +376,11 @@ tail -f /var/log/syslog | grep BLIP
 
 **Problem**: Emoji mapping failures
 ```bash
-# Verify emoji API is running
-curl http://localhost:8080/emoji_mappings.json
+# Check cached config files
+ls -la emoji_mappings.json mwe.txt
 
-# Check API configuration in .env
-grep API_ .env
+# Check config loading settings
+grep -E 'AUTO_UPDATE|TIMEOUT' .env
 ```
 
 ### Performance Issues

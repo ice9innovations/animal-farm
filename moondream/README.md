@@ -98,13 +98,11 @@ GET /health
 #### From URL
 ```bash
 GET /analyze?url=<image_url>
-GET /v3/analyze?url=<image_url>
 ```
 
 #### From File Path
 ```bash
 GET /analyze?file=<file_path>
-GET /v3/analyze?file=<file_path>
 ```
 
 #### POST File Upload
@@ -210,7 +208,7 @@ docker run -d \
 
 # Test (model downloads on first run — allow a minute)
 curl -s http://localhost:7795/health | python3 -m json.tool
-curl -s "http://localhost:7795/v3/analyze?url=https://example.com/image.jpg" | python3 -m json.tool
+curl -s "http://localhost:7795/analyze?url=https://example.com/image.jpg" | python3 -m json.tool
 
 # Delete
 docker stop moondream && docker rm moondream && docker rmi moondream

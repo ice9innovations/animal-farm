@@ -82,10 +82,9 @@ CLIP_MODEL=ViT-B/32            # Model size (ViT-B/32, ViT-L/14, ViT-L/14@336px)
 CLIP_CONFIDENCE_THRESHOLD=0.01  # Minimum confidence for predictions
 CLIP_MAX_PREDICTIONS=10         # Maximum number of predictions to return
 
-# API Configuration (Required for emoji mapping)
-API_HOST=localhost              # Host for emoji API
-API_PORT=8080                   # Port for emoji API
-API_TIMEOUT=2.0                 # Timeout for emoji API requests
+# Configuration Updates (GitHub-first pattern)
+AUTO_UPDATE=true                # Refresh emoji mappings from GitHub on startup
+API_TIMEOUT=10.0                # Timeout for remote config downloads (seconds)
 ```
 
 ### Configuration Details
@@ -97,9 +96,8 @@ API_TIMEOUT=2.0                 # Timeout for emoji API requests
 | `CLIP_MODEL` | Yes | CLIP model variant to use |
 | `CLIP_CONFIDENCE_THRESHOLD` | Yes | Minimum confidence score for predictions |
 | `CLIP_MAX_PREDICTIONS` | Yes | Maximum number of predictions to return |
-| `API_HOST` | Yes | Host for emoji mapping API |
-| `API_PORT` | Yes | Port for emoji mapping API |
-| `API_TIMEOUT` | Yes | Timeout for emoji API requests |
+| `AUTO_UPDATE` | No | Refresh emoji mappings from GitHub on startup, then cache locally |
+| `API_TIMEOUT` | No | Timeout for remote config downloads |
 
 ### Model Options
 
@@ -403,11 +401,11 @@ ls -la labels/*.txt
 
 **Problem**: Emoji mapping failures
 ```bash
-# Verify emoji API is running
-curl http://localhost:8080/emoji_mappings.json
+# Check cached mapping file
+ls -la emoji_mappings.json
 
-# Check API configuration in .env
-grep API_ .env
+# Check config loading settings
+grep -E 'AUTO_UPDATE|API_TIMEOUT' .env
 ```
 
 ### Performance Issues

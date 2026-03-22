@@ -100,12 +100,10 @@ GET /health
 ### Remove Background
 
 ```bash
-GET  /v3/analyze?url=<image_url>
-GET  /v3/analyze?file=<file_path>
-POST /v3/analyze   (multipart file upload)
+GET  /analyze?url=<image_url>
+GET  /analyze?file=<file_path>
+POST /analyze   (multipart file upload)
 ```
-
-Also available at `/analyze` (no version prefix).
 
 **Response:**
 ```json

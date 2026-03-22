@@ -130,7 +130,6 @@ GET /health
   "endpoints": [
     "GET /health - Health check",
     "GET,POST /analyze - Unified endpoint (URL/file/upload)",
-    "GET /v3/analyze - V3 compatibility",
     "GET /v2/analyze - V2 compatibility (deprecated)",
     "GET /v2/analyze_file - V2 compatibility (deprecated)"
   ]
@@ -215,12 +214,6 @@ GET /v2/analyze?image_url=<url>
 #### V2 File Analysis
 ```bash
 GET /v2/analyze_file?file_path=<path>
-```
-
-#### V3 Compatibility
-```bash
-GET /v3/analyze?url=<url>
-GET /v3/analyze?file=<path>
 ```
 
 ## Service Management
@@ -569,7 +562,7 @@ docker run -d \
 
 # Test (model downloads on first run)
 curl -s http://localhost:7789/health | python3 -m json.tool
-curl -s "http://localhost:7789/v3/analyze?url=https://example.com/image.jpg" | python3 -m json.tool
+curl -s "http://localhost:7789/analyze?url=https://example.com/image.jpg" | python3 -m json.tool
 
 # Delete
 docker stop nudenet && docker rm nudenet && docker rmi nudenet

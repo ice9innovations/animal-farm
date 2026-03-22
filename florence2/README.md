@@ -117,9 +117,7 @@ GET /health
 
 ```
 GET  /analyze?url=<image_url>[&task=<TASK>][&text=<text>]
-GET  /v3/analyze?url=<image_url>[&task=<TASK>][&text=<text>]
 POST /analyze        (multipart file upload)
-POST /v3/analyze     (multipart file upload)
 ```
 
 Parameters:
@@ -135,7 +133,6 @@ Parameters:
 
 ```
 POST /analyze/batch
-POST /v3/analyze/batch
 ```
 
 Image supplied the same way as the single-task endpoint (`?url=`, `?file=`, or multipart upload). Task list is JSON in the request body.
@@ -276,31 +273,31 @@ Bounding boxes are in `[x1, y1, x2, y2]` pixel coordinates (absolute, not normal
 
 ```bash
 # Default task (DENSE_REGION_CAPTION)
-curl "http://localhost:7803/v3/analyze?url=https://example.com/image.jpg"
+curl "http://localhost:7803/analyze?url=https://example.com/image.jpg"
 
 # Plain caption
-curl "http://localhost:7803/v3/analyze?url=https://example.com/image.jpg&task=CAPTION"
+curl "http://localhost:7803/analyze?url=https://example.com/image.jpg&task=CAPTION"
 
 # Object detection
-curl "http://localhost:7803/v3/analyze?url=https://example.com/image.jpg&task=OD"
+curl "http://localhost:7803/analyze?url=https://example.com/image.jpg&task=OD"
 
 # OCR
-curl "http://localhost:7803/v3/analyze?url=https://example.com/image.jpg&task=OCR"
+curl "http://localhost:7803/analyze?url=https://example.com/image.jpg&task=OCR"
 
 # Open vocabulary detection — find specific classes
-curl "http://localhost:7803/v3/analyze?url=https://example.com/image.jpg&task=OPEN_VOCABULARY_DETECTION&text=cat+dog+person"
+curl "http://localhost:7803/analyze?url=https://example.com/image.jpg&task=OPEN_VOCABULARY_DETECTION&text=cat+dog+person"
 
 # Phrase grounding — locate parts of a caption
-curl "http://localhost:7803/v3/analyze?url=https://example.com/image.jpg&task=CAPTION_TO_PHRASE_GROUNDING&text=a+dog+on+a+couch"
+curl "http://localhost:7803/analyze?url=https://example.com/image.jpg&task=CAPTION_TO_PHRASE_GROUNDING&text=a+dog+on+a+couch"
 
 # Referring expression segmentation — segment a described region
-curl "http://localhost:7803/v3/analyze?url=https://example.com/image.jpg&task=REFERRING_EXPRESSION_SEGMENTATION&text=the+red+car+on+the+left"
+curl "http://localhost:7803/analyze?url=https://example.com/image.jpg&task=REFERRING_EXPRESSION_SEGMENTATION&text=the+red+car+on+the+left"
 
 # File upload
-curl -X POST -F "file=@/path/to/image.jpg" "http://localhost:7803/v3/analyze?task=OD"
+curl -X POST -F "file=@/path/to/image.jpg" "http://localhost:7803/analyze?task=OD"
 
 # Local file path
-curl "http://localhost:7803/v3/analyze?file=/path/to/image.jpg&task=DETAILED_CAPTION"
+curl "http://localhost:7803/analyze?file=/path/to/image.jpg&task=DETAILED_CAPTION"
 ```
 
 ## Configuration Reference
@@ -338,7 +335,7 @@ docker run -d \
 
 # Test (model downloads on first run — allow a minute)
 curl -s http://localhost:7803/health | python3 -m json.tool
-curl -s "http://localhost:7803/v3/analyze?url=https://example.com/image.jpg" | python3 -m json.tool
+curl -s "http://localhost:7803/analyze?url=https://example.com/image.jpg" | python3 -m json.tool
 
 # Delete
 docker stop florence2 && docker rm florence2 && docker rmi florence2

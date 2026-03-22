@@ -73,21 +73,17 @@ GET /health
   "library": "pyzbar",
   "endpoints": [
     "GET  /health",
-    "POST /analyze",
-    "POST /v3/analyze"
+    "POST /analyze"
   ]
 }
 ```
 
 ### Analyze Image
 
-Both `/analyze` and `/v3/analyze` are identical endpoints.
-
 #### URL input
 
 ```bash
 GET /analyze?url=<image_url>
-GET /v3/analyze?url=<image_url>
 ```
 
 **Example:**
@@ -384,7 +380,7 @@ docker run -d \
 
 # Test
 curl -s http://localhost:7801/health | python3 -m json.tool
-curl -s -X POST -F "file=@/home/sd/animal-farm/qr/qr.jpg" http://localhost:7801/v3/analyze | python3 -m json.tool
+curl -s -X POST -F "file=@/home/sd/animal-farm/qr/qr.jpg" http://localhost:7801/analyze | python3 -m json.tool
 
 # Delete
 docker stop qr && docker rm qr && docker rmi qr

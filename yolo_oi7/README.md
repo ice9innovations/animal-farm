@@ -1,19 +1,19 @@
-# YOLOv8 Object Detection Service
+# YOLO Open Images v7 Detection Service
 
-**Port**: 7773  
-**Framework**: Ultralytics YOLOv8  
-**Purpose**: Real-time object detection with bounding boxes and emoji mapping  
+**Port**: 7791  
+**Framework**: Ultralytics YOLOv11  
+**Purpose**: Open Images v7 object detection with bounding boxes and emoji mapping  
 **Status**: ✅ Active
 
 ## Overview
 
-YOLOv8 provides fast, accurate object detection using Ultralytics' state-of-the-art YOLO models. The service detects 80 COCO object classes in images with confidence scores, bounding boxes, and automatic emoji mapping for enhanced user experience.
+This service provides Open Images v7 object detection using an Ultralytics YOLO model, returning confidence scores, bounding boxes, and emoji mappings for detected classes.
 
 ## Features
 
 - **Modern V3 API**: Clean, unified endpoint with intuitive parameters
 - **Unified Input Handling**: Single endpoint for both URL and file path analysis
-- **COCO Object Detection**: Detects 80 common object classes
+- **Open Images v7 Detection**: Detects classes from the Open Images v7 training set
 - **Advanced IoU Filtering**: Removes overlapping detections for cleaner results
 - **Emoji Integration**: Automatic word-to-emoji mapping using local dictionary
 - **GPU Acceleration**: CUDA and MPS support for fast inference
@@ -32,8 +32,8 @@ YOLOv8 provides fast, accurate object detection using Ultralytics' state-of-the-
 ### 1. Environment Setup
 
 ```bash
-# Navigate to YOLOv8 directory
-cd /home/sd/animal-farm/yolov8
+# Navigate to yolo_oi7 directory
+cd /home/sd/animal-farm/yolo_oi7
 
 # Create virtual environment
 python3 -m venv yolo_venv
@@ -74,17 +74,16 @@ nvidia-smi  # If CUDA GPU available
 
 ### Environment Variables (.env)
 
-Create a `.env` file in the yolov8 directory:
+Create a `.env` file in the `yolo_oi7` directory:
 
 ```bash
 # Service Configuration
-PORT=7773                           # Service port
+PORT=7791                           # Service port
 PRIVATE=False                       # Access mode (False=public, True=localhost-only)
 
-# API Configuration (Required for emoji mapping)
-API_HOST=localhost                  # Host for emoji API
-API_PORT=8080                      # Port for emoji API
-API_TIMEOUT=2.0                    # Timeout for emoji API requests
+# Configuration Updates (GitHub-first pattern)
+AUTO_UPDATE=true                   # Refresh emoji mappings from GitHub on startup
+TIMEOUT=10.0                       # Timeout for remote config downloads (seconds)
 ```
 
 ### Configuration Details
@@ -93,9 +92,8 @@ API_TIMEOUT=2.0                    # Timeout for emoji API requests
 |----------|----------|---------|-------------|
 | `PORT` | Yes | - | Service listening port |
 | `PRIVATE` | Yes | - | Access control (False=public, True=localhost-only) |
-| `API_HOST` | Yes | - | Host for emoji mapping API |
-| `API_PORT` | Yes | - | Port for emoji mapping API |
-| `API_TIMEOUT` | Yes | - | Timeout for emoji API requests |
+| `AUTO_UPDATE` | No | `true` | Refresh emoji mappings from GitHub on startup, then cache locally |
+| `TIMEOUT` | No | `10.0` | Timeout for remote config downloads |
 
 ## API Endpoints
 
@@ -199,8 +197,7 @@ GET /v2/analyze_file?file_path=<path>  # Translates to V3 file parameter
 
 ### Manual Startup
 ```bash
-# Ensure emoji API is running (required dependency)
-# Start YOLOv8 service
+# Start yolo_oi7 service
 
 # Activate virtual environment
 source yolo_venv/bin/activate
@@ -371,4 +368,4 @@ traffic light, fire hydrant, stop sign, parking meter, bench, backpack, umbrella
 
 ---
 
-*Generated with Animal Farm ML Platform v3.0 - YOLOv8 Object Detection*
+*Generated with Animal Farm ML Platform v3.0 - Open Images v7 Object Detection*

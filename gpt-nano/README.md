@@ -92,12 +92,10 @@ GET /health
 ### Analyze Image
 
 ```bash
-GET  /v3/analyze?url=<image_url>
-GET  /v3/analyze?file=<file_path>
-POST /v3/analyze   (multipart file upload)
+GET  /analyze?url=<image_url>
+GET  /analyze?file=<file_path>
+POST /analyze   (multipart file upload)
 ```
-
-Also available at `/analyze` (no version prefix).
 
 An optional `prompt` parameter overrides the default vision prompt for a single request.
 
@@ -166,7 +164,7 @@ docker run -d \
 # Test
 curl -s http://localhost:7800/health | python3 -m json.tool
 
-curl -s "http://localhost:7800/v3/analyze?url=https://example.com/image.jpg" \
+curl -s "http://localhost:7800/analyze?url=https://example.com/image.jpg" \
   | python3 -m json.tool
 
 # Delete

@@ -86,8 +86,6 @@ GET /score?caption=<text>&file=<file_path>
 POST /score  (multipart: caption + file)
 ```
 
-> `/v3/score` is deprecated but remains functional.
-
 #### URL Example
 ```bash
 curl "http://localhost:7776/score?caption=a+dog+in+the+park&url=http://example.com/image.jpg"

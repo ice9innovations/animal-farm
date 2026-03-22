@@ -130,7 +130,6 @@ Exactly one of `url`, `file`, or POST body must be provided.
 ### Other Endpoints
 ```
 GET /classes     # List all 80 COCO class names
-GET /v3/analyze  # Alias for /analyze
 ```
 
 ## Service Management

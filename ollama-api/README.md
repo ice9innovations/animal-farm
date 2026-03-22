@@ -94,10 +94,8 @@ Create a `.env` file in the ollama-api directory:
 PORT=7782                           # Service port
 PRIVATE=False                       # Access mode (False=public, True=localhost-only)
 
-# API Configuration (Required for emoji mapping)
-API_HOST=localhost                  # Host for emoji API
-API_PORT=8080                      # Port for emoji API
-API_TIMEOUT=2.0                    # Timeout for emoji API requests
+# Configuration Updates (GitHub-first pattern)
+AUTO_UPDATE=true                   # Refresh emoji/MWE config from GitHub on startup
 
 # Ollama Configuration
 OLLAMA_HOST=http://localhost:11434  # Ollama server URL
@@ -115,9 +113,7 @@ PROMPT=What is in this image? One sentence only.  # Default vision prompt
 |----------|----------|---------|-------------|
 | `PORT` | Yes | - | Service listening port |
 | `PRIVATE` | Yes | - | Access control (False=public, True=localhost-only) |
-| `API_HOST` | Yes | - | Host for emoji mapping API |
-| `API_PORT` | Yes | - | Port for emoji mapping API |
-| `API_TIMEOUT` | Yes | - | Timeout for emoji API requests |
+| `AUTO_UPDATE` | No | `true` | Refresh emoji/MWE config from GitHub on startup, then cache locally |
 | `OLLAMA_HOST` | Yes | - | Ollama server URL |
 | `TEXT_MODEL` | Yes | - | Default model for text generation |
 | `VISION_MODEL` | Yes | - | Default model for image analysis |

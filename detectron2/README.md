@@ -83,10 +83,9 @@ Create a `.env` file in the detectron2 directory:
 PORT=7771                    # Service port (default: 7771)
 PRIVATE=False               # Access mode (False=public, True=localhost-only)
 
-# API Configuration (Required for emoji mapping)
-API_HOST=localhost          # Host for emoji API
-API_PORT=8080              # Port for emoji API  
-API_TIMEOUT=2.0            # Timeout for emoji API requests
+# Configuration Updates (GitHub-first pattern)
+AUTO_UPDATE=true           # Refresh emoji mappings from GitHub on startup
+TIMEOUT=10.0               # Timeout for remote config downloads (seconds)
 ```
 
 ### Configuration Details
@@ -95,9 +94,8 @@ API_TIMEOUT=2.0            # Timeout for emoji API requests
 |----------|----------|---------|-------------|
 | `PORT` | Yes | - | Service listening port |
 | `PRIVATE` | Yes | - | Access control (False=public, True=localhost-only) |
-| `API_HOST` | Yes | - | Host for emoji mapping API |
-| `API_PORT` | Yes | - | Port for emoji mapping API |
-| `API_TIMEOUT` | Yes | - | Timeout for emoji API requests |
+| `AUTO_UPDATE` | No | `true` | Refresh emoji mappings from GitHub on startup, then cache locally |
+| `TIMEOUT` | No | `10.0` | Timeout for remote config downloads |
 
 ## API Endpoints
 

@@ -172,7 +172,7 @@ GET /classes
 
 ### Analyze Image (Unified Endpoint)
 
-The unified `/analyze` and `/v3/analyze` endpoints accept URL, file path, or file upload:
+The unified `/analyze` endpoint accepts URL, file path, or file upload:
 
 #### Analyze Image from URL
 ```bash
@@ -478,8 +478,8 @@ curl http://localhost:7792/health
 # Check emoji file exists
 ls -la emoji_mappings.json
 
-# Test emoji API
-curl http://localhost:7792/classes
+# Check cached mapping file
+ls -la emoji_mappings.json
 
 # Verify AUTO_UPDATE setting in .env
 ```

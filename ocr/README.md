@@ -75,10 +75,9 @@ Create a `.env` file in the ocr directory:
 PORT=7775                   # Service port
 PRIVATE=false              # Access mode (false=public, true=localhost-only)
 
-# API Configuration (Required for emoji mapping)
-API_HOST=localhost          # Host for emoji API
-API_PORT=8080              # Port for emoji API
-API_TIMEOUT=5              # Timeout for emoji API requests
+# Configuration Updates (GitHub-first pattern)
+AUTO_UPDATE=true           # Refresh emoji/MWE config from GitHub on startup
+TIMEOUT=30                 # Timeout for remote config downloads (seconds)
 ```
 
 ### Configuration Details
@@ -87,9 +86,8 @@ API_TIMEOUT=5              # Timeout for emoji API requests
 |----------|----------|---------|-------------|
 | `PORT` | Yes | - | Service listening port |
 | `PRIVATE` | Yes | - | Access control (false=public, true=localhost-only) |
-| `API_HOST` | Yes | - | Host for emoji mapping API |
-| `API_PORT` | Yes | - | Port for emoji mapping API |
-| `API_TIMEOUT` | Yes | - | Timeout for emoji API requests |
+| `AUTO_UPDATE` | Yes | - | Refresh emoji/MWE config from GitHub on startup, then cache locally |
+| `TIMEOUT` | Yes | - | Timeout for remote config downloads |
 
 ### OCR Engine Configuration
 
@@ -499,7 +497,7 @@ python3 -c "
 from dotenv import load_dotenv
 import os
 load_dotenv()
-required = ['PORT', 'PRIVATE', 'API_HOST', 'API_PORT', 'API_TIMEOUT']
+required = ['PORT', 'PRIVATE', 'AUTO_UPDATE', 'TIMEOUT', 'MODEL_DIR']
 missing = [k for k in required if not os.getenv(k)]
 if missing: print(f'Missing: {missing}')
 else: print('All variables set')
@@ -507,9 +505,9 @@ else: print('All variables set')
 ```
 
 **Problem**: Emoji mappings not loading
-- Verify API_HOST and API_PORT point to valid emoji API
-- Check API_TIMEOUT is sufficient (increase if network is slow)
-- Ensure emoji API service is running and accessible
+- Verify outbound network access to GitHub or ensure local `emoji_mappings.json` and `mwe.txt` cache files exist
+- Check `AUTO_UPDATE` and `TIMEOUT` in `.env`
+- Confirm `MODEL_DIR` is set and readable
 
 ## Security Considerations
 

@@ -81,10 +81,8 @@ Create a `.env` file in the yolov8 directory:
 PORT=7773                           # Service port
 PRIVATE=False                       # Access mode (False=public, True=localhost-only)
 
-# API Configuration (Required for emoji mapping)
-API_HOST=localhost                  # Host for emoji API
-API_PORT=8080                      # Port for emoji API
-API_TIMEOUT=2.0                    # Timeout for emoji API requests
+# Configuration Updates (GitHub-first pattern)
+AUTO_UPDATE=true                   # Refresh emoji mappings from GitHub on startup
 ```
 
 ### Configuration Details
@@ -93,9 +91,7 @@ API_TIMEOUT=2.0                    # Timeout for emoji API requests
 |----------|----------|---------|-------------|
 | `PORT` | Yes | - | Service listening port |
 | `PRIVATE` | Yes | - | Access control (False=public, True=localhost-only) |
-| `API_HOST` | Yes | - | Host for emoji mapping API |
-| `API_PORT` | Yes | - | Port for emoji mapping API |
-| `API_TIMEOUT` | Yes | - | Timeout for emoji API requests |
+| `AUTO_UPDATE` | No | `true` | Refresh emoji mappings from GitHub on startup, then cache locally |
 
 ## API Endpoints
 
@@ -199,7 +195,6 @@ GET /v2/analyze_file?file_path=<path>  # Translates to V3 file parameter
 
 ### Manual Startup
 ```bash
-# Ensure emoji API is running (required dependency)
 # Start YOLOv8 service
 
 # Activate virtual environment
