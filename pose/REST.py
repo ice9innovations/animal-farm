@@ -22,6 +22,11 @@ import requests
 from datetime import datetime
 from urllib.parse import urlparse
 from pose_analyzer import PoseAnalyzer
+try:
+    from trt_pose_analyzer import TRTPoseAnalyzer
+    _TRT_AVAILABLE = True
+except ImportError:
+    _TRT_AVAILABLE = False
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -61,6 +66,7 @@ CORS(app)
 
 # Global pose analyzer - initialize once at startup
 pose_analyzer = None
+_analyzer_framework = "MediaPipe Pose"
 
 # Configuration
 UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
@@ -95,14 +101,29 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def initialize_pose_analyzer():
-    """Initialize pose analyzer once at startup"""
-    global pose_analyzer
-    try:
-        if USE_GPU:
-            logger.info("Initializing MediaPipe Pose Analyzer with GPU acceleration...")
-        else:
-            logger.info("Initializing MediaPipe Pose Analyzer with CPU...")
+    """Initialize pose analyzer once at startup. Tries TRT first, falls back to MediaPipe."""
+    global pose_analyzer, _analyzer_framework
 
+    trt_detection = os.path.join(os.path.dirname(__file__), '..', 'models', 'pose', 'pose_detection.onnx')
+    trt_landmark  = os.path.join(os.path.dirname(__file__), '..', 'models', 'pose', 'pose_landmark_heavy.onnx')
+
+    if USE_GPU and _TRT_AVAILABLE and os.path.exists(trt_detection) and os.path.exists(trt_landmark):
+        try:
+            logger.info("Initializing TRT Pose Analyzer (GPU)...")
+            pose_analyzer = TRTPoseAnalyzer(
+                detection_model_path=trt_detection,
+                landmark_model_path=trt_landmark,
+                use_gpu=True
+            )
+            _analyzer_framework = "BlazePose TRT"
+            logger.info("✅ TRT Pose Analyzer initialized successfully")
+            return True
+        except Exception as e:
+            logger.warning(f"⚠️ TRT Pose Analyzer failed ({e}), falling back to MediaPipe")
+
+    try:
+        gpu_status = "GPU" if USE_GPU else "CPU"
+        logger.info(f"Initializing MediaPipe Pose Analyzer ({gpu_status})...")
         pose_analyzer = PoseAnalyzer(
             min_detection_confidence=POSE_MIN_DETECTION_CONFIDENCE,
             min_tracking_confidence=POSE_MIN_TRACKING_CONFIDENCE,
@@ -110,9 +131,8 @@ def initialize_pose_analyzer():
             enable_segmentation=ENABLE_SEGMENTATION,
             use_gpu=USE_GPU
         )
-
-        gpu_status = "GPU" if USE_GPU else "CPU"
-        logger.info(f"✅ Pose Analyzer initialized successfully ({gpu_status})")
+        _analyzer_framework = "MediaPipe Pose"
+        logger.info(f"✅ MediaPipe Pose Analyzer initialized ({gpu_status})")
         return True
 
     except Exception as e:
@@ -243,29 +263,32 @@ def process_image_for_pose(image: Image.Image) -> dict:
 def create_pose_response(pose_data: dict, processing_time: float) -> dict:
     """Create standardized pose response with metadata"""
     enhanced_predictions = []
-    
+
     for prediction in pose_data.get('predictions', []):
         is_shiny, shiny_roll = check_shiny()
-        
+
         enhanced_prediction = {
             "landmarks": prediction['landmarks'],
             "pose_analysis": prediction['pose_analysis']
         }
-        
+
+        if 'segmentation_polygon' in prediction:
+            enhanced_prediction['segmentation_polygon'] = prediction['segmentation_polygon']
+
         # Add shiny flag for rare detections
         if is_shiny:
             enhanced_prediction["shiny"] = True
             logger.info(f"✨ SHINY POSE LANDMARKS DETECTED! Roll: {shiny_roll} ✨")
-        
+
         enhanced_predictions.append(enhanced_prediction)
-    
+
     return {
         "service": "pose",
         "status": "success",
         "predictions": enhanced_predictions,
         "metadata": {
             "processing_time": round(processing_time, 3),
-            "model_info": {"framework": "MediaPipe Pose"}
+            "model_info": {"framework": _analyzer_framework}
         }
     }
 
