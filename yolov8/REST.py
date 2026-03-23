@@ -673,8 +673,8 @@ def analyze():
             else:  # file_path
                 # Load file directly into memory
                 if not os.path.exists(file_path):
-                    return error_response(f"File not found: {file_path}")
-                
+                    return error_response(f"File not found: {file_path}", 404)
+
                 if not is_allowed_file(file_path):
                     return error_response("File type not allowed")
                 
