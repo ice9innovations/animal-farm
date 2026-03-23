@@ -23,6 +23,11 @@ import requests
 from datetime import datetime
 from urllib.parse import urlparse
 from face_analyzer import FaceAnalyzer
+try:
+    from trt_face_analyzer import TRTFaceAnalyzer
+    _TRT_AVAILABLE = True
+except ImportError:
+    _TRT_AVAILABLE = False
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -87,22 +92,29 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def initialize_face_analyzer():
-    """Initialize face analyzer once at startup"""
+    """Initialize face analyzer once at startup. Tries TRT first, falls back to MediaPipe."""
     global face_analyzer
-    try:
-        if USE_GPU:
-            logger.info("Initializing MediaPipe Face Analyzer with GPU acceleration...")
-        else:
-            logger.info("Initializing MediaPipe Face Analyzer with CPU...")
 
+    trt_model = os.path.join(os.path.dirname(__file__), '..', 'models', 'face', 'face_detection_back_256x256_float32.onnx')
+
+    if USE_GPU and _TRT_AVAILABLE and os.path.exists(trt_model):
+        try:
+            logger.info("Initializing TRT Face Analyzer (GPU)...")
+            face_analyzer = TRTFaceAnalyzer(model_path=trt_model, use_gpu=True)
+            logger.info("✅ TRT Face Analyzer initialized successfully")
+            return True
+        except Exception as e:
+            logger.warning(f"⚠️ TRT Face Analyzer failed ({e}), falling back to MediaPipe")
+
+    try:
+        gpu_status = "GPU" if USE_GPU else "CPU"
+        logger.info(f"Initializing MediaPipe Face Analyzer ({gpu_status})...")
         face_analyzer = FaceAnalyzer(
             min_detection_confidence=FACE_MIN_DETECTION_CONFIDENCE,
-            model_selection=1,  # 1 for full range detection (better for diverse faces)
+            model_selection=1,
             use_gpu=USE_GPU
         )
-
-        gpu_status = "GPU" if USE_GPU else "CPU"
-        logger.info(f"✅ Face Analyzer initialized successfully ({gpu_status})")
+        logger.info(f"✅ MediaPipe Face Analyzer initialized ({gpu_status})")
         return True
 
     except Exception as e:

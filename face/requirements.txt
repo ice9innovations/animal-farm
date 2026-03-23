@@ -23,9 +23,8 @@ MarkupSafe==3.0.2
 matplotlib==3.9.4
 mediapipe==0.10.14
 ml_dtypes==0.5.1
-numpy==2.0.2
-opencv-contrib-python==4.12.0.88
-opencv-python==4.12.0.88
+numpy==1.26.4
+opencv-python==4.9.0.80
 opt_einsum==3.4.0
 packaging==25.0
 pillow==11.3.0
