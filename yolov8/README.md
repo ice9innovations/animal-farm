@@ -18,7 +18,7 @@ YOLOv8 provides fast, accurate object detection using Ultralytics' state-of-the-
 - **Emoji Integration**: Automatic word-to-emoji mapping using local dictionary
 - **GPU Acceleration**: CUDA and MPS support for fast inference
 - **Confidence Filtering**: Configurable detection thresholds
-- **Security**: File validation, size limits, secure cleanup
+- **Security**: File validation, size limits, and in-memory handling for uploads/URL input
 
 ## Installation
 

@@ -39,12 +39,8 @@ if not PORT_STR:
 PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
 PORT = int(PORT_STR)
 
-FOLDER = './uploads'
 MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
 EXIFTOOL_PATH = '/usr/bin/exiftool'
-
-# Ensure upload directory exists
-os.makedirs(FOLDER, exist_ok=True)
 
 def serialize_metadata_value(value):
     """Convert EXIF/metadata values to JSON-serializable format"""
@@ -523,7 +519,7 @@ def categorize_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
 
 def extract_comprehensive_metadata(image_file: str, cleanup: bool = True) -> Dict[str, Any]:
     """Extract maximum possible metadata from image using multiple methods"""
-    full_path = os.path.join(FOLDER, image_file)
+    full_path = image_file
     return extract_comprehensive_metadata_from_path(full_path, cleanup=cleanup)
 
 def extract_comprehensive_metadata_from_path(full_path: str, cleanup: bool = True) -> Dict[str, Any]:

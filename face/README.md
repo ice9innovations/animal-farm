@@ -17,7 +17,7 @@ The Face service provides state-of-the-art face detection using Google's MediaPi
 - **Fairness Optimization**: Tested across demographics to reduce bias
 - **Focused Analysis**: Dedicated face detection with facial keypoints
 - **High Performance**: Optimized model initialization and processing pipeline
-- **Security**: File validation, size limits, secure cleanup
+- **Security**: File validation, size limits, and in-memory handling for uploads/URL input
 
 ## Installation
 

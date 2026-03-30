@@ -53,15 +53,11 @@ PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
 TIMEOUT = float(TIMEOUT_STR)
 AUTO_UPDATE = AUTO_UPDATE_STR.lower() == 'true'
 
-FOLDER = './uploads'
 MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
 
 # Global emoji mappings and MWE tokenizer - loaded from API on startup
 emoji_mappings = {}
 emoji_tokenizer = None
-
-# Ensure upload directory exists
-os.makedirs(FOLDER, exist_ok=True)
 
 # Initialize PaddleOCR (run once)
 print("Initializing PaddleOCR...")

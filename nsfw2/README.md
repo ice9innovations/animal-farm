@@ -18,7 +18,7 @@ The NSFW2 service provides state-of-the-art content moderation using Yahoo's Ope
 - **High Confidence**: 95.2% confidence on actual NSFW content vs 50.2% legacy
 - **Format Support**: Native JPEG, PNG, WebP processing without conversion
 - **GPU Optimization**: CUDA 12.2 support with automatic memory management
-- **Security**: File validation, size limits, secure cleanup
+- **Security**: File validation, size limits, and in-memory handling for uploads/URL input
 
 ## Installation
 

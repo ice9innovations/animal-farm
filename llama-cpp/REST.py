@@ -29,7 +29,6 @@ load_dotenv()
 AUTO_UPDATE_STR = os.getenv('AUTO_UPDATE', 'true')
 AUTO_UPDATE = AUTO_UPDATE_STR.lower() == 'true'
 
-FOLDER = './uploads'
 PRIVATE_STR = os.getenv('PRIVATE')
 PORT_STR = os.getenv('PORT')
 LLAMA_SERVER_HOST = os.getenv('LLAMA_SERVER_HOST')
@@ -55,8 +54,6 @@ PORT = int(PORT_STR)
 TEMPERATURE = float(TEMPERATURE_STR)
 MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
 MAX_RESPONSE_LENGTH = 4000
-
-os.makedirs(FOLDER, exist_ok=True)
 
 emoji_mappings = {}
 emoji_tokenizer = None

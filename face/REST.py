@@ -71,7 +71,6 @@ USE_GPU = os.getenv('USE_GPU', 'true').lower() == 'true'
 face_analyzer = None
 
 # Configuration
-UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
 MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
 
@@ -79,10 +78,6 @@ MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
 FACE_MIN_DETECTION_CONFIDENCE = 0.2
 CONFIDENCE_DECIMAL_PLACES = 3
 LANDMARK_DECIMAL_PLACES = 3  # Precision for landmark coordinates and visibility
-
-# Ensure upload folder exists
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
 
 # Set up logging
 logging.basicConfig(

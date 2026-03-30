@@ -79,7 +79,6 @@ ENABLE_SEGMENTATION=false                 # Optional MediaPipe body segmentation
 
 # File Processing
 MAX_FILE_SIZE=8388608                     # Maximum file size in bytes (8MB)
-UPLOAD_FOLDER=uploads                     # Temporary upload directory
 USE_GPU=true                              # Allow MediaPipe GPU-backed execution when available
 ```
 

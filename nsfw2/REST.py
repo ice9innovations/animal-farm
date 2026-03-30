@@ -67,11 +67,7 @@ PORT = int(PORT_STR)
 PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
 NSFW_THRESHOLD = float(NSFW_THRESHOLD_STR)
 
-FOLDER = './uploads'
 MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
-
-# Ensure upload directory exists
-os.makedirs(FOLDER, exist_ok=True)
 
 def get_nsfw_emoji(probability: float) -> str:
     """Get appropriate emoji based on NSFW probability"""

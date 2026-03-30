@@ -1,13 +1,13 @@
 # Colors Analysis Service
 
 **Port**: 7770  
-**Framework**: Haishoku + PIL  
+**Framework**: In-memory Haishoku-compatible extraction + PIL  
 **Purpose**: Professional color analysis with Copic and Prismacolor marker mapping  
 **Status**: ✅ Active
 
 ## Overview
 
-The Colors service provides professional-grade color analysis using the Haishoku library combined with PIL for image processing. It extracts dominant colors, generates color palettes, and maps colors to professional art supply systems (Copic markers and Prismacolor pencils) with temperature analysis.
+The Colors service provides professional-grade color analysis using an in-memory Haishoku-compatible extraction pipeline combined with PIL for image processing. It extracts dominant colors, generates color palettes, and maps colors to professional art supply systems (Copic markers and Prismacolor pencils) with temperature analysis.
 
 ## Features
 
@@ -16,8 +16,8 @@ The Colors service provides professional-grade color analysis using the Haishoku
 - **Professional Color Matching**: Maps colors to Copic and Prismacolor systems
 - **Temperature Analysis**: Determines warm/cool/neutral color temperature for palettes
 - **Configurable Systems**: Choose between Copic, Prismacolor, or both
-- **Security**: File validation, size limits, secure cleanup
-- **Performance**: Fast color analysis with automatic cleanup
+- **Security**: File validation, size limits, and in-memory processing for uploads/URL input
+- **Performance**: Fast color analysis without temporary image writes
 
 ## Installation
 
@@ -25,7 +25,7 @@ The Colors service provides professional-grade color analysis using the Haishoku
 
 - Python 3.8+
 - PIL/Pillow for image processing
-- Haishoku library for color analysis
+- Pillow for image processing and in-memory color extraction
 - 512MB+ RAM
 
 ### 1. Environment Setup
@@ -50,7 +50,7 @@ Install the required Python packages:
 
 ```bash
 # Core dependencies
-pip install flask python-dotenv pillow haishoku requests flask-cors
+pip install flask python-dotenv pillow requests flask-cors
 ```
 
 ## Configuration
@@ -160,7 +160,7 @@ curl -X POST -F "file=@/path/to/image.jpg" http://localhost:7770/analyze
 {
   "metadata": {
     "model_info": {
-      "framework": "Haishoku + PIL"
+      "framework": "Haishoku-compatible + PIL"
     },
     "processing_time": 0.158
   },
@@ -401,10 +401,10 @@ curl "http://localhost:7770/v2/analyze?image_url=https://example.com/image.jpg"
 
 ### Installation Issues
 
-**Problem**: Import error for haishoku
+**Problem**: Import error for color extraction helpers
 ```bash
 # Solution
-pip install haishoku
+pip install -r requirements.txt
 ```
 
 **Problem**: PIL/Pillow import errors
@@ -478,5 +478,5 @@ python3 -c "from dotenv import load_dotenv; load_dotenv(); import os; print([k f
 ---
 
 **Generated**: August 13, 2025  
-**Framework Version**: Haishoku 1.1.8 + PIL 9.5.0  
+**Framework Version**: In-memory Haishoku-compatible extraction + PIL  
 **Service Version**: 3.0 (Modernized)

@@ -43,11 +43,7 @@ COLOR_SYSTEM = [system.strip().lower() for system in COLOR_SYSTEM]
 pass
 
 FOLDER = './'
-UPLOAD_FOLDER = os.path.join(FOLDER, 'uploads')
 MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
-
-# Ensure upload folder exists
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # Global analyzer instance
 analyzer = None

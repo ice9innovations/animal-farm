@@ -16,7 +16,7 @@ The Metadata Extraction Service provides comprehensive image metadata analysis u
 - **Multiple Extraction Engines**: ExifTool, PIL/Pillow, and OpenCV integration
 - **Advanced Analysis**: Image quality, color properties, composition, and accessibility
 - **Comprehensive Metadata**: Camera settings, GPS data, technical specifications
-- **Security**: File validation, size limits, secure cleanup
+- **Security**: File validation, size limits, and in-memory handling for uploads/URL input
 - **Performance**: Efficient processing with automated categorization
 
 ## Installation

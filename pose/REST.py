@@ -69,7 +69,6 @@ pose_analyzer = None
 _analyzer_framework = "MediaPipe Pose"
 
 # Configuration
-UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
 MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(8 * 1024 * 1024)))  # 8MB
 
@@ -88,10 +87,6 @@ POSE_CLASSIFICATIONS = {
     "pointing": {"emoji": "👉", "description": "Person pointing"},
     "unknown": {"emoji": "🧑", "description": "Pose not classified"}
 }
-
-# Ensure upload folder exists
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
 
 # Set up logging
 logging.basicConfig(

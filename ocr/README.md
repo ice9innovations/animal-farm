@@ -17,7 +17,7 @@ The OCR service provides advanced text extraction from images using PaddleOCR fr
 - **Multi-language Support**: 80+ languages supported by PaddleOCR
 - **High Accuracy**: Advanced OCR with angle classification and GPU acceleration
 - **Text Regions**: Detailed bounding box information for detected text
-- **Security**: File validation, size limits, secure cleanup
+- **Security**: File validation, size limits, and in-memory handling for uploads/URL input
 - **Performance**: GPU acceleration with optimized text processing
 
 ## Installation

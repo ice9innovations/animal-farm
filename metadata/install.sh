@@ -32,14 +32,12 @@ cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=Animal Farm Metadata Extraction Service
 After=network.target
-RequiresMountsFor=/dev/shm
 
 [Service]
 Type=simple
 User=$CURRENT_USER
 WorkingDirectory=$SCRIPT_DIR
 EnvironmentFile=$SCRIPT_DIR/.env
-ExecStartPre=/usr/bin/install -d -m 700 /dev/shm/animal-farm-metadata
 ExecStart=$SCRIPT_DIR/run.sh
 Restart=on-failure
 RestartSec=5
