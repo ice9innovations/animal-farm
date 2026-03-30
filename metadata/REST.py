@@ -4,6 +4,7 @@ import os
 import uuid
 import time
 import io
+import subprocess
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 import hashlib
@@ -11,6 +12,7 @@ import base64
 import numpy as np
 import cv2
 from collections import Counter
+from urllib.parse import urlparse
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -38,22 +40,11 @@ PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
 PORT = int(PORT_STR)
 
 FOLDER = './uploads'
-if not os.path.isdir('/dev/shm'):
-    raise ValueError("metadata service requires /dev/shm for non-persistent temp storage")
-TEMP_FOLDER = '/dev/shm/animal-farm-metadata'
 MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
+EXIFTOOL_PATH = '/usr/bin/exiftool'
 
 # Ensure upload directory exists
 os.makedirs(FOLDER, exist_ok=True)
-os.makedirs(TEMP_FOLDER, exist_ok=True)
-
-def cleanup_file(filepath: str) -> None:
-    """Safely remove temporary file"""
-    try:
-        if os.path.exists(filepath):
-            os.remove(filepath)
-    except Exception as e:
-        print(f"Warning: Could not remove file {filepath}: {e}")
 
 def serialize_metadata_value(value):
     """Convert EXIF/metadata values to JSON-serializable format"""
@@ -141,10 +132,22 @@ def get_file_hash(filepath: str) -> str:
     except Exception:
         return ""
 
+def get_bytes_hash(image_bytes: bytes) -> str:
+    """Generate SHA-256 hash of in-memory image bytes."""
+    try:
+        return hashlib.sha256(image_bytes).hexdigest()
+    except Exception:
+        return ""
+
 def compute_phash(filepath: str) -> str:
     """Compute perceptual hash of image using imagehash.phash()"""
     img = Image.open(filepath)
     return str(imagehash.phash(img))
+
+def compute_phash_bytes(image_bytes: bytes) -> str:
+    """Compute perceptual hash from in-memory image bytes."""
+    with Image.open(io.BytesIO(image_bytes)) as img:
+        return str(imagehash.phash(img))
 
 def extract_basic_file_info(filepath: str) -> Dict[str, Any]:
     """Extract basic file system information"""
@@ -171,6 +174,26 @@ def format_file_size(size_bytes: int) -> str:
         size_bytes /= 1024.0
         i += 1
     return f"{size_bytes:.1f} {size_names[i]}"
+
+def build_ingest_file_info(
+    image_bytes: bytes,
+    source_kind: str,
+    source_name: Optional[str] = None,
+    received_at: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build truthful file info for byte-origin inputs."""
+    info = {
+        "file_size": len(image_bytes),
+        "file_size_human": format_file_size(len(image_bytes)),
+        "source_kind": source_kind,
+    }
+
+    if source_name:
+        info["source_name"] = source_name
+    if received_at:
+        info["received_at"] = received_at
+
+    return info
 
 def extract_pil_metadata(filepath: str) -> Dict[str, Any]:
     """Extract metadata using PIL/Pillow"""
@@ -216,6 +239,46 @@ def extract_pil_metadata(filepath: str) -> Dict[str, Any]:
     except Exception as e:
         return {"error": f"PIL extraction failed: {str(e)}"}
 
+def extract_pil_metadata_bytes(image_bytes: bytes) -> Dict[str, Any]:
+    """Extract metadata using PIL/Pillow from in-memory bytes."""
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as img:
+            info = {
+                "format": img.format,
+                "mode": img.mode,
+                "size": img.size,
+                "width": img.size[0],
+                "height": img.size[1],
+                "has_transparency": img.mode in ('RGBA', 'LA') or 'transparency' in img.info,
+            }
+
+            if hasattr(img, 'info') and img.info:
+                pil_info = {}
+                for key, value in img.info.items():
+                    pil_info[key] = serialize_metadata_value(value)
+                info["pil_info"] = pil_info
+
+            exif_data = {}
+            if hasattr(img, '_getexif') and img._getexif():
+                exif = img._getexif()
+                if exif:
+                    for tag_id, value in exif.items():
+                        tag = TAGS.get(tag_id, tag_id)
+                        if tag == 'GPSInfo':
+                            gps_data = {}
+                            for gps_tag_id, gps_value in value.items():
+                                gps_tag = GPSTAGS.get(gps_tag_id, gps_tag_id)
+                                gps_data[gps_tag] = serialize_metadata_value(gps_value)
+                            exif_data[tag] = gps_data
+                        else:
+                            exif_data[tag] = serialize_metadata_value(value)
+
+            info["exif"] = exif_data
+            return info
+
+    except Exception as e:
+        return {"error": f"PIL extraction failed: {str(e)}"}
+
 def extract_exiftool_metadata(filepath: str) -> Dict[str, Any]:
     """Extract comprehensive metadata using ExifTool"""
     try:
@@ -246,6 +309,42 @@ def extract_exiftool_metadata(filepath: str) -> Dict[str, Any]:
                 processed[key] = serialize_metadata_value(value)
 
             return processed
+
+    except Exception as e:
+        return {"error": f"ExifTool extraction failed: {str(e)}"}
+
+def extract_exiftool_metadata_bytes(image_bytes: bytes) -> Dict[str, Any]:
+    """Extract metadata with ExifTool from stdin instead of a temp file."""
+    try:
+        proc = subprocess.run(
+            [EXIFTOOL_PATH, '-j', '-'],
+            input=image_bytes,
+            capture_output=True,
+            check=True,
+        )
+        payload = json.loads(proc.stdout.decode('utf-8'))
+        metadata = payload[0] if payload else {}
+
+        if 'SourceFile' in metadata:
+            del metadata['SourceFile']
+
+        exclude_fields = {
+            'ICC_Profile:BlueTRC',
+            'ICC_Profile:GreenTRC',
+            'ICC_Profile:RedTRC',
+            'PIL:icc_profile',
+            'PIL:exif',
+        }
+
+        processed = {}
+        for key, value in metadata.items():
+            if key in exclude_fields:
+                processed[key] = "<Excluded: Large binary data>"
+                continue
+
+            processed[key] = serialize_metadata_value(value)
+
+        return processed
 
     except Exception as e:
         return {"error": f"ExifTool extraction failed: {str(e)}"}
@@ -524,20 +623,22 @@ def extract_comprehensive_metadata_from_path(full_path: str, cleanup: bool = Tru
             }
         }
         
-        # Cleanup (only for temporary files)
-        if cleanup:
-            cleanup_file(full_path)
         # Ensure everything is JSON serializable
         return json.loads(json.dumps(result, default=serialize_metadata_value))
         
     except Exception as e:
-        # Cleanup on error (only for temporary files)
-        if cleanup:
-            cleanup_file(full_path)
         return {
             "error": f"Metadata extraction failed: {str(e)}",
             "status": "error"
         }
+
+def decode_cv_image(image_bytes: bytes) -> np.ndarray:
+    """Decode image bytes into an OpenCV BGR image."""
+    img_array = np.frombuffer(image_bytes, dtype=np.uint8)
+    img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+    if img_cv is None:
+        raise ValueError("Could not decode image bytes for OpenCV analysis")
+    return img_cv
 
 def analyze_image_quality(filepath: str) -> Dict[str, Any]:
     """
@@ -624,6 +725,68 @@ def analyze_image_quality(filepath: str) -> Dict[str, Any]:
     except Exception as e:
         return {"error": f"Quality analysis failed: {str(e)}"}
 
+def analyze_image_quality_bytes(image_bytes: bytes) -> Dict[str, Any]:
+    """Advanced image quality analysis from in-memory bytes."""
+    try:
+        img_cv = decode_cv_image(image_bytes)
+        gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+
+        laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+        mean_brightness = np.mean(gray)
+        brightness_std = np.std(gray)
+        hist = cv2.calcHist([gray], [0], None, [256], [0, 256])
+        total_pixels = gray.shape[0] * gray.shape[1]
+        dark_pixels = np.sum(hist[:25]) / total_pixels
+        bright_pixels = np.sum(hist[230:]) / total_pixels
+        contrast_score = brightness_std / 64.0
+
+        aesthetic_score = 50
+        if laplacian_var >= 100:
+            aesthetic_score += 15
+        if 50 <= mean_brightness <= 200 and brightness_std >= 30:
+            aesthetic_score += 15
+        if dark_pixels <= 0.4 and bright_pixels <= 0.4:
+            aesthetic_score += 10
+        if 0.5 <= contrast_score <= 2.0:
+            aesthetic_score += 10
+        if laplacian_var < 100:
+            aesthetic_score -= 20
+        if mean_brightness < 50 or mean_brightness > 200:
+            aesthetic_score -= 15
+        if dark_pixels > 0.4 or bright_pixels > 0.4:
+            aesthetic_score -= 10
+        aesthetic_score = max(0, min(100, aesthetic_score))
+
+        return {
+            "blur_analysis": {
+                "laplacian_variance": round(laplacian_var, 2),
+                "sharpness_score": round(min(1.0, laplacian_var / 500), 3)
+            },
+            "lighting_analysis": {
+                "mean_brightness": round(mean_brightness, 2),
+                "lighting_quality": round(mean_brightness, 2)
+            },
+            "exposure_analysis": {
+                "dark_pixel_ratio": round(dark_pixels, 3),
+                "bright_pixel_ratio": round(bright_pixels, 3),
+                "exposure_quality": round((1.0 - dark_pixels - bright_pixels) * 100, 1),
+                "histogram_balance": round(brightness_std, 2)
+            },
+            "contrast_analysis": {
+                "contrast_score": round(contrast_score, 2),
+                "brightness_std": round(brightness_std, 2),
+                "contrast_quality": round(contrast_score * 25, 1),
+                "dynamic_range": round(brightness_std, 2)
+            },
+            "aesthetic_score": {
+                "score": aesthetic_score,
+                "factors": "Based on sharpness, lighting, exposure, contrast"
+            }
+        }
+
+    except Exception as e:
+        return {"error": f"Quality analysis failed: {str(e)}"}
+
 def analyze_color_properties(filepath: str) -> Dict[str, Any]:
     """
     🎯 LOW-HANGING FRUIT: Color analysis and dominant colors
@@ -652,6 +815,27 @@ def analyze_color_properties(filepath: str) -> Dict[str, Any]:
             }
         }
         
+    except Exception as e:
+        return {"error": f"Color analysis failed: {str(e)}"}
+
+def analyze_color_properties_bytes(image_bytes: bytes) -> Dict[str, Any]:
+    """Color analysis from in-memory bytes."""
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as img_pil:
+            if img_pil.mode != 'RGB':
+                img_pil = img_pil.convert('RGB')
+            stat = ImageStat.Stat(img_pil)
+            img_hsv = img_pil.convert('HSV')
+            hsv_stat = ImageStat.Stat(img_hsv)
+            avg_saturation = hsv_stat.mean[1]
+
+        return {
+            "saturation_analysis": {
+                "average_saturation": round(avg_saturation, 1),
+                "saturation_level": round(avg_saturation, 1)
+            }
+        }
+
     except Exception as e:
         return {"error": f"Color analysis failed: {str(e)}"}
 
@@ -736,6 +920,69 @@ def analyze_composition(filepath: str) -> Dict[str, Any]:
     except Exception as e:
         return {"error": f"Composition analysis failed: {str(e)}"}
 
+def analyze_composition_bytes(image_bytes: bytes) -> Dict[str, Any]:
+    """Composition analysis from in-memory bytes."""
+    try:
+        img_cv = decode_cv_image(image_bytes)
+        gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+        height, width = gray.shape
+
+        aspect_ratio = width / height
+        if abs(aspect_ratio - 1.0) < 0.1:
+            aspect_category = "square"
+        elif aspect_ratio > 1.2:
+            aspect_category = "landscape"
+        elif aspect_ratio < 0.8:
+            aspect_category = "portrait"
+        else:
+            aspect_category = "square"
+
+        third_h = height // 3
+        third_w = width // 3
+
+        sections = []
+        for i in range(3):
+            for j in range(3):
+                section = gray[i*third_h:(i+1)*third_h, j*third_w:(j+1)*third_w]
+                sections.append(np.mean(section))
+
+        section_variance = [np.std(gray[i*third_h:(i+1)*third_h, j*third_w:(j+1)*third_w])
+                           for i in range(3) for j in range(3)]
+        most_interesting_section = np.argmax(section_variance)
+
+        edges = cv2.Canny(gray, 50, 150)
+        edge_density = np.sum(edges > 0) / (width * height)
+
+        left_half = gray[:, :width//2]
+        right_half = cv2.flip(gray[:, width//2:], 1)
+        min_width = min(left_half.shape[1], right_half.shape[1])
+        left_half = left_half[:, :min_width]
+        right_half = right_half[:, :min_width]
+        symmetry_score = 1.0 - (np.mean(np.abs(left_half.astype(float) - right_half.astype(float))) / 255.0)
+
+        return {
+            "aspect_ratio": {
+                "ratio": round(aspect_ratio, 2),
+                "category": aspect_category,
+                "dimensions": [width, height]
+            },
+            "rule_of_thirds": {
+                "section_brightness": [round(s, 1) for s in sections],
+                "most_interesting_section": most_interesting_section
+            },
+            "complexity_analysis": {
+                "edge_density": round(edge_density, 3),
+                "complexity_level": round(edge_density * 100, 1)
+            },
+            "symmetry_analysis": {
+                "horizontal_symmetry_score": round(symmetry_score, 3),
+                "symmetry_level": round(symmetry_score * 100, 1)
+            }
+        }
+
+    except Exception as e:
+        return {"error": f"Composition analysis failed: {str(e)}"}
+
 def download_image_bytes(url: str) -> bytes:
     """Download image from URL and return raw bytes"""
     try:
@@ -766,40 +1013,145 @@ def load_image_bytes(file_path: str) -> bytes:
     except Exception as e:
         raise Exception(f"Failed to load image: {str(e)}")
 
-def process_image_for_metadata(image_bytes: bytes) -> dict:
-    """Main processing function - takes raw image bytes, returns metadata data.
-    Uses a private per-request temporary directory under /dev/shm for ExifTool."""
-    import tempfile
+def extract_comprehensive_metadata_from_bytes(
+    image_bytes: bytes,
+    source_kind: str,
+    source_name: Optional[str] = None,
+    received_at: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Extract comprehensive metadata for byte-origin inputs without temp files."""
     try:
-        # Detect original format for the correct file extension
-        with Image.open(io.BytesIO(image_bytes)) as img:
-            fmt = img.format or 'JPEG'
-        ext_map = {'JPEG': '.jpg', 'PNG': '.png', 'WEBP': '.webp',
-                   'GIF': '.gif', 'TIFF': '.tif', 'BMP': '.bmp'}
-        suffix = ext_map.get(fmt, '.jpg')
+        start_time = time.time()
+        file_info = build_ingest_file_info(image_bytes, source_kind, source_name, received_at)
+        file_hash = get_bytes_hash(image_bytes)
+        phash = compute_phash_bytes(image_bytes)
 
-        # ExifTool requires a real path. Keep it in a private tmpfs-backed directory
-        # and unlink the file as soon as extraction completes.
-        with tempfile.TemporaryDirectory(dir=TEMP_FOLDER, prefix='req-') as temp_dir:
-            temp_path = os.path.join(temp_dir, f'image{suffix}')
-            with open(temp_path, 'wb') as tmp_file:
-                tmp_file.write(image_bytes)
+        pil_metadata = extract_pil_metadata_bytes(image_bytes)
+        exiftool_metadata = extract_exiftool_metadata_bytes(image_bytes)
+        ai_detection = detect_ai_generation_markers(exiftool_metadata)
 
-            result = extract_comprehensive_metadata_from_path(temp_path, cleanup=True)
-        
+        all_metadata = {}
+        if "error" not in exiftool_metadata:
+            all_metadata.update(exiftool_metadata)
+
+        if "error" not in pil_metadata:
+            pil_info = pil_metadata.get("pil_info", {})
+            if pil_info:
+                for key, value in pil_info.items():
+                    if key not in all_metadata:
+                        all_metadata[f"PIL:{key}"] = value
+
+        categorized = categorize_metadata(all_metadata) if all_metadata else {}
+        quality_analysis = analyze_image_quality_bytes(image_bytes)
+        color_analysis = analyze_color_properties_bytes(image_bytes)
+        composition_analysis = analyze_composition_bytes(image_bytes)
+
+        total_tags = len(all_metadata)
+        categories_found = len(categorized)
+        has_exif = bool([k for k in all_metadata.keys() if 'exif' in k.lower()])
+        has_gps = bool(categorized.get("gps", {}))
+        has_camera_info = bool(categorized.get("camera", {}))
+        processing_time = round(time.time() - start_time, 3)
+        serialized_file_info = {k: serialize_metadata_value(v) for k, v in file_info.items()}
+
+        result = {
+            "metadata": {
+                "file_info": serialized_file_info,
+                "file_hash": file_hash,
+                "phash": phash,
+                "ai_detection": ai_detection,
+                "summary": {
+                    "total_metadata_tags": total_tags,
+                    "categories_found": categories_found,
+                    "has_exif_data": has_exif,
+                    "has_gps_data": has_gps,
+                    "has_camera_info": has_camera_info,
+                    "extraction_methods": ["ExifTool", "PIL/Pillow"],
+                    "processing_time": processing_time
+                },
+                "categorized": categorized,
+                "raw_metadata": all_metadata,
+                "extraction_info": {
+                    "pil_result": "success" if "error" not in pil_metadata else pil_metadata.get("error"),
+                    "exiftool_result": "success" if "error" not in exiftool_metadata else exiftool_metadata.get("error"),
+                    "total_extraction_time": processing_time
+                },
+                "advanced_analysis": {
+                    "image_quality": quality_analysis,
+                    "color_properties": color_analysis,
+                    "composition": composition_analysis
+                },
+                "analysis_summary": {
+                    "aesthetic_score": quality_analysis.get("aesthetic_score", {}).get("score", 0) if not quality_analysis.get("error") else 0,
+                    "lighting_quality": quality_analysis.get("lighting_analysis", {}).get("lighting_quality", 0) if not quality_analysis.get("error") else 0,
+                    "exposure_quality": quality_analysis.get("exposure_analysis", {}).get("exposure_quality", 0) if not quality_analysis.get("error") else 0,
+                    "contrast_quality": quality_analysis.get("contrast_analysis", {}).get("contrast_quality", 0) if not quality_analysis.get("error") else 0,
+                    "histogram_balance": quality_analysis.get("exposure_analysis", {}).get("histogram_balance", 0) if not quality_analysis.get("error") else 0,
+                    "dynamic_range": quality_analysis.get("contrast_analysis", {}).get("dynamic_range", 0) if not quality_analysis.get("error") else 0,
+                    "saturation_level": color_analysis.get("saturation_analysis", {}).get("saturation_level", 0) if not color_analysis.get("error") else 0,
+                    "complexity_level": composition_analysis.get("complexity_analysis", {}).get("complexity_level", 0) if not composition_analysis.get("error") else 0,
+                    "symmetry_level": composition_analysis.get("symmetry_analysis", {}).get("symmetry_level", 0) if not composition_analysis.get("error") else 0
+                },
+                "status": "success"
+            }
+        }
+        return json.loads(json.dumps(result, default=serialize_metadata_value))
+    except Exception as e:
+        return {"error": f"Metadata extraction failed: {str(e)}", "status": "error"}
+
+def process_image_for_metadata(
+    image_bytes: bytes,
+    source_kind: str,
+    source_name: Optional[str] = None,
+    received_at: Optional[str] = None,
+) -> dict:
+    """Main processing function for byte-origin inputs."""
+    try:
+        result = extract_comprehensive_metadata_from_bytes(
+            image_bytes=image_bytes,
+            source_kind=source_kind,
+            source_name=source_name,
+            received_at=received_at,
+        )
+
         if result.get('status') == 'error':
             return {
                 'success': False,
                 'data': {},
                 'error': result.get('error', 'Metadata extraction failed')
             }
-        
+
         return {
             'success': True,
             'data': result,
             'error': None
         }
-        
+
+    except Exception as e:
+        return {
+            'success': False,
+            'data': {},
+            'error': str(e)
+        }
+
+def process_file_for_metadata(file_path: str) -> dict:
+    """Main processing function for existing local files."""
+    try:
+        result = extract_comprehensive_metadata_from_path(file_path, cleanup=False)
+
+        if result.get('status') == 'error':
+            return {
+                'success': False,
+                'data': {},
+                'error': result.get('error', 'Metadata extraction failed')
+            }
+
+        return {
+            'success': True,
+            'data': result,
+            'error': None
+        }
+
     except Exception as e:
         return {
             'success': False,
@@ -1048,6 +1400,13 @@ def analyze():
     
     try:
         # Step 1: Get image data (URL/file/POST)
+        image_bytes = None
+        source_name = None
+        source_kind = None
+        received_at = None
+        url = None
+        file_path = None
+
         if request.method == 'POST':
             # Handle POST file upload
             if 'file' not in request.files:
@@ -1077,6 +1436,9 @@ def analyze():
             
             # Read raw bytes — preserves original encoding and EXIF
             image_bytes = file.read()
+            source_name = file.filename or None
+            source_kind = 'upload'
+            received_at = datetime.utcnow().isoformat() + 'Z'
 
             if len(image_bytes) > MAX_FILE_SIZE:
                 return jsonify({
@@ -1138,8 +1500,11 @@ def analyze():
             try:
                 if url:
                     image_bytes = download_image_bytes(url)
+                    source_kind = 'url'
+                    source_name = urlparse(url).path.rsplit('/', 1)[-1] or None
+                    received_at = datetime.utcnow().isoformat() + 'Z'
                 elif file_path:
-                    image_bytes = load_image_bytes(file_path)
+                    load_image_bytes(file_path)
             except Exception as e:
                 return jsonify({
                     "service": "metadata",
@@ -1153,7 +1518,15 @@ def analyze():
                 }), 400
         
         # Step 2: Call processing function
-        result = process_image_for_metadata(image_bytes)
+        if file_path:
+            result = process_file_for_metadata(file_path)
+        else:
+            result = process_image_for_metadata(
+                image_bytes,
+                source_kind=source_kind,
+                source_name=source_name,
+                received_at=received_at,
+            )
         processing_time = time.time() - start_time
         
         # Step 3: Handle processing result
