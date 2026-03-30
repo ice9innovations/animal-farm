@@ -13,6 +13,8 @@ from PIL import Image
 import logging
 
 from colors_analyzer import ColorsAnalyzer
+from haishoku_compat import get_dominant as get_dominant_color
+from haishoku_compat import get_palette as get_color_palette
 
 # Load environment variables FIRST
 load_dotenv()
@@ -160,7 +162,8 @@ def emoji(dominant):
 def dominant(dl_filename):
     dom_json = '  {\n    "dominant": {\n'
 
-    dominant = Haishoku.getDominant(dl_filename)
+    with Image.open(dl_filename).convert('RGB') as image:
+        dominant = get_dominant_color(image)
     dr = dominant[0]
     dg = dominant[1]
     db = dominant[2]
@@ -202,7 +205,8 @@ def dominant(dl_filename):
 
 def palette(dl_filename):
     #get RGB color palette from Haishoku
-    palette = Haishoku.getPalette(dl_filename)
+    with Image.open(dl_filename).convert('RGB') as image:
+        palette = get_color_palette(image)
     hexes = []
     cnames_copic = []
     cnames_prisma = []
@@ -310,7 +314,7 @@ def create_colors_response(predictions: list, processing_time: float, additional
     metadata = {
         "processing_time": round(processing_time, 3),
         "model_info": {
-            "framework": "Haishoku"
+            "framework": "Haishoku-compatible + PIL"
         }
     }
     
@@ -335,8 +339,9 @@ def analyze_colors(image_file: str, cleanup: bool = True) -> Dict[str, Any]:
         full_path = os.path.join(FOLDER, image_file)
     
     try:
-        # Get dominant color directly using Haishoku
-        dominant_color = Haishoku.getDominant(full_path)
+        with Image.open(full_path).convert('RGB') as image:
+            dominant_color = get_dominant_color(image)
+            palette_colors = get_color_palette(image)
         dr, dg, db = dominant_color[0], dominant_color[1], dominant_color[2]
         dhex = rgb2hex(dr, dg, db)
         
@@ -354,8 +359,6 @@ def analyze_colors(image_file: str, cleanup: bool = True) -> Dict[str, Any]:
         color_name_emoji = get_color_name_for_emojis(dominant_color)
         #color_emoji = get_emoji_by_name(color_name_emoji)
         
-        # Get color palette
-        palette_colors = Haishoku.getPalette(full_path)
         cnames_copic = []
         cnames_prisma = []
         
@@ -432,7 +435,7 @@ def analyze_colors(image_file: str, cleanup: bool = True) -> Dict[str, Any]:
                 },
                 "palette": palette_info,
                 "analysis_info": {
-                    "framework": "Haishoku + PIL",
+                    "framework": "Haishoku-compatible + PIL",
                     "color_systems": active_systems,
                     "analysis_time": analysis_time
                 },
@@ -648,4 +651,3 @@ if __name__ == '__main__':
     print(f"Configured color systems: {', '.join([s.title() for s in COLOR_SYSTEM])}")
     print(f"Analyzer loaded: {analyzer_loaded}")
     app.run(host=host, port=int(PORT), debug=False, threaded=True)
-

@@ -3,18 +3,18 @@
 Colors Analyzer - Core color analysis functionality
 
 Handles color extraction, palette analysis, and color naming using
-Haishoku color extraction library with Copic and Prismacolor mappings.
+an in-memory Haishoku-compatible implementation with Copic and Prismacolor mappings.
 """
 
 import re
 import time
 import json
 import logging
-import tempfile
 import os
 from typing import Dict, Any, List
 from PIL import Image
-from haishoku.haishoku import Haishoku
+
+from haishoku_compat import get_colors, get_colors_mean, get_dominant, get_palette
 
 logger = logging.getLogger(__name__)
 
@@ -411,67 +411,20 @@ class ColorsAnalyzer:
             }
     
     def _get_colors_from_image(self, image: Image.Image):
-        """Extract color groups from PIL Image using proper Haishoku API"""
-        import uuid
-        # Create temporary file for Haishoku (it requires file path)
-        tmp_path = f"temp_color_analysis_{uuid.uuid4().hex[:8]}.jpg"
-        image.save(tmp_path, format='JPEG')
-            
-        try:
-            # Use Haishoku's public getPalette method
-            palette = Haishoku.getPalette(tmp_path)
-            # Convert to the expected format (count, color_tuple)
-            image_colors = [(int(p[0] * 1000), p[1]) for p in palette]  # Scale percentage to count
-            return image_colors
-        finally:
-            # Clean up temporary file
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+        """Extract color groups from PIL Image using in-memory Haishoku-compatible logic."""
+        return get_colors(image)
     
     def _get_colors_mean_from_image(self, image: Image.Image):
-        """Get color means from PIL Image using proper Haishoku API"""
-        import uuid
-        # Create temporary file for Haishoku (it requires file path)
-        tmp_path = f"temp_color_analysis_{uuid.uuid4().hex[:8]}.jpg"
-        image.save(tmp_path, format='JPEG')
-            
-        try:
-            # Use Haishoku's public getColorsMean method
-            colors_mean = Haishoku.getColorsMean(tmp_path)
-            # colors_mean is already in the format [(count, (r,g,b)), ...]
-            return colors_mean
-        finally:
-            # Clean up temporary file
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+        """Get color means from PIL Image using in-memory Haishoku-compatible logic."""
+        return get_colors_mean(image)
     
     def _get_dominant_from_image(self, image: Image.Image):
         """Get dominant color directly from PIL Image - copied from REST.py"""
-        colors_mean = self._get_colors_mean_from_image(image)
-        colors_mean = sorted(colors_mean, reverse=True)
-        dominant_tuple = colors_mean[0]
-        dominant = dominant_tuple[1]
-        return dominant
+        return get_dominant(image)
     
     def _get_palette_from_image(self, image: Image.Image):
         """Get color palette directly from PIL Image - copied from REST.py"""
-        colors_mean = self._get_colors_mean_from_image(image)
-        
-        # Calculate percentages (following Haishoku's logic)
-        palette_tmp = []
-        count_sum = 0
-        for c_m in colors_mean:
-            count_sum += c_m[0]
-            palette_tmp.append(c_m)
-        
-        # Calculate the percentage
-        palette = []
-        for p in palette_tmp:
-            pp = '%.2f' % (p[0] / count_sum)
-            tp = (float(pp), p[1])
-            palette.append(tp)
-        
-        return palette
+        return get_palette(image)
     
     def _rgb2hex(self, r, g, b):
         """Convert RGB to hex - copied from REST.py"""
