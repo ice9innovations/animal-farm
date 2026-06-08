@@ -54,20 +54,35 @@ if [ -z "${CXX:-}" ]; then
     fi
 fi
 CMAKE_CUDA_HOST_COMPILER="${CMAKE_CUDA_HOST_COMPILER:-$CXX}"
+CUDA_COMPILER="${CUDA_COMPILER:-${CUDACXX:-}}"
+if [ -z "$CUDA_COMPILER" ]; then
+    if [ -x /usr/local/cuda/bin/nvcc ]; then
+        CUDA_COMPILER=/usr/local/cuda/bin/nvcc
+    else
+        CUDA_COMPILER="$(command -v nvcc || true)"
+    fi
+fi
+if [ -z "$CUDA_COMPILER" ]; then
+    echo "CUDA nvcc compiler not found. Install the CUDA Toolkit, then rerun."
+    exit 1
+fi
+CUDA_ROOT="$(dirname "$(dirname "$CUDA_COMPILER")")"
 
 echo "Using C compiler: $CC"
 echo "Using C++ compiler: $CXX"
 echo "Using CUDA host compiler: $CMAKE_CUDA_HOST_COMPILER"
+echo "Using CUDA compiler: $CUDA_COMPILER"
 
 # Conda can put a stub nvcc and wrong gcc on PATH — use resolved system compilers explicitly
 CC="$CC" CXX="$CXX" \
     cmake -B build \
     -DGGML_CUDA=ON \
     -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCH}" \
-    -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
+    -DCMAKE_CUDA_COMPILER="$CUDA_COMPILER" \
     -DCMAKE_CUDA_HOST_COMPILER="$CMAKE_CUDA_HOST_COMPILER" \
-    -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath-link,/usr/local/cuda/lib64/stubs" \
-    -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-rpath-link,/usr/local/cuda/lib64/stubs"
+    -DCUDAToolkit_ROOT="$CUDA_ROOT" \
+    -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath-link,$CUDA_ROOT/lib64/stubs" \
+    -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-rpath-link,$CUDA_ROOT/lib64/stubs"
 
 cmake --build build --config Release -j$(nproc) --target llama-server
 
