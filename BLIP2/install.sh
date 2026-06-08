@@ -14,6 +14,7 @@ SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 LAVIS_DIR="$SCRIPT_DIR/LAVIS"
 SERVICE_NAME="blip2"
 CURRENT_USER="$(whoami)"
+WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
 
 # Clone LAVIS if not already present
 if [ ! -d "$LAVIS_DIR" ]; then
@@ -28,7 +29,7 @@ python3.11 -m venv "$SCRIPT_DIR/venv"
 source "$SCRIPT_DIR/venv/bin/activate"
 
 # Route pip temp files to network volume — CUDA wheels exhaust the overlay /tmp
-export TMPDIR="${TMPDIR:-/workspace/tmp}"
+export TMPDIR="${TMPDIR:-$WORKSPACE_DIR/tmp}"
 mkdir -p "$TMPDIR"
 
 pip install --upgrade pip

@@ -13,8 +13,9 @@ set -e
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 SERVICE_NAME="ocr"
 CURRENT_USER="$(whoami)"
+WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
 
-export TMPDIR=/workspace/tmp
+export TMPDIR="${TMPDIR:-$WORKSPACE_DIR/tmp}"
 mkdir -p "$TMPDIR"
 
 rm -rf "$SCRIPT_DIR/venv"
@@ -26,7 +27,7 @@ python3.11 -m venv "$SCRIPT_DIR/venv"
 "$SCRIPT_DIR/venv/bin/python" -c "import nltk; nltk.download('punkt'); nltk.download('stopwords')"
 
 # Download PaddleOCR model weights to the network volume
-bash "$SCRIPT_DIR/download_models.sh" /workspace/paddleocr/models
+bash "$SCRIPT_DIR/download_models.sh" "$WORKSPACE_DIR/paddleocr/models"
 
 # Generate systemd service file
 SERVICE_FILE="$SCRIPT_DIR/$SERVICE_NAME.service"

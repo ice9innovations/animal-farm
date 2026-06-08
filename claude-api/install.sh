@@ -14,7 +14,8 @@ SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 SERVICE_NAME="claude-api"
 CURRENT_USER="$(whoami)"
 
-export TMPDIR=/workspace/tmp
+WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
+export TMPDIR="${TMPDIR:-$WORKSPACE_DIR/tmp}"
 mkdir -p "$TMPDIR"
 
 rm -rf "$SCRIPT_DIR/venv"

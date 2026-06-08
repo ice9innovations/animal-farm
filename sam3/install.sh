@@ -16,12 +16,13 @@ set -e
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 SERVICE_NAME="sam3"
 CURRENT_USER="$(whoami)"
+WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
 
-export TMPDIR=/workspace/tmp
+export TMPDIR="${TMPDIR:-$WORKSPACE_DIR/tmp}"
 mkdir -p "$TMPDIR"
 
 # Clone SAM3 model code to network volume
-SAM3_CODE_DIR="/workspace/sam3/sam3"
+SAM3_CODE_DIR="$WORKSPACE_DIR/sam3/sam3"
 if [ ! -d "$SAM3_CODE_DIR" ]; then
     echo "Cloning SAM3 model code to $SAM3_CODE_DIR..."
     mkdir -p "$(dirname "$SAM3_CODE_DIR")"
@@ -31,7 +32,7 @@ else
 fi
 
 # Download model checkpoint (requires HF_TOKEN — facebook/sam3 is restricted)
-bash "$SCRIPT_DIR/download_models.sh" /workspace/sam3/models
+bash "$SCRIPT_DIR/download_models.sh" "$WORKSPACE_DIR/sam3/models"
 
 rm -rf "$SCRIPT_DIR/venv"
 python3.11 -m venv "$SCRIPT_DIR/venv"

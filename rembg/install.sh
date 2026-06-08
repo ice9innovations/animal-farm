@@ -17,8 +17,9 @@ set -e
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 SERVICE_NAME="rembg"
 CURRENT_USER="$(whoami)"
+WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
 
-export TMPDIR=/workspace/tmp
+export TMPDIR="${TMPDIR:-$WORKSPACE_DIR/tmp}"
 mkdir -p "$TMPDIR"
 
 # Read BACKEND from .env to download only what's needed
@@ -29,7 +30,7 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
 fi
 
 # Clone BEN2 model code to network volume
-BEN2_CODE_DIR="/workspace/rembg/BEN2"
+BEN2_CODE_DIR="$WORKSPACE_DIR/rembg/BEN2"
 if [ ! -f "$BEN2_CODE_DIR/BEN2.py" ]; then
     echo "Cloning BEN2 model code to $BEN2_CODE_DIR..."
     mkdir -p "$(dirname "$BEN2_CODE_DIR")"
@@ -39,7 +40,7 @@ else
 fi
 
 # Download model weights
-bash "$SCRIPT_DIR/download_models.sh" /workspace/rembg/models "$BACKEND"
+bash "$SCRIPT_DIR/download_models.sh" "$WORKSPACE_DIR/rembg/models" "$BACKEND"
 
 rm -rf "$SCRIPT_DIR/venv"
 python3.11 -m venv "$SCRIPT_DIR/venv"
