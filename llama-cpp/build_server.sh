@@ -39,13 +39,33 @@ fi
 
 cd "$BUILD_DIR"
 
-# Conda puts a stub nvcc and wrong gcc on PATH — use system compilers explicitly
-CC=/usr/bin/gcc-11 CXX=/usr/bin/g++-11 \
+if [ -z "${CC:-}" ]; then
+    if [ -x /usr/bin/gcc-11 ]; then
+        CC=/usr/bin/gcc-11
+    else
+        CC="$(command -v gcc)"
+    fi
+fi
+if [ -z "${CXX:-}" ]; then
+    if [ -x /usr/bin/g++-11 ]; then
+        CXX=/usr/bin/g++-11
+    else
+        CXX="$(command -v g++)"
+    fi
+fi
+CMAKE_CUDA_HOST_COMPILER="${CMAKE_CUDA_HOST_COMPILER:-$CXX}"
+
+echo "Using C compiler: $CC"
+echo "Using C++ compiler: $CXX"
+echo "Using CUDA host compiler: $CMAKE_CUDA_HOST_COMPILER"
+
+# Conda can put a stub nvcc and wrong gcc on PATH — use resolved system compilers explicitly
+CC="$CC" CXX="$CXX" \
     cmake -B build \
     -DGGML_CUDA=ON \
     -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCH}" \
     -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc \
-    -DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-11 \
+    -DCMAKE_CUDA_HOST_COMPILER="$CMAKE_CUDA_HOST_COMPILER" \
     -DCMAKE_EXE_LINKER_FLAGS="-Wl,-rpath-link,/usr/local/cuda/lib64/stubs" \
     -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-rpath-link,/usr/local/cuda/lib64/stubs"
 
