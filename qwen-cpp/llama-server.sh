@@ -7,7 +7,7 @@ source .env
 /home/sd/llama.cpp/build/bin/llama-server \
     --model "${MODEL_PATH}" \
     --mmproj "${MMPROJ_PATH}" \
-    --ctx-size 2048 \
+    --ctx-size 4096 \
     --n-gpu-layers "${N_GPU_LAYERS}" \
     --port "${LLAMA_SERVER_PORT}" \
     --host 127.0.0.1 \

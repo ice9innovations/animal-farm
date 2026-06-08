@@ -8,6 +8,12 @@ import sys
 # NOTE: your list included "ollama-cpp-server" but the actual systemd service
 # is "llama-cpp-server" — using the real name here.
 SERVICES = [
+    "rembg-api",
+    "florence2-api",
+    "qwen-cpp-api",
+    "qwen-cpp-server",
+    "xai-api",
+    "gpt-api",
     "face-api",
     "pose-api",
     "sam3-api",

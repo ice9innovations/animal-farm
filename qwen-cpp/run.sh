@@ -8,7 +8,7 @@ LLAMA_BIN="${LLAMA_SERVER_BIN}"
 "$LLAMA_BIN" \
     --model "${MODEL_PATH}" \
     --mmproj "${MMPROJ_PATH}" \
-    --ctx-size 2048 \
+    --ctx-size 5120 \
     --n-gpu-layers "${N_GPU_LAYERS:-99}" \
     --port "${LLAMA_SERVER_PORT}" \
     --host 127.0.0.1 \
