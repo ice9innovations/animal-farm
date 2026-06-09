@@ -1,14 +1,15 @@
 #!/bin/bash
-# Download Qwen2-VL-2B model files from HuggingFace.
+# Download Qwen3-VL model files from HuggingFace.
 # Run once before first container start. Files are volume-mounted into the container.
-# Source: bartowski/Qwen2-VL-2B-Instruct-GGUF (confirmed in issues/containerize-llama-server-binary.md)
-# Note: docker-compose.yaml references Qwen3VL-4B filenames — reconcile before deploying.
 set -e
 
 MODELS_DIR="${1:-$(dirname "$0")/models}"
 mkdir -p "$MODELS_DIR"
 
-HF_BASE="https://huggingface.co/bartowski/Qwen2-VL-2B-Instruct-GGUF/resolve/main"
+QWEN_GGUF_REPO="${QWEN_GGUF_REPO:-lmstudio-community/Qwen3-VL-2B-Instruct-GGUF}"
+QWEN_MODEL_FILE="${QWEN_MODEL_FILE:-Qwen3-VL-2B-Instruct-Q4_K_M.gguf}"
+QWEN_MMPROJ_FILE="${QWEN_MMPROJ_FILE:-mmproj-Qwen3-VL-2B-Instruct-F16.gguf}"
+HF_BASE="https://huggingface.co/$QWEN_GGUF_REPO/resolve/main"
 
 download() {
     local url="$1"
@@ -20,11 +21,11 @@ download() {
     fi
 }
 
-echo "Downloading Qwen2-VL-2B-Instruct-Q4_K_M.gguf (986MB)..."
-download "$HF_BASE/Qwen2-VL-2B-Instruct-Q4_K_M.gguf" "$MODELS_DIR"
+echo "Downloading $QWEN_MODEL_FILE..."
+download "$HF_BASE/$QWEN_MODEL_FILE" "$MODELS_DIR"
 
-echo "Downloading mmproj-Qwen2-VL-2B-Instruct-f16.gguf (1.33GB)..."
-download "$HF_BASE/mmproj-Qwen2-VL-2B-Instruct-f16.gguf" "$MODELS_DIR"
+echo "Downloading $QWEN_MMPROJ_FILE..."
+download "$HF_BASE/$QWEN_MMPROJ_FILE" "$MODELS_DIR"
 
 echo "Done. Files in $MODELS_DIR:"
 ls -lh "$MODELS_DIR"/*.gguf

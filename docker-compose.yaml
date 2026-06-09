@@ -168,9 +168,9 @@ services:
     environment:
       PORT: "7796"
       PRIVATE: "false"
-      MODEL_PATH: /app/models/Qwen2-VL-2B-Instruct-Q4_K_M.gguf
-      MMPROJ_PATH: /app/models/mmproj-Qwen2-VL-2B-Instruct-f16.gguf
-      MODEL_NAME: qwen3-vl-4b
+      MODEL_PATH: /app/models/Qwen3-VL-2B-Instruct-Q4_K_M.gguf
+      MMPROJ_PATH: /app/models/mmproj-Qwen3-VL-2B-Instruct-F16.gguf
+      MODEL_NAME: qwen3-vl-2b
       LLAMA_SERVER_HOST: "http://127.0.0.1:11436"
       LLAMA_SERVER_PORT: "11436"
       N_GPU_LAYERS: "99"

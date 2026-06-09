@@ -40,14 +40,18 @@ fi
 cd "$BUILD_DIR"
 
 if [ -z "${CC:-}" ]; then
-    if [ -x /usr/bin/gcc-11 ]; then
+    if [ -x /usr/bin/gcc-12 ]; then
+        CC=/usr/bin/gcc-12
+    elif [ -x /usr/bin/gcc-11 ]; then
         CC=/usr/bin/gcc-11
     else
         CC="$(command -v gcc)"
     fi
 fi
 if [ -z "${CXX:-}" ]; then
-    if [ -x /usr/bin/g++-11 ]; then
+    if [ -x /usr/bin/g++-12 ]; then
+        CXX=/usr/bin/g++-12
+    elif [ -x /usr/bin/g++-11 ]; then
         CXX=/usr/bin/g++-11
     else
         CXX="$(command -v g++)"

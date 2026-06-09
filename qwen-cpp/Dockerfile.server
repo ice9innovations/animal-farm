@@ -64,8 +64,8 @@ RUN chmod +x /app/start.sh
 # Models are volume-mounted — never baked into the image:
 #   -v /home/sd/animal-farm/qwen-cpp/models:/app/models:ro
 # .env must set:
-#   MODEL_PATH=/app/models/Qwen2-VL-2B-Instruct-Q4_K_M.gguf
-#   MMPROJ_PATH=/app/models/mmproj-Qwen2-VL-2B-Instruct-f16.gguf
+#   MODEL_PATH=/app/models/Qwen3-VL-2B-Instruct-Q4_K_M.gguf
+#   MMPROJ_PATH=/app/models/mmproj-Qwen3-VL-2B-Instruct-F16.gguf
 #   LLAMA_SERVER_HOST=http://127.0.0.1:11436
 
 EXPOSE 7796

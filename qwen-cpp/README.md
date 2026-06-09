@@ -40,8 +40,8 @@ Client → Flask REST (port 7796) → llama-server (port 11436) → GPU
 GGUF model files are stored locally in `models/`:
 
 ```
-models/Qwen3VL-2B-Instruct-Q4_K_M.gguf
-models/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf
+models/Qwen3-VL-2B-Instruct-Q4_K_M.gguf
+models/mmproj-Qwen3-VL-2B-Instruct-F16.gguf
 ```
 
 A 4B variant is also available — swap the paths in `.env`:
@@ -74,8 +74,8 @@ LLAMA_SERVER_HOST=http://127.0.0.1:11436
 LLAMA_SERVER_PORT=11436
 N_GPU_LAYERS=99
 
-MODEL_PATH=/home/sd/animal-farm/qwen-cpp/models/Qwen3VL-2B-Instruct-Q4_K_M.gguf
-MMPROJ_PATH=/home/sd/animal-farm/qwen-cpp/models/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf
+MODEL_PATH=/home/sd/animal-farm/qwen-cpp/models/Qwen3-VL-2B-Instruct-Q4_K_M.gguf
+MMPROJ_PATH=/home/sd/animal-farm/qwen-cpp/models/mmproj-Qwen3-VL-2B-Instruct-F16.gguf
 MODEL_NAME=qwen3-vl-2b
 
 PROMPT="Briefly describe what you see in this image in a single short sentence."
