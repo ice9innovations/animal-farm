@@ -1,5 +1,4 @@
 #!/bin/bash
-# Starts the caption-summary Flask REST API.
 set -e
 
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
