@@ -34,12 +34,12 @@ mkdir -p "$TMPDIR"
 
 pip install --upgrade pip
 
-# PyTorch with CUDA 11.8 (works on CUDA 12.x hardware)
+# PyTorch with CUDA 12.8 for RTX 50-series / Blackwell support
 pip install --no-cache-dir \
-    torch==2.7.1+cu118 \
-    torchvision==0.22.1+cu118 \
-    torchaudio==2.7.1+cu118 \
-    --index-url https://download.pytorch.org/whl/cu118
+    torch==2.10.0+cu128 \
+    torchvision==0.25.0+cu128 \
+    torchaudio==2.10.0+cu128 \
+    --index-url https://download.pytorch.org/whl/cu128
 
 pip install --no-cache-dir -r "$SCRIPT_DIR/requirements.txt"
 

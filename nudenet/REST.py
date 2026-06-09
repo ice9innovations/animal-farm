@@ -93,10 +93,13 @@ emoji_mappings = load_emoji_mappings()
 
 # Global NudeNet detector - initialize once at startup
 nude_detector = None
+nudenet_requested_device = None
+nudenet_requested_providers = []
+nudenet_active_providers = []
 
 def initialize_detector() -> bool:
     """Initialize NudeNet detector once at startup - fail fast"""
-    global nude_detector
+    global nude_detector, nudenet_requested_device, nudenet_requested_providers, nudenet_active_providers
 
     if not NUDENET_AVAILABLE:
         logger.error("❌ NudeNet library not available")
@@ -112,15 +115,18 @@ def initialize_detector() -> bool:
         import nudenet
         model_path = os.path.join(os.path.dirname(nudenet.__file__), "320n.onnx")
         device = os.getenv('DEVICE', 'gpu').lower()
+        nudenet_requested_device = device
         if device == 'cpu':
             providers = ['CPUExecutionProvider']
             logger.info("Device: cpu (DEVICE=cpu)")
         else:
             providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
             logger.info("Device: gpu (DEVICE=gpu or unset)")
+        nudenet_requested_providers = providers
         nude_detector.onnx_session = onnxruntime.InferenceSession(model_path, providers=providers)
 
         actual_providers = nude_detector.onnx_session.get_providers()
+        nudenet_active_providers = actual_providers
         logger.info(f"✅ NudeNet Detector initialized with providers: {actual_providers}")
         return True
     except Exception as e:
@@ -273,6 +279,80 @@ def validate_image_file(file_path: str) -> Image.Image:
         raise Exception(f"Failed to load image: {str(e)}")
 
 app = Flask(__name__)
+
+
+def _normalize_health_payload(payload):
+    """Ensure every /health response exposes the common Animal Farm health shape."""
+    if not isinstance(payload, dict):
+        return payload
+
+    payload.setdefault("status", "healthy")
+    payload.setdefault("schema_version", "health.v1")
+    if not payload.get("service"):
+        payload["service"] = str(globals().get("SERVICE_NAME") or __file__.replace("\\", "/").rstrip("/").split("/")[-2])
+
+    warnings = payload.get("warnings", [])
+    if warnings is None:
+        warnings = []
+    elif isinstance(warnings, str):
+        warnings = [warnings]
+    payload["warnings"] = warnings
+
+    dependencies = payload.get("dependencies") if isinstance(payload.get("dependencies"), dict) else {}
+    for key in ("llama_server", "ollama", "extraction_engines"):
+        if key in payload and key not in dependencies:
+            dependencies[key] = payload[key]
+    payload["dependencies"] = dependencies
+
+    model_value = payload.get("model")
+    if isinstance(model_value, dict):
+        model = dict(model_value)
+    elif model_value is not None:
+        payload.setdefault("model_name", model_value)
+        model = {"name": model_value}
+    else:
+        model = {}
+
+    if "models" in payload and "components" not in model:
+        model["components"] = payload["models"]
+    for source_key in ("detector", "analyzer", "ocr_engine"):
+        source_value = payload.get(source_key)
+        if isinstance(source_value, dict):
+            model.setdefault("status", source_value.get("status"))
+            model.setdefault("details", source_value)
+    if "model_status" in payload and "status" not in model:
+        model["status"] = payload["model_status"]
+    if "model_loaded" in payload and "status" not in model:
+        model["status"] = "loaded" if payload["model_loaded"] else "not_loaded"
+    if "backend_status" in payload and "status" not in model:
+        model["status"] = payload["backend_status"]
+    if "device" in payload and "device" not in model:
+        model["device"] = payload["device"]
+    if "framework" in payload and "framework" not in model:
+        model["framework"] = payload["framework"]
+    if "backend" in payload and "backend" not in model:
+        model["backend"] = payload["backend"]
+    for threshold_key in ("threshold", "confidence_threshold", "detection_threshold", "classification_threshold"):
+        if threshold_key in payload and threshold_key not in model:
+            model[threshold_key] = payload[threshold_key]
+    payload["model"] = model
+
+    payload.setdefault("endpoints", [])
+    return payload
+
+
+@app.after_request
+def _normalize_health_response(response):
+    if request.path != "/health" or not response.is_json:
+        return response
+    payload = response.get_json(silent=True)
+    normalized = _normalize_health_payload(payload)
+    if normalized is not payload:
+        return response
+    response.set_data(app.json.dumps(normalized))
+    response.content_type = "application/json"
+    return response
+
 app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
 
 # Enable CORS for direct browser access
@@ -296,14 +376,29 @@ def health_check():
     """Health check endpoint"""
     try:
         model_status = "loaded" if nude_detector is not None else "not_loaded"
+        requested_gpu = nudenet_requested_device != 'cpu'
+        gpu_active = 'CUDAExecutionProvider' in nudenet_active_providers
+        status = "healthy"
+        warnings = []
+        if model_status != "loaded":
+            status = "unhealthy"
+        elif requested_gpu and not gpu_active:
+            status = "degraded"
+            warnings.append("DEVICE requested GPU but ONNX Runtime is using CPUExecutionProvider")
+
         return jsonify({
-            "status": "healthy",
+            "status": status,
             "service": "NudeNet Detection",
             "model": {
                 "status": model_status,
                 "framework": "NudeNet+",
-                "threshold": DETECTION_THRESHOLD
+                "threshold": DETECTION_THRESHOLD,
+                "device": "cuda" if gpu_active else "cpu",
+                "requested_device": nudenet_requested_device,
+                "requested_providers": nudenet_requested_providers,
+                "active_providers": nudenet_active_providers
             },
+            "warnings": warnings,
             "endpoints": [
                 "GET /health - Health check",
                 "GET,POST /analyze - Unified endpoint (URL/file/upload)",

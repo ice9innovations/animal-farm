@@ -197,6 +197,80 @@ def _load_image_from_request(req) -> Image.Image:
 # ---------------------------------------------------------------------------
 
 app = Flask(__name__)
+
+
+def _normalize_health_payload(payload):
+    """Ensure every /health response exposes the common Animal Farm health shape."""
+    if not isinstance(payload, dict):
+        return payload
+
+    payload.setdefault("status", "healthy")
+    payload.setdefault("schema_version", "health.v1")
+    if not payload.get("service"):
+        payload["service"] = str(globals().get("SERVICE_NAME") or __file__.replace("\\", "/").rstrip("/").split("/")[-2])
+
+    warnings = payload.get("warnings", [])
+    if warnings is None:
+        warnings = []
+    elif isinstance(warnings, str):
+        warnings = [warnings]
+    payload["warnings"] = warnings
+
+    dependencies = payload.get("dependencies") if isinstance(payload.get("dependencies"), dict) else {}
+    for key in ("llama_server", "ollama", "extraction_engines"):
+        if key in payload and key not in dependencies:
+            dependencies[key] = payload[key]
+    payload["dependencies"] = dependencies
+
+    model_value = payload.get("model")
+    if isinstance(model_value, dict):
+        model = dict(model_value)
+    elif model_value is not None:
+        payload.setdefault("model_name", model_value)
+        model = {"name": model_value}
+    else:
+        model = {}
+
+    if "models" in payload and "components" not in model:
+        model["components"] = payload["models"]
+    for source_key in ("detector", "analyzer", "ocr_engine"):
+        source_value = payload.get(source_key)
+        if isinstance(source_value, dict):
+            model.setdefault("status", source_value.get("status"))
+            model.setdefault("details", source_value)
+    if "model_status" in payload and "status" not in model:
+        model["status"] = payload["model_status"]
+    if "model_loaded" in payload and "status" not in model:
+        model["status"] = "loaded" if payload["model_loaded"] else "not_loaded"
+    if "backend_status" in payload and "status" not in model:
+        model["status"] = payload["backend_status"]
+    if "device" in payload and "device" not in model:
+        model["device"] = payload["device"]
+    if "framework" in payload and "framework" not in model:
+        model["framework"] = payload["framework"]
+    if "backend" in payload and "backend" not in model:
+        model["backend"] = payload["backend"]
+    for threshold_key in ("threshold", "confidence_threshold", "detection_threshold", "classification_threshold"):
+        if threshold_key in payload and threshold_key not in model:
+            model[threshold_key] = payload[threshold_key]
+    payload["model"] = model
+
+    payload.setdefault("endpoints", [])
+    return payload
+
+
+@app.after_request
+def _normalize_health_response(response):
+    if request.path != "/health" or not response.is_json:
+        return response
+    payload = response.get_json(silent=True)
+    normalized = _normalize_health_payload(payload)
+    if normalized is not payload:
+        return response
+    response.set_data(app.json.dumps(normalized))
+    response.content_type = "application/json"
+    return response
+
 CORS(app, origins=['*'])
 
 
