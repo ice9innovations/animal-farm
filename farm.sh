@@ -106,7 +106,7 @@ start_service() {
 
     mkdir -p "$LOG_DIR" "$PID_DIR"
     state_add "$name"
-    nohup bash "$dir/run.sh" >> "$LOG_DIR/${name}.log" 2>&1 &
+    setsid bash "$dir/run.sh" >> "$LOG_DIR/${name}.log" 2>&1 < /dev/null &
     local pid=$!
     echo $pid > "$PID_DIR/${name}.pid"
     sleep 2
