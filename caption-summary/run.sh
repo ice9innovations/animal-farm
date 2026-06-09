@@ -2,7 +2,7 @@
 set -e
 
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
-VENV_DIR="${CAPTION_SUMMARY_VENV:-$SCRIPT_DIR/caption_summary_venv}"
+VENV_DIR="${CAPTION_SUMMARY_VENV:-$SCRIPT_DIR/venv}"
 
 cd "$SCRIPT_DIR"
 source "$VENV_DIR/bin/activate"

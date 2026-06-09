@@ -5,7 +5,7 @@ set -e
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 SERVICE_NAME="caption-summary"
 CURRENT_USER="$(whoami)"
-VENV_DIR="${CAPTION_SUMMARY_VENV:-$SCRIPT_DIR/caption_summary_venv}"
+VENV_DIR="${CAPTION_SUMMARY_VENV:-$SCRIPT_DIR/venv}"
 
 python3 -m venv "$VENV_DIR"
 "$VENV_DIR/bin/pip" install --upgrade pip
