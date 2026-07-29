@@ -107,10 +107,6 @@ def initialize_detector() -> bool:
 
     try:
         logger.info("Initializing NudeNet Detector...")
-        nude_detector = NudeDetector()
-
-        # The nudenet library has a bug where it accepts but ignores the providers parameter.
-        # We must recreate the ONNX session with the correct providers explicitly.
         import onnxruntime
         import nudenet
         model_path = os.path.join(os.path.dirname(nudenet.__file__), "320n.onnx")
@@ -123,7 +119,21 @@ def initialize_detector() -> bool:
             providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
             logger.info("Device: gpu (DEVICE=gpu or unset)")
         nudenet_requested_providers = providers
-        nude_detector.onnx_session = onnxruntime.InferenceSession(model_path, providers=providers)
+
+        # NudeDetector.__init__ ignores its providers argument and creates a
+        # default ONNX session. On Jetson, that selects TensorRT and can spend
+        # several minutes compiling an engine that we immediately discard.
+        # Build the requested session directly and initialize the four fields
+        # that NudeDetector.detect() uses.
+        nude_detector = NudeDetector.__new__(NudeDetector)
+        nude_detector.onnx_session = onnxruntime.InferenceSession(
+            model_path,
+            providers=providers
+        )
+        model_input = nude_detector.onnx_session.get_inputs()[0]
+        nude_detector.input_width = 320
+        nude_detector.input_height = 320
+        nude_detector.input_name = model_input.name
 
         actual_providers = nude_detector.onnx_session.get_providers()
         nudenet_active_providers = actual_providers
