@@ -3,48 +3,94 @@
 #
 # Differences from install.sh:
 #   - Uses nudenet_venv (not venv) to match nudenet.sh
-#   - Skips onnxruntime-gpu from requirements (nudenet pulls in CPU onnxruntime as dep)
-#   - Installs onnxruntime-gpu from Jetson index after, then pins numpy<2
+#   - Installs Jetson-compatible NumPy/OpenCV constraints
+#   - Installs NudeNet without its CPU-only onnxruntime dependency
+#   - Installs onnxruntime-gpu from the Jetson index
 #   - Removes TMPDIR override (RunPod-specific, not needed on Jetson)
-#   - Copies pre-configured services/nudenet-api.service instead of generating one
+#   - Generates a systemd service for the invoking user and current install path
 #
 # Usage:
 #   bash install_jetson.sh
 #
 # After install:
 #   sudo systemctl start nudenet-api
-set -e
+set -eu
 
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 VENV="$SCRIPT_DIR/nudenet_venv"
-SERVICE_SRC="$SCRIPT_DIR/services/nudenet-api.service"
+SERVICE_FILE="$SCRIPT_DIR/nudenet-api.service"
+JETSON_INDEX="${JETSON_INDEX:-https://pypi.jetson-ai-lab.io/jp6/cu126}"
+JETSON_ORT_VERSION="${JETSON_ORT_VERSION:-1.23.0}"
+SERVICE_USER="${SUDO_USER:-$(id -un)}"
+SERVICE_GROUP="$(id -gn "$SERVICE_USER")"
+
+if [ "$(uname -m)" != "aarch64" ]; then
+    echo "Error: install_jetson.sh requires an aarch64 Jetson system." >&2
+    exit 1
+fi
 
 rm -rf "$VENV"
 python3 -m venv "$VENV"
 
 "$VENV/bin/pip" install --upgrade pip
 
-# Install requirements (excluding onnxruntime-gpu — handled below)
-"$VENV/bin/pip" install --no-cache-dir -r "$SCRIPT_DIR/requirements.txt"
+# Install the compatible dependency set first. NudeNet is installed without
+# dependencies because its metadata requires the CPU "onnxruntime" package.
+"$VENV/bin/pip" install --no-cache-dir -r "$SCRIPT_DIR/requirements-jetson.txt"
+"$VENV/bin/pip" install --no-cache-dir --no-deps "nudenet>=3.4.0"
+"$VENV/bin/pip" install --no-cache-dir \
+    "onnxruntime-gpu==$JETSON_ORT_VERSION" \
+    --no-deps \
+    --index-url "$JETSON_INDEX"
 
-# nudenet pulls in CPU-only onnxruntime as a transitive dep — remove it,
-# then install the Jetson GPU wheel (nvgpu / TensorRT support).
-# Must also pin numpy<2 after, since the Jetson wheel is compiled against NumPy 1.x ABI.
-"$VENV/bin/pip" uninstall -y onnxruntime onnxruntime-gpu 2>/dev/null || true
-"$VENV/bin/pip" install --no-cache-dir onnxruntime-gpu \
-    --index-url https://pypi.jetson-ai-lab.io/jp6/cu126
-"$VENV/bin/pip" install --no-cache-dir "numpy<2"
+"$VENV/bin/python" - <<'PY'
+import cv2
+import numpy
+import onnxruntime as ort
+from nudenet import NudeDetector
+
+providers = ort.get_available_providers()
+print(f"NumPy {numpy.__version__}; OpenCV {cv2.__version__}; ONNX Runtime {ort.__version__}")
+print(f"ONNX Runtime providers: {providers}")
+if "CUDAExecutionProvider" not in providers:
+    raise SystemExit("Error: the installed ONNX Runtime has no CUDAExecutionProvider")
+PY
 
 echo ""
 echo "nudenet_venv ready."
 
+cat > "$SERVICE_FILE" <<EOF
+[Unit]
+Description=NudeNet+ REST API Service
+After=network.target
+StartLimitBurst=3
+StartLimitIntervalSec=300
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=5
+User=$SERVICE_USER
+Group=$SERVICE_GROUP
+WorkingDirectory=$SCRIPT_DIR
+ExecStart=$SCRIPT_DIR/nudenet.sh
+EnvironmentFile=$SCRIPT_DIR/.env
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+echo "Generated $SERVICE_FILE for $SERVICE_USER:$SERVICE_GROUP"
+
 if [ "$(id -u)" = "0" ]; then
-    cp "$SERVICE_SRC" /etc/systemd/system/nudenet-api.service
+    cp "$SERVICE_FILE" /etc/systemd/system/nudenet-api.service
     systemctl daemon-reload
     echo "Service installed. Run: systemctl start nudenet-api"
 else
     echo "To install the service, run:"
-    echo "  sudo cp $SERVICE_SRC /etc/systemd/system/nudenet-api.service"
+    echo "  sudo cp $SERVICE_FILE /etc/systemd/system/nudenet-api.service"
     echo "  sudo systemctl daemon-reload"
     echo "  sudo systemctl start nudenet-api"
 fi

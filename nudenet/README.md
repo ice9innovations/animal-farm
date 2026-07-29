@@ -58,6 +58,20 @@ NudeNet detects **18 distinct categories** organized by exposure level:
 
 ### 1. Environment Setup
 
+On Jetson Orin with JetPack 6 / CUDA 12.6, use the Jetson installer. It
+selects the ARM64 ONNX Runtime build and compatible NumPy/OpenCV versions:
+
+```bash
+cd /home/orin/animal-farm/nudenet
+bash install_jetson.sh
+```
+
+The installer generates `nudenet-api.service` using the invoking username,
+group, and current repository path. If it is run through `sudo`, the service
+still runs as the original `SUDO_USER`.
+
+For a conventional CUDA workstation:
+
 ```bash
 # Navigate to nudenet directory
 cd /home/sd/animal-farm/nudenet
@@ -71,6 +85,12 @@ source nudenet_venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 ```
+
+Do not install the PyPI `onnxruntime-gpu` wheel on Jetson. NudeNet also
+declares the CPU `onnxruntime` package as a dependency, so the Jetson installer
+installs NudeNet without dependencies and supplies the Jetson GPU runtime
+separately. The installer gets ordinary dependencies from PyPI first, then
+installs only the ARM64 runtime wheel from the Jetson package index.
 
 ### 2. Model Download
 
@@ -421,9 +441,8 @@ nvidia-smi
 # Check ONNX Runtime providers
 python -c "import onnxruntime; print(onnxruntime.get_available_providers())"
 
-# Reinstall GPU version
-pip uninstall onnxruntime onnxruntime-gpu
-pip install onnxruntime-gpu>=1.23.0
+# Jetson: rebuild the environment with the platform-specific installer
+bash install_jetson.sh
 ```
 
 **Problem**: Model download fails
