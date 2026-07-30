@@ -73,17 +73,8 @@ still runs as the original `SUDO_USER`.
 For a conventional CUDA workstation:
 
 ```bash
-# Navigate to nudenet directory
 cd /home/sd/animal-farm/nudenet
-
-# Create virtual environment
-python3 -m venv nudenet_venv
-
-# Activate virtual environment
-source nudenet_venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
+bash install.sh
 ```
 
 Do not install the PyPI `onnxruntime-gpu` wheel on Jetson. NudeNet also
@@ -243,15 +234,17 @@ GET /v2/analyze_file?file_path=<path>
 ```bash
 # Start service
 cd /home/sd/animal-farm/nudenet
-./nudenet.sh
+./run.sh
 ```
 
 ### Systemd Service
 
 ```bash
-# Install service (if available)
-sudo cp services/nudenet-api.service /etc/systemd/system/
-sudo systemctl daemon-reload
+# Generate and install service
+bash install.sh
+
+# Or on Jetson
+bash install_jetson.sh
 
 # Start/stop service
 sudo systemctl start nudenet-api
@@ -468,8 +461,7 @@ netstat -tlnp | grep 7789
 cat .env
 
 # Test manual startup
-source nudenet_venv/bin/activate
-python REST.py
+./run.sh
 ```
 
 **Problem**: Slow inference times

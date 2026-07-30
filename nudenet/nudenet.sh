@@ -1,5 +1,3 @@
 #!/bin/bash
-cd "$(dirname "$0")"
-source nudenet_venv/bin/activate
-source .env
-python3 REST.py
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+exec "$SCRIPT_DIR/run.sh"

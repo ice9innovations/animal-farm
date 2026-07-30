@@ -2,7 +2,7 @@
 # Install nudenet service for Nvidia Jetson Orin (JetPack 6, CUDA 12.6, TRT 10.3).
 #
 # Differences from install.sh:
-#   - Uses nudenet_venv (not venv) to match nudenet.sh
+#   - Uses nudenet_venv (not venv) for Jetson-specific dependencies
 #   - Installs Jetson-compatible NumPy/OpenCV constraints
 #   - Installs NudeNet without its CPU-only onnxruntime dependency
 #   - Installs onnxruntime-gpu from the Jetson index
@@ -30,7 +30,16 @@ if [ "$(uname -m)" != "aarch64" ]; then
 fi
 
 rm -rf "$VENV"
-python3 -m venv "$VENV"
+if ! python3 -m venv "$VENV"; then
+    echo "Error: failed to create virtualenv at $VENV." >&2
+    echo "Install the Python venv package for your Jetson Python, then rerun this script." >&2
+    exit 1
+fi
+
+if [ ! -x "$VENV/bin/pip" ]; then
+    echo "Error: virtualenv was created without pip at $VENV." >&2
+    exit 1
+fi
 
 "$VENV/bin/pip" install --upgrade pip
 
@@ -73,7 +82,7 @@ RestartSec=5
 User=$SERVICE_USER
 Group=$SERVICE_GROUP
 WorkingDirectory=$SCRIPT_DIR
-ExecStart=$SCRIPT_DIR/nudenet.sh
+ExecStart=$SCRIPT_DIR/run.sh
 EnvironmentFile=$SCRIPT_DIR/.env
 StandardOutput=journal
 StandardError=journal
