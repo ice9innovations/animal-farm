@@ -51,7 +51,8 @@ NudeNet detects **18 distinct categories** organized by exposure level:
 
 ### Prerequisites
 
-- Python 3.8+
+- Python 3.11 on conventional CUDA workstations
+- Python 3.10 on Jetson JetPack 6
 - CUDA 11.2+ (for GPU acceleration)
 - 4GB+ RAM
 - ONNX Runtime GPU support
@@ -59,7 +60,8 @@ NudeNet detects **18 distinct categories** organized by exposure level:
 ### 1. Environment Setup
 
 On Jetson Orin with JetPack 6 / CUDA 12.6, use the Jetson installer. It
-selects the ARM64 ONNX Runtime build and compatible NumPy/OpenCV versions:
+uses JetPack's Python 3.10, selects the ARM64 ONNX Runtime build, and installs
+compatible NumPy/OpenCV versions:
 
 ```bash
 cd /home/orin/animal-farm/nudenet

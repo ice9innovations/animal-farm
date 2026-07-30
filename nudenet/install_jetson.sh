@@ -3,6 +3,7 @@
 #
 # Differences from install.sh:
 #   - Uses nudenet_venv (not venv) for Jetson-specific dependencies
+#   - Uses Python 3.10, the Python version shipped with JetPack 6
 #   - Installs Jetson-compatible NumPy/OpenCV constraints
 #   - Installs NudeNet without its CPU-only onnxruntime dependency
 #   - Installs onnxruntime-gpu from the Jetson index
@@ -19,6 +20,7 @@ set -eu
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 VENV="$SCRIPT_DIR/nudenet_venv"
 SERVICE_FILE="$SCRIPT_DIR/nudenet-api.service"
+PYTHON_BIN="${PYTHON_BIN:-python3.10}"
 JETSON_INDEX="${JETSON_INDEX:-https://pypi.jetson-ai-lab.io/jp6/cu126}"
 JETSON_ORT_VERSION="${JETSON_ORT_VERSION:-1.23.0}"
 SERVICE_USER="${SUDO_USER:-$(id -un)}"
@@ -29,10 +31,26 @@ if [ "$(uname -m)" != "aarch64" ]; then
     exit 1
 fi
 
+if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+    echo "Error: $PYTHON_BIN was not found. JetPack 6 should provide Python 3.10." >&2
+    echo "Set PYTHON_BIN=/path/to/python3.10 if it is installed in a non-standard location." >&2
+    exit 1
+fi
+
+"$PYTHON_BIN" - <<'PY'
+import sys
+
+if sys.version_info[:2] != (3, 10):
+    raise SystemExit(
+        f"Error: install_jetson.sh requires Python 3.10 on JetPack 6; "
+        f"got Python {sys.version_info.major}.{sys.version_info.minor}"
+    )
+PY
+
 rm -rf "$VENV"
-if ! python3 -m venv "$VENV"; then
+if ! "$PYTHON_BIN" -m venv "$VENV"; then
     echo "Error: failed to create virtualenv at $VENV." >&2
-    echo "Install the Python venv package for your Jetson Python, then rerun this script." >&2
+    echo "Install the Python 3.10 venv package for JetPack 6, then rerun this script." >&2
     exit 1
 fi
 
