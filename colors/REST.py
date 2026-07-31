@@ -586,7 +586,7 @@ def analyze():
             try:
                 from io import BytesIO
                 file_data = uploaded_file.read()
-                image = Image.open(BytesIO(file_data)).convert('RGB')
+                image = Image.open(BytesIO(file_data))
             except Exception as e:
                 return error_response(f"Failed to process uploaded image: {str(e)}", 500)
         
@@ -622,7 +622,7 @@ def analyze():
                         return error_response("Downloaded file too large")
                     
                     from io import BytesIO
-                    image = Image.open(BytesIO(response.content)).convert('RGB')
+                    image = Image.open(BytesIO(response.content))
                     
                 except Exception as e:
                     return error_response(f"Failed to download/process image: {str(e)}")
@@ -632,7 +632,7 @@ def analyze():
                     return error_response(f"File not found: {file_path}")
                 
                 try:
-                    image = Image.open(file_path).convert('RGB')
+                    image = Image.open(file_path)
                 except Exception as e:
                     return error_response(f"Failed to load image file: {str(e)}", 500)
         
