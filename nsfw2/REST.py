@@ -13,6 +13,7 @@ if MODE not in ('cpu', 'gpu'):
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1' if MODE == 'cpu' else '0'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+REQUIRE_GPU = os.getenv('NSFW_REQUIRE_GPU', 'true').lower() in ('true', '1', 'yes')
 
 import json
 import requests
@@ -44,8 +45,16 @@ if MODE == 'gpu':
             tf.config.optimizer.set_experimental_options({"auto_mixed_precision": True})
             print(f"GPU optimization enabled for {len(gpus)} GPU(s)")
         else:
-            print("MODE=gpu but no GPU devices found")
+            message = (
+                "MODE=gpu but TensorFlow found no GPU devices. "
+                "Install a JetPack-matched NVIDIA TensorFlow build or set MODE=cpu."
+            )
+            if REQUIRE_GPU:
+                raise RuntimeError(message)
+            print(message)
     except Exception as e:
+        if REQUIRE_GPU:
+            raise
         print(f"GPU setup warning: {e}")
 else:
     print("Running on CPU (MODE=cpu)")
