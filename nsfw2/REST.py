@@ -20,6 +20,8 @@ import uuid
 import time
 import shutil
 import random
+import inspect
+import threading
 from typing import Dict, Any
 
 import tensorflow as tf
@@ -68,6 +70,59 @@ PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
 NSFW_THRESHOLD = float(NSFW_THRESHOLD_STR)
 
 MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
+NSFW_WARMUP_SIZE = int(os.getenv('NSFW_WARMUP_SIZE', '224'))
+NSFW_PREPROCESSING_NAME = os.getenv('NSFW_PREPROCESSING', 'YAHOO').upper()
+_PREPROCESSING_ENUM = getattr(n2, "Preprocessing", None)
+if _PREPROCESSING_ENUM is not None:
+    try:
+        NSFW_PREPROCESSING = getattr(_PREPROCESSING_ENUM, NSFW_PREPROCESSING_NAME)
+    except AttributeError as e:
+        raise ValueError(f"NSFW_PREPROCESSING must be one of {[item.name for item in _PREPROCESSING_ENUM]}") from e
+else:
+    NSFW_PREPROCESSING = None
+
+INFERENCE_LOCK_ENABLED = os.getenv('NSFW_INFERENCE_LOCK', 'true').lower() in ('true', '1', 'yes')
+WARMUP_ENABLED = os.getenv('NSFW_WARMUP', 'true').lower() in ('true', '1', 'yes')
+
+_INFERENCE_LOCK = threading.Lock()
+_MODEL_STATUS = {
+    "status": "not_loaded",
+    "warmup_time": None,
+    "prediction_api": "opennsfw2.predict_image(global cache)"
+}
+
+try:
+    _PREDICT_IMAGE_PARAMS = set(inspect.signature(n2.predict_image).parameters)
+except (TypeError, ValueError):
+    _PREDICT_IMAGE_PARAMS = set()
+
+
+def _load_nsfw_model() -> None:
+    """Warm TensorFlow/OpenNSFW2 once at process startup instead of on first request."""
+    try:
+        if WARMUP_ENABLED:
+            warmup_start = time.time()
+            warmup_image = Image.new('RGB', (NSFW_WARMUP_SIZE, NSFW_WARMUP_SIZE), color='black')
+            _predict_nsfw_probability(warmup_image)
+            _MODEL_STATUS["warmup_time"] = round(time.time() - warmup_start, 3)
+
+        _MODEL_STATUS["status"] = "loaded"
+    except Exception as e:
+        _MODEL_STATUS["status"] = "error"
+        _MODEL_STATUS["error"] = str(e)
+        print(f"NSFW2 model warmup failed: {e}")
+
+
+def _predict_nsfw_probability(image: Image.Image) -> float:
+    def predict():
+        if NSFW_PREPROCESSING is not None and "preprocessing" in _PREDICT_IMAGE_PARAMS:
+            return n2.predict_image(image, preprocessing=NSFW_PREPROCESSING)
+        return n2.predict_image(image)
+
+    if INFERENCE_LOCK_ENABLED:
+        with _INFERENCE_LOCK:
+            return predict()
+    return predict()
 
 def get_nsfw_emoji(probability: float) -> str:
     """Get appropriate emoji based on NSFW probability"""
@@ -98,7 +153,7 @@ def process_image_for_nsfw(image: Image.Image) -> Dict[str, Any]:
         
         # Get NSFW probability using OpenNSFW2 directly with PIL Image
         # No file I/O needed - OpenNSFW2 accepts PIL Images directly!
-        nsfw_probability = n2.predict_image(image)
+        nsfw_probability = _predict_nsfw_probability(image)
         
         # Handle different return types from OpenNSFW2
         if isinstance(nsfw_probability, dict):
@@ -249,19 +304,11 @@ print("NSFW2 service: CORS enabled for direct browser communication")
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    # Test if OpenNSFW2 is working by creating a small test image
-    try:
-        import opennsfw2 as n2
-        test_image = Image.new('RGB', (10, 10), color='red')
-        n2.predict_image(test_image)  # This will fail if model can't load
-        model_status = "loaded"
-        status = "healthy"
-    except Exception as e:
-        model_status = f"error: {str(e)}"
-        status = "unhealthy"
+    status = "healthy" if _MODEL_STATUS.get("status") == "loaded" else "unhealthy"
+    if status != "healthy":
         return jsonify({
             "status": status,
-            "reason": f"OpenNSFW2 model error: {str(e)}",
+            "reason": f"OpenNSFW2 model error: {_MODEL_STATUS.get('error', 'model not loaded')}",
             "service": "NSFW2 Detection"
         }), 503
     
@@ -269,10 +316,15 @@ def health_check():
         "status": status,
         "service": "NSFW2 Detection",
         "model": {
-            "status": model_status,
+            "status": _MODEL_STATUS.get("status"),
             "framework": "Keras/TensorFlow",
             "model_type": "OpenNSFW2",
-            "threshold": NSFW_THRESHOLD
+            "threshold": NSFW_THRESHOLD,
+            "preprocessing": NSFW_PREPROCESSING_NAME,
+            "warmup_size": NSFW_WARMUP_SIZE,
+            "inference_lock": INFERENCE_LOCK_ENABLED,
+            "warmup_time": _MODEL_STATUS.get("warmup_time"),
+            "prediction_api": _MODEL_STATUS.get("prediction_api")
         },
         "endpoints": [
             "GET /health - Health check",
@@ -410,6 +462,7 @@ def analyze_v2_compat():
 
 
 if __name__ == '__main__':
+    _load_nsfw_model()
     host = "0.0.0.0" if not PRIVATE else "127.0.0.1"
     print(f"Starting NSFW2 Detection API on {host}:{PORT}")
     print(f"Private mode: {PRIVATE}")
