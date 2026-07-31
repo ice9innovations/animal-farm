@@ -14,7 +14,14 @@ import os
 from typing import Dict, Any, List
 from PIL import Image
 
-from haishoku_compat import get_colors, get_colors_mean, get_dominant, get_palette
+from haishoku_compat import (
+    get_colors,
+    get_colors_mean,
+    get_dominant,
+    get_dominant_from_colors_mean,
+    get_palette,
+    get_palette_from_colors_mean,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -149,8 +156,12 @@ class ColorsAnalyzer:
         start_time = time.time()
         
         try:
-            # Get dominant color using our in-memory implementation
-            dominant_color = self._get_dominant_from_image(image)
+            # Dominant color and palette share the same expensive thumbnail/grouping pass.
+            colors_mean = self._get_colors_mean_from_image(image)
+            if not colors_mean:
+                raise ValueError("Could not extract colors from image")
+
+            dominant_color = get_dominant_from_colors_mean(colors_mean)
             dr, dg, db = dominant_color[0], dominant_color[1], dominant_color[2]
             dhex = self._rgb2hex(dr, dg, db)
             
@@ -169,8 +180,7 @@ class ColorsAnalyzer:
                     if marker_rgb:
                         primary_marker_hex = self._rgb2hex(marker_rgb[0], marker_rgb[1], marker_rgb[2])
             
-            # Get color palette using our in-memory implementation
-            palette_colors = self._get_palette_from_image(image)
+            palette_colors = get_palette_from_colors_mean(colors_mean)
             
             # Build palette arrays with configured systems
             palette_colors_processed = []

@@ -1,5 +1,9 @@
 #!/bin/bash
 cd "$(dirname "$0")"
-source colors_venv/bin/activate
+if [ -d venv ]; then
+    source venv/bin/activate
+else
+    source colors_venv/bin/activate
+fi
 source .env
 python3 REST.py

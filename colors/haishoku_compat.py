@@ -132,11 +132,21 @@ def get_dominant(image: Image.Image) -> Tuple[int, int, int]:
     colors_mean = get_colors_mean(image)
     if not colors_mean:
         raise ValueError("Could not extract dominant color from image")
-    return colors_mean[0][1]
+    return get_dominant_from_colors_mean(colors_mean)
 
 
 def get_palette(image: Image.Image) -> List[PaletteEntry]:
     colors_mean = get_colors_mean(image)
+    return get_palette_from_colors_mean(colors_mean)
+
+
+def get_dominant_from_colors_mean(colors_mean: Sequence[ColorCount]) -> Tuple[int, int, int]:
+    if not colors_mean:
+        raise ValueError("Could not extract dominant color from image")
+    return colors_mean[0][1]
+
+
+def get_palette_from_colors_mean(colors_mean: Sequence[ColorCount]) -> List[PaletteEntry]:
     if not colors_mean:
         return []
 
