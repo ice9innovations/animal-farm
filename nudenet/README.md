@@ -266,7 +266,7 @@ sudo journalctl -u nudenet-api -f
 
 ### Input Formats
 - **Images**: PNG, JPG, JPEG, GIF, BMP, WebP
-- **Max Size**: 8MB
+- **Max Size**: 32MB default
 - **Input Methods**: URL, file upload, local path
 
 ### Output Features
@@ -314,7 +314,7 @@ If GPU is unavailable, service automatically falls back to CPU (slower inference
 | Error | Cause | Solution |
 |-------|-------|----------|
 | "NudeNet detector not initialized" | Model download failed | Check internet connection, retry |
-| "File too large" | File > 8MB | Resize or compress image |
+| "File too large" | File exceeds MAX_FILE_SIZE | Raise MAX_FILE_SIZE or use a smaller file |
 | "Invalid URL" | Malformed URL | Check URL format |
 | "File not found" | Invalid path | Verify file exists |
 | "Must provide either url or file parameter" | No input | Provide url or file parameter |

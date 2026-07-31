@@ -308,7 +308,7 @@ sudo systemctl status ollama-api.service
 | `Model not found` | Requested model not installed | Pull model with `ollama pull <model>` |
 | `Temperature out of range` | Invalid temperature value | Use values between 0.0 and 2.0 |
 | `Prompt too long` | Prompt exceeds 10,000 characters | Reduce prompt length |
-| `File too large` | Image exceeds 8MB limit | Resize image or increase MAX_FILE_SIZE |
+| `File too large` | Image exceeds MAX_FILE_SIZE | Raise MAX_FILE_SIZE or use a smaller file |
 
 ### Error Response Format
 ```json

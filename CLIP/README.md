@@ -232,7 +232,7 @@ sudo journalctl -u CLIP-api -f
 
 ### Input Formats
 - **Images**: PNG, JPG, JPEG, GIF, BMP, WebP
-- **Max Size**: 8MB
+- **Max Size**: 32MB default
 - **Input Methods**: URL, file upload, local path
 
 ### Output Features
@@ -272,7 +272,7 @@ model = model.half()  # FP16 for 50% VRAM reduction
 | Error | Cause | Solution |
 |-------|-------|----------|
 | "Model not loaded" | CLIP not installed | Install clip-by-openai package |
-| "File too large" | File > 8MB | Resize or compress image |
+| "File too large" | File exceeds MAX_FILE_SIZE | Raise MAX_FILE_SIZE or use a smaller file |
 | "Invalid URL" | Malformed URL | Check URL format |
 | "No labels loaded" | Missing label files | Ensure .txt files exist in labels/ |
 | "CUDA out of memory" | Insufficient VRAM | Use smaller model or CPU mode |

@@ -298,7 +298,7 @@ sudo journalctl -u metadata-api -f
 
 ### Input Formats
 - **Images**: PNG, JPG, JPEG, GIF, BMP, WebP, TIFF, RAW
-- **Max Size**: 8MB
+- **Max Size**: 32MB default
 - **Input Methods**: URL, file upload, local path
 
 ### Extracted Metadata Categories
@@ -341,7 +341,7 @@ SYMMETRY_PRECISION = 0.1  # Lower = more precise symmetry analysis
 | Error | Cause | Solution |
 |-------|-------|----------|
 | "ExifTool not available" | Missing system package | Install exiftool package |
-| "File too large" | File > 8MB | Resize or compress image |
+| "File too large" | File exceeds MAX_FILE_SIZE | Raise MAX_FILE_SIZE or use a smaller file |
 | "File not found" | Invalid file path | Check file path and permissions |
 | "Invalid URL" | Malformed URL | Check URL format and accessibility |
 | "Metadata extraction failed" | Corrupted image | Try different image format |

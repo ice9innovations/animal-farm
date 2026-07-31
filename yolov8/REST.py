@@ -49,7 +49,7 @@ PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
 CONFIDENCE_THRESHOLD = float(CONFIDENCE_THRESHOLD_STR) if CONFIDENCE_THRESHOLD_STR else 0.25
 
 # Configuration
-MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
+MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
 IOU_THRESHOLD = 0.3  # IoU threshold for NMS (lowered from 0.45 for better duplicate detection)
 MAX_DETECTIONS = 100  # Maximum number of detections per image

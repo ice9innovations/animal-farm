@@ -53,7 +53,7 @@ PORT = int(PORT_STR)
 PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
 MAX_TOKENS = int(MAX_TOKENS_STR)
 AUTO_UPDATE = AUTO_UPDATE_STR.lower() == 'true'
-MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
+MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 

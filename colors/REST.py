@@ -43,7 +43,9 @@ COLOR_SYSTEM = [system.strip().lower() for system in COLOR_SYSTEM]
 pass
 
 FOLDER = './'
-MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
+MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
+MAX_IMAGE_PIXELS = int(os.getenv('MAX_IMAGE_PIXELS', str(50_000_000)))  # 50MP default
+Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
 # Global analyzer instance
 analyzer = None
@@ -278,6 +280,17 @@ def process_image_for_colors(image: Image.Image) -> Dict[str, Any]:
             "success": False,
             "error": f"Processing failed: {str(e)}"
         }
+
+def validate_image_dimensions(image: Image.Image) -> Optional[str]:
+    """Reject images whose decoded dimensions are too large for this service."""
+    width, height = image.size
+    pixels = width * height
+    if pixels > MAX_IMAGE_PIXELS:
+        return (
+            f"Image dimensions too large. Maximum pixels: {MAX_IMAGE_PIXELS}; "
+            f"got {width}x{height} ({pixels} pixels)"
+        )
+    return None
 
 def process_multiregion_colors(image: Image.Image, regions: int = 4) -> Dict[str, Any]:
     """
@@ -587,6 +600,9 @@ def analyze():
                 from io import BytesIO
                 file_data = uploaded_file.read()
                 image = Image.open(BytesIO(file_data))
+                dimension_error = validate_image_dimensions(image)
+                if dimension_error:
+                    return error_response(dimension_error)
             except Exception as e:
                 return error_response(f"Failed to process uploaded image: {str(e)}", 500)
         
@@ -623,6 +639,9 @@ def analyze():
                     
                     from io import BytesIO
                     image = Image.open(BytesIO(response.content))
+                    dimension_error = validate_image_dimensions(image)
+                    if dimension_error:
+                        return error_response(dimension_error)
                     
                 except Exception as e:
                     return error_response(f"Failed to download/process image: {str(e)}")
@@ -633,6 +652,9 @@ def analyze():
                 
                 try:
                     image = Image.open(file_path)
+                    dimension_error = validate_image_dimensions(image)
+                    if dimension_error:
+                        return error_response(dimension_error)
                 except Exception as e:
                     return error_response(f"Failed to load image file: {str(e)}", 500)
         

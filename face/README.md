@@ -249,7 +249,7 @@ journalctl -u face-api -f
 ### Performance Tuning
 
 - **Model Loading**: Models initialized once at startup for optimal performance
-- **File Size Limit**: 8MB maximum (configurable)
+- **File Size Limit**: 32MB default (configurable)
 - **Concurrent Requests**: Flask threaded mode enabled
 - **Memory Usage**: ~200MB base + image size during processing
 - **GPU Support**: CPU-optimized, no GPU requirements
@@ -265,7 +265,7 @@ journalctl -u face-api -f
 | `File not found: <path>` | Invalid file path | Check file exists and path is correct |
 | `File type not allowed` | Unsupported image format | Use supported formats (PNG, JPG, JPEG, GIF, BMP, WEBP) |
 | `Failed to download image` | Network/URL issue | Verify URL is accessible |
-| `Image too large` | File > 8MB | Use smaller image or compress |
+| `Image too large` | File exceeds MAX_FILE_SIZE | Raise MAX_FILE_SIZE or use a smaller file |
 
 ### Error Response Format
 
@@ -445,7 +445,7 @@ else: print('All variables set')
 
 ### File Security
 
-- **Size Limits**: 8MB maximum file size
+- **Size Limits**: 32MB default maximum file size
 - **Format Validation**: Only supported image formats accepted  
 - **Temporary Files**: Automatically cleaned up after processing
 - **Path Validation**: File paths validated to prevent directory traversal

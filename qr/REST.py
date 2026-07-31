@@ -23,7 +23,7 @@ if not PORT_STR:
     raise ValueError("PORT environment variable is required")
 PORT = int(PORT_STR)
 
-MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
+MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
 
 app = Flask(__name__)
 

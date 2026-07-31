@@ -170,7 +170,7 @@ sudo journalctl -u moondream-api -f
 ## Supported Formats
 
 - **Images**: PNG, JPG, JPEG, GIF, BMP, WebP
-- **Max Size**: 8MB
+- **Max Size**: 32MB default
 
 ## Hardware Requirements
 

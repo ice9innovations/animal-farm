@@ -66,6 +66,10 @@ PRIVATE=false               # Access mode (false=public, true=localhost-only)
 
 # Color System Configuration
 COLOR_SYSTEM=copic  # Options: copic, prismacolor, prismacolor_pencils, or any comma-separated combination
+
+# Input Limits
+MAX_FILE_SIZE=33554432       # Maximum compressed upload/download size in bytes (32MB)
+MAX_IMAGE_PIXELS=50000000    # Maximum decoded image size in pixels (50MP)
 ```
 
 ### Configuration Details
@@ -75,6 +79,8 @@ COLOR_SYSTEM=copic  # Options: copic, prismacolor, prismacolor_pencils, or any c
 | `PORT` | Yes | - | Service listening port |
 | `PRIVATE` | Yes | - | Access control (false=public, true=localhost-only) |
 | `COLOR_SYSTEM` | Yes | - | Color systems to use (copic, prismacolor, prismacolor_pencils, or combinations) |
+| `MAX_FILE_SIZE` | No | `33554432` | Maximum compressed upload/download size in bytes |
+| `MAX_IMAGE_PIXELS` | No | `50000000` | Maximum decoded image dimensions in pixels |
 
 ### Color System Options
 
@@ -291,7 +297,7 @@ journalctl -u colors-api -f
 
 ### Performance Tuning
 
-- **File Size Limit**: 8MB maximum (hardcoded)
+- **Input Limits**: Configurable compressed file-size and decoded pixel-count guards
 - **Concurrent Requests**: Flask threaded mode enabled
 - **Memory Usage**: ~50-100MB base + image size during processing
 - **Color System Impact**: Single system (copic) ~30% faster than dual system
@@ -306,7 +312,8 @@ journalctl -u colors-api -f
 | `Cannot provide both 'url' and 'file' parameters` | Both parameters provided | Use only one parameter |
 | `File not found: <path>` | Invalid file path | Check file exists and path is correct |
 | `Failed to download image` | Network/URL issue | Verify URL is accessible |
-| `Downloaded file too large` | Image > 8MB | Use smaller image or compress |
+| `Downloaded file too large` | Image exceeds `MAX_FILE_SIZE` | Raise `MAX_FILE_SIZE` or use a smaller file |
+| `Image dimensions too large` | Image exceeds `MAX_IMAGE_PIXELS` | Raise `MAX_IMAGE_PIXELS` or resize the image |
 | `Failed to process image` | Invalid image format | Use supported formats (JPEG, PNG, GIF, BMP) |
 
 ### Error Response Format
@@ -464,7 +471,7 @@ python3 -c "from dotenv import load_dotenv; load_dotenv(); import os; print([k f
 
 ### File Security
 
-- **Size Limits**: 8MB maximum file size
+- **Size Limits**: Configurable maximum file size and decoded pixel count
 - **Format Validation**: Only supported image formats accepted  
 - **Temporary Files**: Automatically cleaned up after processing
 - **Path Validation**: File paths validated to prevent directory traversal

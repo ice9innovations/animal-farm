@@ -243,7 +243,7 @@ The service includes several optimizations:
 |-------|-------|----------|
 | `Model not loaded` | Detectron2 initialization failed | Check CUDA installation and model files |
 | `Config file not found` | Missing configuration file | Verify Detectron2 installation |
-| `File too large` | Image exceeds 8MB limit | Resize image or increase MAX_FILE_SIZE |
+| `File too large` | Image exceeds MAX_FILE_SIZE | Raise MAX_FILE_SIZE or use a smaller file |
 | `Invalid URL format` | Malformed image URL | Check URL syntax and accessibility |
 | `CUDA not available` | GPU/CUDA setup issue | Install CUDA drivers or use CPU mode |
 
@@ -335,7 +335,7 @@ data.predictions.forEach(prediction => {
 - Implement rate limiting for public endpoints
 
 ### File Security
-- File size limits enforced (8MB default)
+- File size limits enforced (32MB default)
 - Allowed extensions validated
 - Temporary files automatically cleaned up
 - Path traversal protection enabled

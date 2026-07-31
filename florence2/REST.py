@@ -38,7 +38,7 @@ from florence2_analyzer import FlorenceAnalyzer, VALID_TASKS, TEXT_REQUIRED_TASK
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
+MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
 
 PRIVATE = os.getenv('PRIVATE', 'false').lower() == 'true'

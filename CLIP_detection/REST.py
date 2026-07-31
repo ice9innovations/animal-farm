@@ -64,7 +64,7 @@ CLASSIFICATION_THRESHOLD = float(CLASSIFICATION_THRESHOLD_STR) if CLASSIFICATION
 MAX_DETECTIONS = int(MAX_DETECTIONS_STR) if MAX_DETECTIONS_STR else 30
 
 # Configuration
-MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
+MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
 
 # Global detector instance

@@ -69,7 +69,7 @@ rtdetrv2_path = Path(os.path.dirname(os.path.abspath(__file__))) / 'RT-DETRv2'
 sys.path.insert(0, str(rtdetrv2_path))
 
 # Configuration
-MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
+MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
 
 # COCO class names (same as your other services)

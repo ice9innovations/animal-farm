@@ -253,4 +253,7 @@ class PoseAnalyzer:
     def __del__(self):
         """Cleanup MediaPipe resources"""
         if hasattr(self, 'pose_model'):
-            self.pose_model.close()
+            try:
+                self.pose_model.close()
+            except Exception:
+                pass

@@ -78,7 +78,7 @@ POSE_MODEL_COMPLEXITY=2                   # Model complexity (0=lite, 1=full, 2=
 ENABLE_SEGMENTATION=false                 # Optional MediaPipe body segmentation (disabled by default)
 
 # File Processing
-MAX_FILE_SIZE=8388608                     # Maximum file size in bytes (8MB)
+MAX_FILE_SIZE=33554432                    # Maximum file size in bytes (32MB default)
 USE_GPU=true                              # Allow MediaPipe GPU-backed execution when available
 ```
 
@@ -259,7 +259,7 @@ If you deploy the service somewhere else, rerun the installer from that location
 
 ### Input Formats
 - **Images**: PNG, JPG, JPEG, GIF, BMP, WebP
-- **Max Size**: 8MB
+- **Max Size**: 32MB default
 - **Input Methods**: URL, file upload, local path
 
 ### Output Features
@@ -321,7 +321,7 @@ ENABLE_SEGMENTATION=false
 | Error | Cause | Solution |
 |-------|-------|----------|
 | "MediaPipe initialization failed" | Missing dependencies | Install OpenCV and MediaPipe |
-| "File too large" | File > 8MB | Resize or compress image |
+| "File too large" | File exceeds MAX_FILE_SIZE | Raise MAX_FILE_SIZE or use a smaller file |
 | "Invalid URL" | Malformed URL | Check URL format |
 | "No pose detected" | Poor image quality | Use clearer images with visible person |
 | "File not found" | Invalid file path | Verify file exists and is readable |

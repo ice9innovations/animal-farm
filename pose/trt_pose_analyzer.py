@@ -27,12 +27,11 @@ logger = logging.getLogger(__name__)
 
 DETECTION_INPUT_SIZE  = 224
 LANDMARK_INPUT_SIZE   = 256
-ROI_SCALE_FACTOR      = 2.5   # padding around the hip→shoulder span
-                                # MediaPipe uses square_long=true + scale 1.5 on the
-                                # bounding-box long-side; for the keypoint distance we
-                                # use a larger factor to produce an equivalent crop.
+ROI_SCALE_FACTOR      = 1.25  # Matches MediaPipe's pose_detection_to_roi.pbtxt
 DETECTION_SCORE_THRESH = 0.5
 DETECTION_IOU_THRESH   = 0.3
+HEATMAP_KERNEL_SIZE    = 7
+HEATMAP_MIN_CONFIDENCE = 0.5
 
 TRT_CACHE_DIR = os.path.join(os.path.dirname(__file__), '..', 'models', 'trt_cache')
 
@@ -157,7 +156,7 @@ class TRTPoseAnalyzer:
     def _detect_person(self, image_rgb: np.ndarray) -> Optional[Dict]:
         """
         Run pose detector on the image. Returns ROI dict or None if no person.
-        ROI keys: cx, cy, size, angle (all in normalised [0,1] coords except angle).
+        ROI keys: cx_px, cy_px, size_px, angle (pixel units except angle).
         """
         h, w = image_rgb.shape[:2]
         resized = cv2.resize(image_rgb, (DETECTION_INPUT_SIZE, DETECTION_INPUT_SIZE))
@@ -184,23 +183,29 @@ class TRTPoseAnalyzer:
         kp0_x, kp0_y = best[4], best[5]   # mid-hip
         kp1_x, kp1_y = best[6], best[7]   # mid-shoulder
 
-        # ROI centre = midpoint of the two keypoints
-        cx = (kp0_x + kp1_x) / 2
-        cy = (kp0_y + kp1_y) / 2
+        # Convert alignment keypoints back into original-image pixel space before
+        # computing crop geometry. The detector runs on a square-resized image, so
+        # using square-normalised deltas directly skews rotation and ROI size on
+        # non-square inputs.
+        kp0_x_px = kp0_x * w
+        kp0_y_px = kp0_y * h
+        kp1_x_px = kp1_x * w
+        kp1_y_px = kp1_y * h
 
-        # ROI size: use the longer axis (square_long=true, matching MediaPipe)
-        # rather than euclidean distance, so the crop is always square with
-        # side = max(dx, dy) × scale_factor.
-        dx = abs(kp1_x - kp0_x)
-        dy = abs(kp1_y - kp0_y)
-        size = max(dx, dy) * ROI_SCALE_FACTOR
+        # MediaPipe's AlignmentPointsRectsCalculator centers the ROI on the
+        # start keypoint and uses twice the distance to the second keypoint as
+        # the box size before RectTransformationCalculator expands it.
+        cx_px = kp0_x_px
+        cy_px = kp0_y_px
 
-        # Rotation to make person upright:
-        # atan2(horizontal_offset, vertical_offset) gives tilt from vertical,
-        # negated so we rotate to correct it.
-        angle = -math.atan2(kp1_x - kp0_x, kp0_y - kp1_y)
+        dx_px = kp1_x_px - kp0_x_px
+        dy_px = kp1_y_px - kp0_y_px
+        size_px = math.hypot(dx_px, dy_px) * 2.0 * ROI_SCALE_FACTOR
 
-        return {'cx': cx, 'cy': cy, 'size': size, 'angle': angle}
+        # rotation = target_angle - atan2(-(dy), dx), target_angle = 90deg
+        angle = (math.pi * 0.5) - math.atan2(-dy_px, dx_px)
+
+        return {'cx_px': cx_px, 'cy_px': cy_px, 'size_px': max(size_px, 1.0), 'angle': angle}
 
     # ------------------------------------------------------------------
     # Stage 1b: extract aligned crop using the ROI
@@ -220,10 +225,9 @@ class TRTPoseAnalyzer:
         Returns (crop_256x256, affine_matrix) — the affine maps 256-space coords
         back to original-image pixel coords for landmark reprojection.
         """
-        h, w = image_rgb.shape[:2]
-        cx_px   = roi['cx']   * w
-        cy_px   = roi['cy']   * h
-        size_px = roi['size'] * max(w, h)
+        cx_px   = roi['cx_px']
+        cy_px   = roi['cy_px']
+        size_px = roi['size_px']
         angle   = roi['angle']          # radians
         ca = math.cos(angle)
         sa = math.sin(angle)
@@ -269,18 +273,55 @@ class TRTPoseAnalyzer:
     # Stage 2: landmark inference
     # ------------------------------------------------------------------
 
-    def _run_landmark(self, crop: np.ndarray) -> Tuple[np.ndarray, float, np.ndarray]:
-        """Run landmark model. Returns (landmarks_195, presence_score, seg_mask_128x128)."""
+    def _run_landmark(self, crop: np.ndarray) -> Tuple[np.ndarray, float, np.ndarray, np.ndarray]:
+        """Run landmark model. Returns (landmarks_195, presence_score, seg_mask, heatmap)."""
         inp = (crop.astype(np.float32) / 255.0)[np.newaxis]
         outputs = self.lm_session.run(None, {self.lm_input: inp})
-        return outputs[0][0], float(outputs[1][0, 0]), outputs[2][0]
+        return outputs[0][0], float(outputs[1][0, 0]), outputs[2][0], outputs[3][0]
 
     # ------------------------------------------------------------------
     # Post-processing
     # ------------------------------------------------------------------
 
+    def _refine_landmarks_from_heatmap(
+        self, landmarks: np.ndarray, heatmap: np.ndarray
+    ) -> np.ndarray:
+        """Apply MediaPipe-style local heatmap refinement to landmark x/y."""
+        if heatmap.ndim == 4:
+            heatmap = heatmap[0]
+
+        hm_h, hm_w, hm_c = heatmap.shape
+        count = min(len(landmarks), hm_c)
+        offset = (HEATMAP_KERNEL_SIZE - 1) // 2
+
+        refined = landmarks.copy()
+        for idx in range(count):
+            center_col = int(refined[idx, 0] / LANDMARK_INPUT_SIZE * hm_w)
+            center_row = int(refined[idx, 1] / LANDMARK_INPUT_SIZE * hm_h)
+
+            if center_col < 0 or center_col >= hm_w or center_row < 0 or center_row >= hm_h:
+                continue
+
+            begin_col = max(0, center_col - offset)
+            end_col = min(hm_w, center_col + offset + 1)
+            begin_row = max(0, center_row - offset)
+            end_row = min(hm_h, center_row + offset + 1)
+
+            patch = heatmap[begin_row:end_row, begin_col:end_col, idx]
+            confidence = _sigmoid(patch)
+            max_conf = float(np.max(confidence))
+            total = float(np.sum(confidence))
+            if max_conf < HEATMAP_MIN_CONFIDENCE or total <= 0.0:
+                continue
+
+            rows, cols = np.mgrid[begin_row:end_row, begin_col:end_col]
+            refined[idx, 0] = float(np.sum(cols * confidence) / total / hm_w * LANDMARK_INPUT_SIZE)
+            refined[idx, 1] = float(np.sum(rows * confidence) / total / hm_h * LANDMARK_INPUT_SIZE)
+
+        return refined
+
     def _decode_landmarks(
-        self, raw: np.ndarray, orig_w: int, orig_h: int, affine: Optional[np.ndarray]
+        self, raw: np.ndarray, orig_w: int, orig_h: int, affine: Optional[np.ndarray], heatmap: Optional[np.ndarray] = None
     ) -> Dict[str, Dict[str, float]]:
         """
         Decode [195] flat output into 33 named landmarks in original image coords.
@@ -288,7 +329,10 @@ class TRTPoseAnalyzer:
         The model outputs x/y directly in crop pixel space [0, 256], not normalised.
         Visibility is a raw logit — apply sigmoid to get [0,1] probability.
         """
-        lm = raw.reshape(39, 5)[:33]
+        lm = raw.reshape(39, 5)
+        if heatmap is not None:
+            lm = self._refine_landmarks_from_heatmap(lm, heatmap)
+        lm = lm[:33]
         landmarks = {}
         for i, name in enumerate(LANDMARK_NAMES):
             x, y, z, vis, _pres = lm[i]
@@ -305,10 +349,14 @@ class TRTPoseAnalyzer:
                 x = x / LANDMARK_INPUT_SIZE
                 y = y / LANDMARK_INPUT_SIZE
 
+            # TensorsToLandmarksCalculator normalizes z by the landmark input size
+            # when input_image_width/height are configured.
+            z = float(z) / LANDMARK_INPUT_SIZE
+
             landmarks[name] = {
                 'x': round(float(x), 3),
                 'y': round(float(y), 3),
-                'z': round(float(z), 3),
+                'z': round(z, 3),
                 'visibility': round(vis_prob, 3),
             }
         return landmarks
@@ -388,10 +436,10 @@ class TRTPoseAnalyzer:
         """
         Analyse pose from an RGB numpy array.
 
-        The input is already a person crop (from the Windmill bbox worker), so
-        we skip Stage 1 (rotation/ROI detection) and feed the full crop directly
-        to the Stage 2 landmark model.  This matches MediaPipe's behaviour and
-        produces landmarks normalised to the full crop in [0,1] coords.
+        The input is typically a person crop, but we still run Stage 1 detector
+        to recover the rotation-normalised ROI expected by BlazePose before
+        feeding Stage 2. The returned landmarks are reprojected back into the
+        input image's normalised [0,1] coordinate space.
 
         Returns the same structure as PoseAnalyzer.analyze_pose_from_array,
         with an additional 'segmentation_polygon' key per prediction.
@@ -410,11 +458,11 @@ class TRTPoseAnalyzer:
 
         crop, affine = self._extract_roi_crop(image_array, roi)
 
-        lm_raw, presence, seg_mask = self._run_landmark(crop)
+        lm_raw, presence, seg_mask, heatmap = self._run_landmark(crop)
 
         if presence > 0.5:
             persons_detected = 1
-            landmarks    = self._decode_landmarks(lm_raw, orig_w, orig_h, affine)
+            landmarks    = self._decode_landmarks(lm_raw, orig_w, orig_h, affine, heatmap)
             joint_angles = self._calculate_joint_angles(landmarks)
             raw_polygon  = self._extract_segmentation_polygon(seg_mask)
             polygon      = self._transform_polygon(raw_polygon, affine, orig_w, orig_h) if raw_polygon is not None else None

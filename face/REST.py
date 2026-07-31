@@ -146,7 +146,7 @@ face_analyzer = None
 
 # Configuration
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
-MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
+MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
 
 # MediaPipe model configuration
 FACE_MIN_DETECTION_CONFIDENCE = 0.2

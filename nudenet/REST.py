@@ -39,7 +39,7 @@ AUTO_UPDATE = AUTO_UPDATE_STR.lower() in ['true', '1', 'yes']
 
 _SERVICE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
+MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

@@ -258,7 +258,7 @@ sudo systemctl status yolo-api.service
 |-------|-------|----------|
 | `Model not loaded` | YOLOv8 model failed to load | Check model files and GPU drivers |
 | `File not found` | Invalid file path | Verify file exists and path is correct |
-| `File too large` | Image exceeds 8MB limit | Resize image or increase MAX_FILE_SIZE |
+| `File too large` | Image exceeds MAX_FILE_SIZE | Raise MAX_FILE_SIZE or use a smaller file |
 | `Invalid URL format` | Malformed image URL | Check URL syntax and accessibility |
 | `URL does not point to an image` | Non-image content type | Ensure URL serves image content |
 

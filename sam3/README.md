@@ -239,7 +239,7 @@ approximately 6–8GB depending on image resolution.
 ## Supported Input Formats
 
 - PNG, JPG, JPEG, WebP, BMP, GIF
-- Max recommended size: 8MB
+- Max recommended size: 32MB default
 - Input methods: multipart file upload, URL, base64, local file path
 
 ## Troubleshooting

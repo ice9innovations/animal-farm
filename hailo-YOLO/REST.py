@@ -47,7 +47,7 @@ PORT = int(PORT_STR)
 PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
 
 # Configuration
-MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
+MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
 CONFIDENCE_THRESHOLD = 0.25
 IOU_THRESHOLD = 0.3

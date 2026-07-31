@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 UPLOAD_FOLDER = './uploads'
-MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
+MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
 PRIVATE_STR = os.getenv('PRIVATE')
 PORT_STR = os.getenv('PORT')

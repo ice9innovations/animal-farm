@@ -117,7 +117,7 @@ curl -X POST -F "file=@/path/to/qrcode.png" http://localhost:7801/analyze
 **Input Validation:**
 - Exactly one input method must be used (`url`, `file`, or multipart upload)
 - Cannot provide both `url` and `file` simultaneously
-- Maximum file size: 8MB
+- Maximum file size: 32MB default
 
 **Response Format:**
 ```json
@@ -248,7 +248,7 @@ pyzbar wraps the native libzbar C library. Processing is CPU-only and typically 
 | `Cannot specify both url and file` | Both parameters provided | Use only one input method |
 | `Provide a file upload, url parameter, or file parameter` | No input provided | Include one input method |
 | `File not found: <path>` | Invalid file path | Verify the path exists |
-| `File too large (max 8MB)` | File exceeds size limit | Use a smaller image |
+| `File too large (max configured size)` | File exceeds configured size limit | Raise MAX_FILE_SIZE or use a smaller file |
 | `Failed to download image` | Network or URL error | Verify URL is accessible |
 
 ### Error Response Format
@@ -361,7 +361,7 @@ echo "PORT=7802" > .env
 ## Security Considerations
 
 - **Access Control**: The service binds to `0.0.0.0`. Use a firewall or reverse proxy to restrict access if needed.
-- **File Size Limit**: 8MB maximum prevents resource exhaustion
+- **File Size Limit**: configurable file size limit prevents resource exhaustion
 - **No Data Retention**: Images are processed in memory and not stored
 - **Input Validation**: File paths and URLs are validated before use
 

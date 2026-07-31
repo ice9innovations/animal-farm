@@ -304,7 +304,7 @@ journalctl -u ocr-api -f
 - **Model Caching**: Models loaded once and cached for performance
 - **Text Processing**: NLTK-based meaningful word extraction
 - **Emoji Mapping**: Fast local dictionary lookup
-- **File Size Limit**: 8MB maximum (configurable)
+- **File Size Limit**: 32MB default (configurable)
 - **Concurrent Requests**: Flask threaded mode enabled
 
 ### Performance Comparison
@@ -326,7 +326,7 @@ journalctl -u ocr-api -f
 | `Must provide either 'url' or 'file' parameter` | Missing input parameter | Provide exactly one parameter |
 | `Cannot provide both 'url' and 'file' parameters` | Both parameters provided | Use only one parameter |
 | `File not found: <path>` | Invalid file path | Check file exists and path is correct |
-| `Image too large` | File > 8MB | Use smaller image or compress |
+| `Image too large` | File exceeds MAX_FILE_SIZE | Raise MAX_FILE_SIZE or use a smaller file |
 | `Failed to download image` | Network/URL issue | Verify URL is accessible |
 | `OCR processing failed` | Processing error | Check image format and clarity |
 
@@ -519,7 +519,7 @@ else: print('All variables set')
 
 ### File Security
 
-- **Size Limits**: 8MB maximum file size
+- **Size Limits**: 32MB default maximum file size
 - **Format Validation**: Only supported image formats accepted
 - **Temporary Files**: Automatically cleaned up after processing
 - **Path Validation**: File paths validated to prevent system access

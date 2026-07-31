@@ -31,7 +31,7 @@ if not CLIP_MODEL:
 
 PORT = int(PORT_STR)
 PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
-MAX_FILE_SIZE = 8 * 1024 * 1024  # 8MB
+MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 if torch.backends.mps.is_available():
@@ -316,7 +316,7 @@ def embeddings():
                 return error_response("No file selected")
             uploaded_file.seek(0, 2)
             if uploaded_file.tell() > MAX_FILE_SIZE:
-                return error_response("File too large (max 8MB)")
+                return error_response(f"File too large (max {MAX_FILE_SIZE // 1024 // 1024}MB)")
             uploaded_file.seek(0)
             try:
                 image = Image.open(BytesIO(uploaded_file.read())).convert('RGB')
@@ -342,7 +342,7 @@ def embeddings():
                     r = requests.get(url, timeout=15)
                     r.raise_for_status()
                     if len(r.content) > MAX_FILE_SIZE:
-                        return error_response("Downloaded image too large (max 8MB)")
+                        return error_response(f"Downloaded image too large (max {MAX_FILE_SIZE // 1024 // 1024}MB)")
                     image = Image.open(BytesIO(r.content)).convert('RGB')
                 except Exception as e:
                     return error_response(f"Failed to download image: {e}")
@@ -413,7 +413,7 @@ def score():
                 return error_response("No file selected")
             uploaded_file.seek(0, 2)
             if uploaded_file.tell() > MAX_FILE_SIZE:
-                return error_response("File too large (max 8MB)")
+                return error_response(f"File too large (max {MAX_FILE_SIZE // 1024 // 1024}MB)")
             uploaded_file.seek(0)
             try:
                 image = Image.open(BytesIO(uploaded_file.read())).convert('RGB')
@@ -439,7 +439,7 @@ def score():
                     r = requests.get(url, timeout=15)
                     r.raise_for_status()
                     if len(r.content) > MAX_FILE_SIZE:
-                        return error_response("Downloaded image too large (max 8MB)")
+                        return error_response(f"Downloaded image too large (max {MAX_FILE_SIZE // 1024 // 1024}MB)")
                     image = Image.open(BytesIO(r.content)).convert('RGB')
                 except Exception as e:
                     return error_response(f"Failed to download image: {e}")

@@ -283,7 +283,7 @@ python REST.py
 
 ### Input Formats
 - **Images**: PNG, JPG, JPEG, GIF, BMP, WebP
-- **Max Size**: 8MB
+- **Max Size**: 32MB default
 - **Input Methods**: URL, file upload, local path
 
 ### Object Classes (COCO Dataset)
@@ -330,7 +330,7 @@ iou_threshold = 0.45       # Non-maximum suppression
 | Error | Cause | Solution |
 |-------|-------|----------|
 | "RTMDet analyzer not initialized" | Model loading failed | Check dependencies, restart service |
-| "File too large" | File > 8MB | Resize or compress image |
+| "File too large" | File exceeds MAX_FILE_SIZE | Raise MAX_FILE_SIZE or use a smaller file |
 | "Invalid URL" | Malformed URL | Check URL format |
 | "MMDetection dependencies not available" | Installation issue | Follow exact dependency order |
 | "CUDA out of memory" | Insufficient VRAM | Use smaller model or CPU mode |

@@ -257,7 +257,7 @@ docker run -d \
 |-------|-------|----------|
 | `Model not loaded` | RT-DETRv2 model failed to load | Check RT-DETRv2 repository and GPU drivers |
 | `File not found` | Invalid file path | Verify file exists and path is correct |
-| `File too large` | Image exceeds 8MB limit | Resize image or increase MAX_FILE_SIZE |
+| `File too large` | Image exceeds MAX_FILE_SIZE | Raise MAX_FILE_SIZE or use a smaller file |
 | `Invalid URL format` | Malformed image URL | Check URL syntax and accessibility |
 | `URL does not point to an image` | Non-image content type | Ensure URL serves image content |
 
@@ -377,7 +377,7 @@ RT-DETRv2 uses a custom postprocessor with proper Non-Maximum Suppression:
 
 ### Input Formats
 - **Images**: PNG, JPG, JPEG, GIF, BMP, WebP
-- **Max Size**: 8MB
+- **Max Size**: 32MB default
 - **Input Methods**: URL, file upload, local path
 
 ### Output Features
