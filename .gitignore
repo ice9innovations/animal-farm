@@ -1,4 +1,5 @@
 # Byte-compiled / optimized / DLL files
+.codex
 yolov8/yolo-venv/
 qwen-cpp/models/
 yolov8/emoji_mappings.json
