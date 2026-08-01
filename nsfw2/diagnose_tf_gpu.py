@@ -112,7 +112,7 @@ def main():
     if not physical_gpus:
         print()
         print("Result: TensorFlow imported, but it does not expose a GPU device.")
-        print("On Jetson, rebuild this venv with a JetPack-matched NVIDIA TensorFlow wheel/container.")
+        print("On Jetson, rebuild with ./install_jetson.sh and a JetPack-matched CUDA TensorFlow wheel.")
         return 2
 
     print()

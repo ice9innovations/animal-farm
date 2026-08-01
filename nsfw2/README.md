@@ -59,11 +59,15 @@ The service includes automatic CUDA configuration:
 ### Jetson GPU Install
 
 On Jetson, use the Jetson installer instead of normal `install.sh`. It creates
-an isolated Python 3.10 venv and installs TensorFlow from the Jetson AI Lab
-`jp6/cu126` index so TensorFlow is CUDA-enabled:
+an isolated Python 3.10 venv and installs NVIDIA's JetPack 6.1 TensorFlow wheel
+so TensorFlow is CUDA-enabled:
 
 ```bash
 cd /home/sd/animal-farm/nsfw2
+sudo apt-get update && sudo apt-get install -y \
+  libhdf5-serial-dev hdf5-tools libhdf5-dev \
+  zlib1g-dev zip libjpeg8-dev liblapack-dev \
+  libblas-dev gfortran libopenblas-dev
 ./install_jetson.sh
 ./run.sh
 ```
@@ -71,8 +75,8 @@ cd /home/sd/animal-farm/nsfw2
 Override the Jetson package index or TensorFlow version if needed:
 
 ```bash
-JETSON_INDEX=https://pypi.jetson-ai-lab.io/jp6/cu126 \
-JETSON_TENSORFLOW_VERSION=2.18.0 \
+JETSON_INDEX=https://developer.download.nvidia.com/compute/redist/jp/v61 \
+JETSON_TENSORFLOW_VERSION=2.16.1+nv24.08 \
   ./install_jetson.sh
 ```
 
