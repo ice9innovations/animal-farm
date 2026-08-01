@@ -47,7 +47,8 @@ if MODE == 'gpu':
         else:
             message = (
                 "MODE=gpu but TensorFlow found no GPU devices. "
-                "Install a JetPack-matched NVIDIA TensorFlow build or set MODE=cpu."
+                "Run nsfw2/diagnose_tf_gpu.py inside this venv, then rebuild with "
+                "nsfw2/install_jetson.sh or set MODE=cpu."
             )
             if REQUIRE_GPU:
                 raise RuntimeError(message)

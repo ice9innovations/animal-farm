@@ -1,4 +1,4 @@
-opennsfw2>=0.10.1
+opennsfw2==0.18.0
 flask>=2.0.0
 flask-cors>=3.0.0
 requests>=2.25.0
@@ -7,13 +7,9 @@ Pillow>=8.3.0
 gdown>=4.2.0
 cffi>=1.16.0
 keras==3.10.0
-tensorflow==2.18.0
 protobuf>=3.20.3,<6.0.0dev
 pandas>=2.2.0,<2.3.0
 matplotlib>=3.0.0
 numpy>=1.26.0,<2.0.0
 opencv-python==4.11.0.86
 scikit-image>=0.21.0
-# GPU mode only — uncomment if running MODE=gpu
-# nvidia-cublas-cu12==12.9.1.4
-# nvidia-cudnn-cu12==9.11.0.98

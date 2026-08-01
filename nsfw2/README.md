@@ -56,6 +56,29 @@ The service includes automatic CUDA configuration:
 # Automatic memory growth and XLA compilation
 ```
 
+### Jetson GPU Install
+
+On Jetson, use the Jetson installer instead of normal `install.sh`. It creates
+an isolated Python 3.10 venv and installs TensorFlow from the Jetson AI Lab
+`jp6/cu126` index so TensorFlow is CUDA-enabled:
+
+```bash
+cd /home/sd/animal-farm/nsfw2
+./install_jetson.sh
+./run.sh
+```
+
+Override the Jetson package index or TensorFlow version if needed:
+
+```bash
+JETSON_INDEX=https://pypi.jetson-ai-lab.io/jp6/cu126 \
+JETSON_TENSORFLOW_VERSION=2.18.0 \
+  ./install_jetson.sh
+```
+
+The installer verifies `tf.sysconfig.get_build_info()["is_cuda_build"]` and
+visible TensorFlow GPU devices through `diagnose_tf_gpu.py`.
+
 ## Configuration
 
 ### Environment Variables (.env)
@@ -69,6 +92,11 @@ PRIVATE=false              # Access mode (false=public, true=localhost-only)
 
 # Model Configuration  
 NSFW_THRESHOLD=50.0        # Detection threshold percentage
+MODE=gpu                  # cpu or gpu
+NSFW_REQUIRE_GPU=true     # fail startup if MODE=gpu cannot see TensorFlow GPU
+NSFW_WARMUP=true          # warm OpenNSFW2 model cache at startup
+NSFW_INFERENCE_LOCK=true  # serialize TensorFlow inference on small devices
+NSFW_PREPROCESSING=YAHOO  # YAHOO is default accuracy; SIMPLE is faster but changes scores
 ```
 
 ### Configuration Details
@@ -78,6 +106,11 @@ NSFW_THRESHOLD=50.0        # Detection threshold percentage
 | `PORT` | Yes | - | Service listening port |
 | `PRIVATE` | Yes | - | Access control (false=public, true=localhost-only) |
 | `NSFW_THRESHOLD` | Yes | - | NSFW detection threshold (0-100 scale) |
+| `MODE` | Yes | - | `cpu` or `gpu` TensorFlow device mode |
+| `NSFW_REQUIRE_GPU` | No | `true` | Fail startup when `MODE=gpu` but TensorFlow exposes no GPU |
+| `NSFW_WARMUP` | No | `true` | Run one startup prediction to load OpenNSFW2/TensorFlow before real traffic |
+| `NSFW_INFERENCE_LOCK` | No | `true` | Serialize inference to avoid TensorFlow contention on small devices |
+| `NSFW_PREPROCESSING` | No | `YAHOO` | OpenNSFW2 preprocessing mode; `SIMPLE` is faster but can change scores |
 
 ### Model Configuration
 
@@ -367,14 +400,30 @@ curl "http://localhost:7774/v2/analyze_file?file_path=/path/to/image.jpg"
 
 **Problem**: TensorFlow GPU setup fails
 ```bash
-# Solution - verify CUDA installation
+# Desktop/server CUDA checks
 nvidia-smi
 nvcc --version
 
-# Reinstall TensorFlow with GPU support
+# Desktop/server TensorFlow reinstall
 pip uninstall tensorflow
 pip install tensorflow[and-cuda]
 ```
+
+**Problem**: `MODE=gpu but TensorFlow found no GPU devices` on Jetson
+
+Run the NSFW2 diagnostic from the same environment used by the service:
+
+```bash
+cd /home/sd/animal-farm/nsfw2
+source venv/bin/activate
+python diagnose_tf_gpu.py
+```
+
+If `Physical GPUs: []` is printed, the installed TensorFlow package is CPU-only
+or not compatible with the JetPack/CUDA stack. On Jetson, the normal PyPI
+`tensorflow` and `tensorflow[and-cuda]` packages are not a reliable GPU path.
+Run `./install_jetson.sh` to rebuild the venv with the Jetson CUDA TensorFlow
+wheel, then rerun `diagnose_tf_gpu.py`.
 
 **Problem**: OpenNSFW2 model fails to load
 ```bash

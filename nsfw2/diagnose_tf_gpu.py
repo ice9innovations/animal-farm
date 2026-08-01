@@ -48,12 +48,20 @@ def main():
     print()
 
     pyvenv_cfg = os.path.join(sys.prefix, "pyvenv.cfg")
+    include_system_site = None
     if os.path.exists(pyvenv_cfg):
         print(f"{pyvenv_cfg}:")
         with open(pyvenv_cfg, encoding="utf-8") as handle:
             for line in handle:
                 if "include-system-site-packages" in line:
+                    include_system_site = line.strip().split("=", 1)[-1].strip().lower()
                     print(f"  {line.strip()}")
+        print()
+
+    if include_system_site == "true":
+        print("Warning: this venv includes system site packages.")
+        print("That can mix /usr/lib Python packages with venv wheels and cause ABI warnings/errors.")
+        print("Prefer rebuilding the venv without --system-site-packages or set it to false in pyvenv.cfg.")
         print()
 
     for package in ("tensorflow", "keras", "protobuf", "numpy", "pandas", "opennsfw2"):
