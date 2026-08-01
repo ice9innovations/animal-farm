@@ -8,8 +8,9 @@ gdown>=4.2.0
 keras==3.10.0
 tensorflow==2.18.0
 protobuf>=3.20.3,<6.0.0dev
+pandas>=2.2.0,<2.3.0
 matplotlib>=3.0.0
-numpy>=1.22.0
+numpy>=1.26.0,<2.0.0
 opencv-python>=4.0.0.0
 scikit-image>=0.21.0
 # GPU mode only — uncomment if running MODE=gpu

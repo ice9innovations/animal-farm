@@ -5,6 +5,10 @@ source "$SCRIPT_DIR/.env"
 
 cd "$SCRIPT_DIR"
 
+unset PYTHONHOME
+unset PYTHONPATH
+export PYTHONNOUSERSITE=1
+
 if [ "$MODE" = "gpu" ]; then
     export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}"
     if [ -d "$CUDA_HOME/bin" ]; then
