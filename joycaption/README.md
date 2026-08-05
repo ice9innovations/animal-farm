@@ -29,6 +29,9 @@ MODEL_ID=fancyfeast/llama-joycaption-beta-one-hf-llava
 MODEL_DIR=
 DEVICE=auto
 PRECISION=8bit
+DISABLE_CUDNN=auto
+CUDA_ALLOW_TF32=true
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 TORCH_VERSION=
 TORCHVISION_VERSION=
 TORCH_INDEX_URL=
@@ -45,6 +48,8 @@ GREEDY=false
 `PRECISION=8bit` is the default because the full bf16 model needs roughly 17GB VRAM. `PRECISION=4bit` is also available for a smaller footprint. Both quantized modes require CUDA and `bitsandbytes`, and leave the vision tower and multimodal projector unquantized to match the smoke-test script. CPU mode is intentionally limited to `DEVICE=cpu` and `PRECISION=fp32` because JoyCaption is large.
 
 The install script chooses PyTorch wheels from the detected GPU. Compute capability 12.x GPUs, such as RTX 5090, use CUDA 12.8 wheels. Older GPUs default to CUDA 12.1 wheels for driver compatibility. Override `TORCH_VERSION`, `TORCHVISION_VERSION`, and `TORCH_INDEX_URL` in `.env` only when a machine needs a specific build.
+
+`DISABLE_CUDNN=auto` disables cuDNN on compute capability 12.x GPUs. This avoids cuDNN workspace allocation failures in the SigLIP vision tower on RTX 5090 while leaving cuDNN enabled on older GPUs. Set `DISABLE_CUDNN=false` to force cuDNN back on.
 
 `MODEL_DIR` maps to `HF_HOME`. If `MODEL_DIR` is blank, `install.sh` uses `/mnt/models/workspace/huggingface` when `/mnt/models/workspace` exists and is writable, otherwise it falls back to a service-local `.cache/huggingface`. The same cache root is used for pip cache and temporary files, which keeps large CUDA wheel installs off small root volumes. Set `JOYCAPTION_VENV_DIR` if the virtualenv itself should live on the model/workspace drive; `install.sh` will symlink `./venv` to it so runtime scripts keep working.
 

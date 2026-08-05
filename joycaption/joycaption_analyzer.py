@@ -28,6 +28,13 @@ DEFAULT_PROMPT = (
 )
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.lower() in {"1", "true", "yes", "on"}
+
+
 class JoyCaptionAnalyzer:
     """Long-lived JoyCaption inference wrapper."""
 
@@ -46,6 +53,7 @@ class JoyCaptionAnalyzer:
         self.processor = None
         self.model = None
         self._lock = threading.Lock()
+        self._configure_cuda_backend()
 
     def initialize(self) -> bool:
         """Load processor and model. Return False instead of raising for REST startup diagnostics."""
@@ -145,6 +153,8 @@ class JoyCaptionAnalyzer:
             return {"success": True, "error": None, "caption": caption}
         except Exception as exc:
             logger.exception("JoyCaption generation failed: %s", exc)
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             return {"success": False, "error": str(exc), "caption": ""}
 
     def _resolve_device(self, requested: str) -> str:
@@ -201,6 +211,25 @@ class JoyCaptionAnalyzer:
         if self.device == "cuda":
             kwargs["device_map"] = 0
         return kwargs
+
+    def _configure_cuda_backend(self) -> None:
+        if self.device != "cuda":
+            return
+
+        disable_cudnn = os.getenv("DISABLE_CUDNN", "auto").lower()
+        should_disable = disable_cudnn in {"1", "true", "yes", "on"}
+
+        if disable_cudnn == "auto" and torch.cuda.is_available():
+            major, _minor = torch.cuda.get_device_capability()
+            should_disable = major >= 12
+
+        if should_disable:
+            torch.backends.cudnn.enabled = False
+            logger.info("JoyCaption: cuDNN disabled for CUDA inference")
+
+        if _env_bool("CUDA_ALLOW_TF32", True):
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
 
     def __del__(self):
         if getattr(self, "model", None) is not None:
