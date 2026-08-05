@@ -14,6 +14,22 @@ DEFAULT_REPO_URL="https://github.com/fpgaminer/joycaption.git"
 REPO_URL="${JOYCAPTION_REPO_URL:-$DEFAULT_REPO_URL}"
 REPO_DIR="$SCRIPT_DIR/joycaption-src"
 
+if [ -z "${JOYCAPTION_CACHE_ROOT:-}" ]; then
+    if [ -d "/mnt/models/workspace" ] && [ -w "/mnt/models/workspace" ]; then
+        JOYCAPTION_CACHE_ROOT="/mnt/models/workspace"
+    else
+        JOYCAPTION_CACHE_ROOT="$SCRIPT_DIR/.cache"
+    fi
+fi
+
+export PIP_CACHE_DIR="${PIP_CACHE_DIR:-$JOYCAPTION_CACHE_ROOT/pip-cache}"
+export TMPDIR="${TMPDIR:-$JOYCAPTION_CACHE_ROOT/tmp}"
+export MODEL_DIR="${MODEL_DIR:-$JOYCAPTION_CACHE_ROOT/huggingface}"
+export HF_HOME="$MODEL_DIR"
+VENV_DIR="${JOYCAPTION_VENV_DIR:-$SCRIPT_DIR/venv}"
+
+mkdir -p "$PIP_CACHE_DIR" "$TMPDIR" "$MODEL_DIR" "$(dirname "$VENV_DIR")"
+
 if [[ "$REPO_URL" == /* || "$REPO_URL" == ./* || "$REPO_URL" == ../* ]]; then
     if [ ! -d "$REPO_URL/.git" ]; then
         echo "Configured local JoyCaption repo does not exist: $REPO_URL"
@@ -28,8 +44,15 @@ else
     git -C "$REPO_DIR" pull --ff-only
 fi
 
-rm -rf "$SCRIPT_DIR/venv"
-python3.11 -m venv "$SCRIPT_DIR/venv"
+rm -rf "$VENV_DIR"
+if [ "$VENV_DIR" != "$SCRIPT_DIR/venv" ] && [ -L "$SCRIPT_DIR/venv" ]; then
+    rm -f "$SCRIPT_DIR/venv"
+fi
+python3.11 -m venv "$VENV_DIR"
+if [ "$VENV_DIR" != "$SCRIPT_DIR/venv" ]; then
+    rm -rf "$SCRIPT_DIR/venv"
+    ln -s "$VENV_DIR" "$SCRIPT_DIR/venv"
+fi
 source "$SCRIPT_DIR/venv/bin/activate"
 
 choose_torch_defaults() {
@@ -83,6 +106,12 @@ EOF
 
 echo "JoyCaption installed. Edit $SCRIPT_DIR/.env if needed, then run:"
 echo "  $SCRIPT_DIR/run.sh"
+echo ""
+echo "Cache root: $JOYCAPTION_CACHE_ROOT"
+echo "Hugging Face cache: $MODEL_DIR"
+echo "pip cache: $PIP_CACHE_DIR"
+echo "temp dir: $TMPDIR"
+echo "venv: $VENV_DIR"
 echo ""
 echo "Generated systemd unit:"
 echo "  $SCRIPT_DIR/services/joycaption-api.service"
