@@ -20,11 +20,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODEL = "fancyfeast/llama-joycaption-beta-one-hf-llava"
 DEFAULT_SYSTEM_PROMPT = "You are a helpful image captioner."
 DEFAULT_PROMPT = (
-    "Write a straightforward caption for this image. Include concrete visual "
-    "details useful for image content moderation. Include whether the image is "
-    "sfw, suggestive, or nsfw. Include apparent age only for humans or "
-    "human-like characters when applicable. Never estimate age for animals, "
-    "objects, or non-human subjects. Avoid euphemisms."
+    "Write one concise factual caption for this image in 25 words or fewer. "
+    "Start with sfw, suggestive, or nsfw. Mention only the main visible subject "
+    "and action. Do not list fine details."
 )
 
 
