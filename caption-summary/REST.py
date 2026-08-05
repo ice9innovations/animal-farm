@@ -96,7 +96,9 @@ SYNTHESIS_PROMPT_INSTRUCTION = (
     "Write one concise sentence describing the image. "
     "Do not copy or repeat the captions — synthesize them. "
     "If a preferred caption is provided, treat it as authoritative when captions conflict "
-    "and preserve its SFW or NSFW prefix when present. "
+    "but rewrite it into a new concise summary rather than returning it verbatim. "
+    "If the preferred caption begins with an SFW or NSFW prefix, preserve only that prefix "
+    "at the start of the rewritten summary. "
     "Return only the sentence."
 )
 
@@ -137,7 +139,7 @@ def _format_captions(captions: dict, preferred_caption_service: str = None) -> s
     lines = ["VLM Captions"]
     if preferred_caption_service and preferred_caption_service in captions:
         lines.extend([
-            "Preferred Caption",
+            "Preferred Caption (primary evidence; rewrite, do not copy)",
             preferred_caption_service,
             captions[preferred_caption_service],
         ])
