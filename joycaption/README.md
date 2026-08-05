@@ -7,14 +7,14 @@
 
 ## Overview
 
-This service keeps JoyCaption loaded in one Flask process and exposes `/analyze` and `/v3/analyze` endpoints compatible with the other Animal Farm vision wrappers. It also clones a JoyCaption checkout into `joycaption-src/` during install so the original scripts and prompt examples are available locally. By default, `install.sh` uses `/home/sd/joycaption` when that local checkout exists, otherwise it falls back to GitHub.
+This service keeps JoyCaption loaded in one Flask process and exposes `/analyze` and `/v3/analyze` endpoints compatible with the other Animal Farm vision wrappers. It also clones JoyCaption into `joycaption-src/` beside this wrapper during install, so no local destination path is required.
 
 `qwen-cpp` remains the lighter llama.cpp VLM path. This wrapper is for running the native JoyCaption HF model directly.
 
 ## Install
 
 ```bash
-cd /home/sd/animal-farm/joycaption
+cd ~/animal-farm/joycaption
 bash install.sh
 ```
 
@@ -26,7 +26,7 @@ Edit `.env` after installation if you need a different port, model cache path, p
 PORT=7797
 PRIVATE=False
 MODEL_ID=fancyfeast/llama-joycaption-beta-one-hf-llava
-MODEL_DIR=/home/sd/.cache/huggingface
+MODEL_DIR=${HOME}/.cache/huggingface
 DEVICE=auto
 PRECISION=8bit
 TORCH_INDEX_URL=https://download.pytorch.org/whl/cu121
@@ -40,7 +40,7 @@ GREEDY=false
 
 The install script uses PyTorch CUDA 12.1 wheels by default through `TORCH_INDEX_URL`. That matches systems whose NVIDIA driver reports CUDA 12.2 support; default PyPI Torch wheels may require a newer driver.
 
-`MODEL_DIR` maps to `HF_HOME`. The default uses the normal shared Hugging Face cache at `/home/sd/.cache/huggingface`, so offline mode can reuse models already downloaded by smoke tests or other services. If you point `MODEL_DIR` at a service-local directory, run once with `HF_HUB_OFFLINE=0` and `TRANSFORMERS_OFFLINE=0` to populate that cache before enabling offline mode.
+`MODEL_DIR` maps to `HF_HOME`. The default uses the normal shared Hugging Face cache at `${HOME}/.cache/huggingface`, so offline mode can reuse models already downloaded by smoke tests or other services. If you point `MODEL_DIR` at a service-local directory, run once with `HF_HUB_OFFLINE=0` and `TRANSFORMERS_OFFLINE=0` to populate that cache before enabling offline mode.
 
 ## Run
 

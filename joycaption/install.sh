@@ -9,14 +9,17 @@ fi
 
 source "$SCRIPT_DIR/.env"
 
-if [ -d "/home/sd/joycaption/.git" ]; then
-    DEFAULT_REPO_URL="/home/sd/joycaption"
-else
-    DEFAULT_REPO_URL="https://github.com/fpgaminer/joycaption.git"
-fi
-
+DEFAULT_REPO_URL="https://github.com/fpgaminer/joycaption.git"
 REPO_URL="${JOYCAPTION_REPO_URL:-$DEFAULT_REPO_URL}"
-REPO_DIR="${JOYCAPTION_REPO_DIR:-$SCRIPT_DIR/joycaption-src}"
+REPO_DIR="$SCRIPT_DIR/joycaption-src"
+
+if [[ "$REPO_URL" == /* || "$REPO_URL" == ./* || "$REPO_URL" == ../* ]]; then
+    if [ ! -d "$REPO_URL/.git" ]; then
+        echo "Configured local JoyCaption repo does not exist: $REPO_URL"
+        echo "Falling back to https://github.com/fpgaminer/joycaption.git"
+        REPO_URL="https://github.com/fpgaminer/joycaption.git"
+    fi
+fi
 
 if [ ! -d "$REPO_DIR/.git" ]; then
     git clone "$REPO_URL" "$REPO_DIR"
