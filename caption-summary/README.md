@@ -101,8 +101,10 @@ Content-Type: application/json
   "captions": {
     "blip2": "a golden retriever sits on a couch",
     "moondream": "a dog resting indoors",
+    "joycaption": "SFW: a golden retriever resting on a couch indoors",
     "qwen": "a large dog on a fabric sofa"
   },
+  "preferred_caption_service": "joycaption",
   "nouns": [
     {"canonical": "dog", "category": "animal", "vote_count": 3},
     {"canonical": "couch", "category": "furniture", "vote_count": 2}
@@ -113,7 +115,9 @@ Content-Type: application/json
 }
 ```
 
-`nouns` and `verbs` are optional. Only `captions` is required.
+`nouns`, `verbs`, and `preferred_caption_service` are optional. Only `captions` is required.
+When `preferred_caption_service` names a caption provider, that caption is placed first
+in the synthesis prompt and treated as authoritative when model captions conflict.
 
 **Response:**
 ```json

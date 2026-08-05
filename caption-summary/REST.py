@@ -9,6 +9,7 @@ POST /summarize
   Request (JSON):
     {
       "captions": {"blip": "...", "haiku": "...", ...},
+      "preferred_caption_service": "joycaption",
       "nouns":    [{"canonical": "...", "category": "...", "vote_count": 2}, ...],
       "verbs":    [{"canonical": "...", "vote_count": 2}, ...]
     }
@@ -94,6 +95,8 @@ SYNTHESIS_PROMPT_CONTEXT = (
 SYNTHESIS_PROMPT_INSTRUCTION = (
     "Write one concise sentence describing the image. "
     "Do not copy or repeat the captions — synthesize them. "
+    "If a preferred caption is provided, treat it as authoritative when captions conflict "
+    "and preserve its SFW or NSFW prefix when present. "
     "Return only the sentence."
 )
 
@@ -130,15 +133,28 @@ def _format_verb_consensus(verbs: list) -> str:
     return f"Verb Consensus\n{verbs_line}"
 
 
-def _format_captions(captions: dict) -> str:
+def _format_captions(captions: dict, preferred_caption_service: str = None) -> str:
     lines = ["VLM Captions"]
+    if preferred_caption_service and preferred_caption_service in captions:
+        lines.extend([
+            "Preferred Caption",
+            preferred_caption_service,
+            captions[preferred_caption_service],
+        ])
     for service, text in captions.items():
+        if service == preferred_caption_service:
+            continue
         lines.append(service)
         lines.append(text)
     return "\n".join(lines)
 
 
-def build_prompt(captions: dict, nouns: list, verbs: list) -> str:
+def build_prompt(
+    captions: dict,
+    nouns: list,
+    verbs: list,
+    preferred_caption_service: str = None,
+) -> str:
     parts = [SYNTHESIS_PROMPT_CONTEXT]
 
     noun_section = _format_noun_consensus(nouns)
@@ -149,7 +165,7 @@ def build_prompt(captions: dict, nouns: list, verbs: list) -> str:
     if verb_section:
         parts.append(verb_section)
 
-    parts.append(_format_captions(captions))
+    parts.append(_format_captions(captions, preferred_caption_service))
     parts.append(SYNTHESIS_PROMPT_INSTRUCTION)
     return "\n\n".join(parts)
 
@@ -321,6 +337,7 @@ def summarize():
 
     body = request.get_json()
     captions = body.get('captions', {})
+    preferred_caption_service = body.get('preferred_caption_service')
     nouns = body.get('nouns', [])
     verbs = body.get('verbs', [])
 
@@ -328,7 +345,10 @@ def summarize():
         return jsonify({"status": "error", "error": "No captions provided"}), 400
 
     try:
-        prompt = build_prompt(captions, nouns, verbs)
+        if preferred_caption_service and preferred_caption_service not in captions:
+            preferred_caption_service = None
+
+        prompt = build_prompt(captions, nouns, verbs, preferred_caption_service)
         summary = synthesize(prompt)
 
         if not summary:
