@@ -32,8 +32,32 @@ rm -rf "$SCRIPT_DIR/venv"
 python3.11 -m venv "$SCRIPT_DIR/venv"
 source "$SCRIPT_DIR/venv/bin/activate"
 
+choose_torch_defaults() {
+    local compute_cap
+    compute_cap="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n 1 || true)"
+
+    if [[ "$compute_cap" == 12.* ]]; then
+        TORCH_VERSION="${TORCH_VERSION:-2.7.0}"
+        TORCHVISION_VERSION="${TORCHVISION_VERSION:-0.22.0}"
+        TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}"
+    else
+        TORCH_VERSION="${TORCH_VERSION:-2.5.1}"
+        TORCHVISION_VERSION="${TORCHVISION_VERSION:-0.20.1}"
+        TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu121}"
+    fi
+
+    if [[ "$compute_cap" == 12.* && "$TORCH_INDEX_URL" != *cu128* ]]; then
+        echo "Detected compute capability $compute_cap, which needs PyTorch CUDA 12.8 wheels."
+        echo "Current TORCH_INDEX_URL is '$TORCH_INDEX_URL'."
+        echo "Remove TORCH_INDEX_URL from .env or set it to https://download.pytorch.org/whl/cu128"
+        exit 1
+    fi
+}
+
+choose_torch_defaults
+
 pip install --upgrade pip
-pip install --no-cache-dir torch==2.5.1 torchvision==0.20.1 --index-url "${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu121}"
+pip install --no-cache-dir "torch==$TORCH_VERSION" "torchvision==$TORCHVISION_VERSION" --index-url "$TORCH_INDEX_URL"
 pip install --no-cache-dir -r "$SCRIPT_DIR/requirements.txt"
 
 chmod +x "$SCRIPT_DIR/run.sh" "$SCRIPT_DIR/rest.sh" "$SCRIPT_DIR/joycaption.sh"

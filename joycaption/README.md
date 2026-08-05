@@ -29,7 +29,9 @@ MODEL_ID=fancyfeast/llama-joycaption-beta-one-hf-llava
 MODEL_DIR=${HOME}/.cache/huggingface
 DEVICE=auto
 PRECISION=8bit
-TORCH_INDEX_URL=https://download.pytorch.org/whl/cu121
+TORCH_VERSION=
+TORCHVISION_VERSION=
+TORCH_INDEX_URL=
 MAX_NEW_TOKENS=256
 TEMPERATURE=0.6
 TOP_P=0.9
@@ -38,7 +40,7 @@ GREEDY=false
 
 `PRECISION=8bit` is the default because the full bf16 model needs roughly 17GB VRAM. `PRECISION=4bit` is also available for a smaller footprint. Both quantized modes require CUDA and `bitsandbytes`, and leave the vision tower and multimodal projector unquantized to match the smoke-test script. CPU mode is intentionally limited to `DEVICE=cpu` and `PRECISION=fp32` because JoyCaption is large.
 
-The install script uses PyTorch CUDA 12.1 wheels by default through `TORCH_INDEX_URL`. That matches systems whose NVIDIA driver reports CUDA 12.2 support; default PyPI Torch wheels may require a newer driver.
+The install script chooses PyTorch wheels from the detected GPU. Compute capability 12.x GPUs, such as RTX 5090, use CUDA 12.8 wheels. Older GPUs default to CUDA 12.1 wheels for driver compatibility. Override `TORCH_VERSION`, `TORCHVISION_VERSION`, and `TORCH_INDEX_URL` in `.env` only when a machine needs a specific build.
 
 `MODEL_DIR` maps to `HF_HOME`. The default uses the normal shared Hugging Face cache at `${HOME}/.cache/huggingface`, so offline mode can reuse models already downloaded by smoke tests or other services. If you point `MODEL_DIR` at a service-local directory, run once with `HF_HUB_OFFLINE=0` and `TRANSFORMERS_OFFLINE=0` to populate that cache before enabling offline mode.
 
