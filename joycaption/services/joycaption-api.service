@@ -7,9 +7,9 @@ StartLimitIntervalSec=0
 Type=simple
 Restart=always
 RestartSec=10
-User=sd
-WorkingDirectory=/home/sd/animal-farm/joycaption
-ExecStart=/home/sd/animal-farm/joycaption/rest.sh
+User=REPLACE_WITH_INSTALL_USER
+WorkingDirectory=REPLACE_WITH_INSTALL_DIR
+ExecStart=REPLACE_WITH_INSTALL_DIR/rest.sh
 
 [Install]
 WantedBy=multi-user.target

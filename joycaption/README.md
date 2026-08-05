@@ -51,6 +51,7 @@ The install script uses PyTorch CUDA 12.1 wheels by default through `TORCH_INDEX
 Systemd:
 
 ```bash
+./install.sh
 sudo cp services/joycaption-api.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now joycaption-api

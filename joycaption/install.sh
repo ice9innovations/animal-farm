@@ -2,6 +2,7 @@
 set -e
 
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+CURRENT_USER="$(id -un)"
 
 if [ ! -f "$SCRIPT_DIR/.env" ]; then
     cp "$SCRIPT_DIR/.env.sample" "$SCRIPT_DIR/.env"
@@ -37,5 +38,27 @@ pip install --no-cache-dir -r "$SCRIPT_DIR/requirements.txt"
 
 chmod +x "$SCRIPT_DIR/run.sh" "$SCRIPT_DIR/rest.sh" "$SCRIPT_DIR/joycaption.sh"
 
+mkdir -p "$SCRIPT_DIR/services"
+cat > "$SCRIPT_DIR/services/joycaption-api.service" <<EOF
+[Unit]
+Description=JoyCaption Vision REST API
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+User=$CURRENT_USER
+WorkingDirectory=$SCRIPT_DIR
+ExecStart=$SCRIPT_DIR/rest.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 echo "JoyCaption installed. Edit $SCRIPT_DIR/.env if needed, then run:"
 echo "  $SCRIPT_DIR/run.sh"
+echo ""
+echo "Generated systemd unit:"
+echo "  $SCRIPT_DIR/services/joycaption-api.service"
