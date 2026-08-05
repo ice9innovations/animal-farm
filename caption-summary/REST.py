@@ -100,7 +100,9 @@ SYNTHESIS_PROMPT_INSTRUCTION = (
     "If the preferred caption begins with an SFW or NSFW prefix, preserve only that prefix "
     "at the start of the rewritten summary. Preserve any gendered subject references "
     "that appear in the captions, especially the preferred caption, unless the captions "
-    "clearly conflict. "
+    "clearly conflict. Do not mention captions, models, conflicts between models, "
+    "or what other models did or did not describe. Do not add statements about absent "
+    "animals, text, objects, or content unless that absence is the main visual subject. "
     "Return only the sentence."
 )
 
