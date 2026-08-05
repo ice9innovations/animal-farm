@@ -1,0 +1,15 @@
+[Unit]
+Description=JoyCaption Vision REST API
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+User=sd
+WorkingDirectory=/home/sd/animal-farm/joycaption
+ExecStart=/home/sd/animal-farm/joycaption/rest.sh
+
+[Install]
+WantedBy=multi-user.target

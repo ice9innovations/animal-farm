@@ -1,0 +1,6 @@
+.env
+venv/
+joycaption-src/
+models/
+__pycache__/
+*.pyc
