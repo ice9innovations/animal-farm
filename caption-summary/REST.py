@@ -98,7 +98,9 @@ SYNTHESIS_PROMPT_INSTRUCTION = (
     "If a preferred caption is provided, treat it as authoritative when captions conflict "
     "but rewrite it into a new concise summary rather than returning it verbatim. "
     "If the preferred caption begins with an SFW or NSFW prefix, preserve only that prefix "
-    "at the start of the rewritten summary. "
+    "at the start of the rewritten summary. Preserve any gendered subject references "
+    "that appear in the captions, especially the preferred caption, unless the captions "
+    "clearly conflict. "
     "Return only the sentence."
 )
 
