@@ -29,6 +29,7 @@ MODEL_ID=fancyfeast/llama-joycaption-beta-one-hf-llava
 MODEL_DIR=
 DEVICE=auto
 PRECISION=8bit
+BNB_SKIP_MODULES=vision_tower,multi_modal_projector
 DISABLE_CUDNN=auto
 CUDA_ALLOW_TF32=true
 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
@@ -46,6 +47,8 @@ GREEDY=false
 ```
 
 `PRECISION=8bit` is the default because the full bf16 model needs roughly 17GB VRAM. `PRECISION=4bit` is also available for a smaller footprint. Both quantized modes require CUDA and `bitsandbytes`, and leave the vision tower and multimodal projector unquantized to match the smoke-test script. CPU mode is intentionally limited to `DEVICE=cpu` and `PRECISION=fp32` because JoyCaption is large.
+
+`BNB_SKIP_MODULES` controls which modules bitsandbytes leaves unquantized. The default matches the JoyCaption smoke test. On very tight GPUs, try `BNB_SKIP_MODULES=multi_modal_projector` or `BNB_SKIP_MODULES=` with `PRECISION=4bit` to reduce VRAM further.
 
 The install script chooses PyTorch wheels from the detected GPU. Compute capability 12.x GPUs, such as RTX 5090, use CUDA 12.8 wheels. Older GPUs default to CUDA 12.1 wheels for driver compatibility. Override `TORCH_VERSION`, `TORCHVISION_VERSION`, and `TORCH_INDEX_URL` in `.env` only when a machine needs a specific build.
 

@@ -33,6 +33,13 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return value.lower() in {"1", "true", "yes", "on"}
 
 
+def _csv_env(name: str, default: list[str]) -> list[str]:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
 class JoyCaptionAnalyzer:
     """Long-lived JoyCaption inference wrapper."""
 
@@ -191,10 +198,12 @@ class JoyCaptionAnalyzer:
                     "Install bitsandbytes to use PRECISION=8bit or PRECISION=4bit."
                 ) from exc
 
+            skip_modules = _csv_env("BNB_SKIP_MODULES", ["vision_tower", "multi_modal_projector"])
+
             if self.precision == "8bit":
                 kwargs["quantization_config"] = BitsAndBytesConfig(
                     load_in_8bit=True,
-                    llm_int8_skip_modules=["vision_tower", "multi_modal_projector"],
+                    llm_int8_skip_modules=skip_modules,
                 )
             else:
                 kwargs["quantization_config"] = BitsAndBytesConfig(
@@ -202,7 +211,7 @@ class JoyCaptionAnalyzer:
                     bnb_4bit_compute_dtype=torch.bfloat16,
                     bnb_4bit_quant_type="nf4",
                     bnb_4bit_use_double_quant=True,
-                    llm_int8_skip_modules=["vision_tower", "multi_modal_projector"],
+                    llm_int8_skip_modules=skip_modules,
                 )
             kwargs["torch_dtype"] = "auto"
 
