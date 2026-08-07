@@ -78,7 +78,7 @@ MODEL_PATH=/home/sd/animal-farm/qwen-cpp/models/Qwen3-VL-2B-Instruct-Q4_K_M.gguf
 MMPROJ_PATH=/home/sd/animal-farm/qwen-cpp/models/mmproj-Qwen3-VL-2B-Instruct-F16.gguf
 MODEL_NAME=qwen3-vl-2b
 
-PROMPT="Briefly describe what you see in this image in a single short sentence."
+PROMPT="Write one concise factual caption for this image in 25 words or fewer. Mention only the main visible subject and action. Mention the setting only when it is important. Include visible text only when it is prominent."
 TEMPERATURE=0.3
 AUTO_UPDATE=true
 ```
