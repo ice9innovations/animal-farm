@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install PaddleOCR Flask API dependencies into ocr/venv.
+# Install RapidOCR Flask API dependencies into ocr/venv.
 # Run once before first use. Requires Python 3.11.
 #
 # Usage:
@@ -26,14 +26,11 @@ python3.11 -m venv "$SCRIPT_DIR/venv"
 
 "$SCRIPT_DIR/venv/bin/python" -c "import nltk; nltk.download('punkt'); nltk.download('stopwords')"
 
-# Download PaddleOCR model weights to the network volume
-bash "$SCRIPT_DIR/download_models.sh" "$WORKSPACE_DIR/paddleocr/models"
-
 # Generate systemd service file
 SERVICE_FILE="$SCRIPT_DIR/$SERVICE_NAME.service"
 cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Animal Farm PaddleOCR Text Extraction Service
+Description=Animal Farm RapidOCR Text Extraction Service
 After=network.target
 
 [Service]

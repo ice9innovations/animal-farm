@@ -1,5 +1,5 @@
 [Unit]
-Description=PaddleOCR API Service (Modern OCR replacement)
+Description=RapidOCR API Service
 After=network.target
 Conflicts=tesseract-api.service
 

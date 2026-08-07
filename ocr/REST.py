@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
-from paddleocr import PaddleOCR
+from rapidocr_onnxruntime import RapidOCR
 from PIL import Image
 import numpy as np
 from nltk.corpus import stopwords
@@ -33,7 +33,7 @@ PORT_STR = os.getenv('PORT')
 PRIVATE_STR = os.getenv('PRIVATE')
 TIMEOUT_STR = os.getenv('TIMEOUT')
 AUTO_UPDATE_STR = os.getenv('AUTO_UPDATE')
-MODEL_DIR = os.getenv('MODEL_DIR')
+OCR_USE_CUDA_STR = os.getenv('OCR_USE_CUDA', 'false')
 
 # Step 2: Validate critical environment variables
 if not PORT_STR:
@@ -44,14 +44,13 @@ if not TIMEOUT_STR:
     raise ValueError("TIMEOUT environment variable is required")
 if not AUTO_UPDATE_STR:
     raise ValueError("AUTO_UPDATE environment variable is required")
-if not MODEL_DIR:
-    raise ValueError("MODEL_DIR environment variable is required")
 
 # Step 3: Convert to appropriate types after validation
 PORT = int(PORT_STR)
 PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
 TIMEOUT = float(TIMEOUT_STR)
 AUTO_UPDATE = AUTO_UPDATE_STR.lower() == 'true'
+OCR_USE_CUDA = OCR_USE_CUDA_STR.lower() in ['true', '1', 'yes']
 
 MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
 
@@ -59,16 +58,14 @@ MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB d
 emoji_mappings = {}
 emoji_tokenizer = None
 
-# Initialize PaddleOCR (run once)
-print("Initializing PaddleOCR...")
-ocr_engine = PaddleOCR(
-    lang='en',
-    use_angle_cls=True,
-    det_model_dir=os.path.join(MODEL_DIR, 'whl/det/en'),
-    rec_model_dir=os.path.join(MODEL_DIR, 'whl/rec/en'),
-    cls_model_dir=os.path.join(MODEL_DIR, 'whl/cls'),
-)
-print("PaddleOCR initialized successfully")
+# Initialize RapidOCR (run once). RapidOCR uses ONNX models and does not require Paddle.
+print("Initializing RapidOCR...")
+try:
+    ocr_engine = RapidOCR(det_use_cuda=OCR_USE_CUDA, cls_use_cuda=OCR_USE_CUDA, rec_use_cuda=OCR_USE_CUDA)
+except TypeError:
+    # Older rapidocr-onnxruntime releases do not expose CUDA flags in the constructor.
+    ocr_engine = RapidOCR()
+print("RapidOCR initialized successfully")
 
 def create_ocr_response(data: Dict[str, Any], processing_time: float) -> Dict[str, Any]:
     """Create standardized OCR response with emoji mappings"""
@@ -110,10 +107,38 @@ def create_ocr_response(data: Dict[str, Any], processing_time: float) -> Dict[st
         "metadata": {
             "processing_time": round(processing_time, 3),
             "model_info": {
-                "framework": "PaddleOCR"
+                "framework": "RapidOCR",
+                "runtime": "ONNX Runtime"
             }
         }
     }
+
+def _normalize_rapidocr_results(ocr_result: Any) -> List[Tuple[Any, str, float]]:
+    """Normalize RapidOCR result variants to (bbox, text, confidence)."""
+    if ocr_result is None:
+        return []
+
+    # rapidocr-onnxruntime returns (results, elapsed); newer rapidocr versions may
+    # return an object with boxes/txts/scores or a plain iterable of detections.
+    if isinstance(ocr_result, tuple) and len(ocr_result) >= 1:
+        ocr_result = ocr_result[0]
+
+    if hasattr(ocr_result, 'boxes') and hasattr(ocr_result, 'txts') and hasattr(ocr_result, 'scores'):
+        boxes = ocr_result.boxes if ocr_result.boxes is not None else []
+        txts = ocr_result.txts if ocr_result.txts is not None else []
+        scores = ocr_result.scores if ocr_result.scores is not None else []
+        return list(zip(boxes, txts, scores))
+
+    normalized = []
+    for item in ocr_result or []:
+        if isinstance(item, dict):
+            bbox = item.get('box') or item.get('bbox') or item.get('points')
+            text = item.get('text') or item.get('txt') or ''
+            confidence = item.get('score') or item.get('confidence') or 0.0
+            normalized.append((bbox, text, confidence))
+        elif isinstance(item, (list, tuple)) and len(item) >= 3:
+            normalized.append((item[0], item[1], item[2]))
+    return normalized
 
 def load_mwe_mappings():
     """Load MWE mappings from GitHub raw files with local caching"""
@@ -304,7 +329,7 @@ def process_image_for_ocr(image: Image.Image) -> Dict[str, Any]:
     """
     Main processing function - takes PIL Image, returns OCR data
     This is the core business logic, separated from HTTP concerns
-    Uses pure in-memory processing with PaddleOCR PIL Image support
+    Uses pure in-memory processing with RapidOCR
     """
     start_time = time.time()
     
@@ -313,51 +338,45 @@ def process_image_for_ocr(image: Image.Image) -> Dict[str, Any]:
         if image.mode != 'RGB':
             image = image.convert('RGB')
         
-        # Convert PIL Image to numpy array for PaddleOCR
+        # Convert PIL Image to numpy array for RapidOCR
         image_array = np.array(image)
         
-        # Run PaddleOCR
-        ocr_result = ocr_engine.ocr(image_array, cls=True)
+        # Run RapidOCR
+        ocr_result = ocr_engine(image_array)
         
         # Extract text, confidence scores, and bounding boxes
         texts = []
         confidences = []
         text_regions = []
         
-        if ocr_result and ocr_result[0]:  # PaddleOCR returns nested list
-            for line in ocr_result[0]:
-                if line and len(line) >= 2:
-                    bbox_coords = line[0]  # 4-point polygon coordinates
-                    text_info = line[1]   # [text, confidence]
-                    
-                    if len(text_info) >= 2:
-                        text_content = text_info[0]
-                        confidence = text_info[1]
-                        
-                        texts.append(text_content)
-                        confidences.append(confidence)
-                        
-                        # Convert 4-point polygon to bounding box
-                        if bbox_coords and len(bbox_coords) >= 4:
-                            # bbox_coords = [[x1, y1], [x2, y2], [x3, y3], [x4, y4]]
-                            x_coords = [point[0] for point in bbox_coords]
-                            y_coords = [point[1] for point in bbox_coords]
-                            
-                            x_min = min(x_coords)
-                            y_min = min(y_coords)
-                            x_max = max(x_coords)
-                            y_max = max(y_coords)
-                            
-                            text_regions.append({
-                                "text": text_content,
-                                "confidence": round(confidence, 3),
-                                "bbox": {
-                                    "x": int(x_min),
-                                    "y": int(y_min),
-                                    "width": int(x_max - x_min),
-                                    "height": int(y_max - y_min)
-                                }
-                            })
+        for bbox_coords, text_content, confidence in _normalize_rapidocr_results(ocr_result):
+            if not text_content:
+                continue
+
+            confidence = float(confidence or 0.0)
+            texts.append(str(text_content))
+            confidences.append(confidence)
+
+            # Convert 4-point polygon to bounding box
+            if bbox_coords is not None and len(bbox_coords) >= 4:
+                x_coords = [point[0] for point in bbox_coords]
+                y_coords = [point[1] for point in bbox_coords]
+
+                x_min = min(x_coords)
+                y_min = min(y_coords)
+                x_max = max(x_coords)
+                y_max = max(y_coords)
+
+                text_regions.append({
+                    "text": str(text_content),
+                    "confidence": round(confidence, 3),
+                    "bbox": {
+                        "x": int(x_min),
+                        "y": int(y_min),
+                        "width": int(x_max - x_min),
+                        "height": int(y_max - y_min)
+                    }
+                })
         
         # Combine all text
         raw_text = ' '.join(texts)
@@ -388,7 +407,7 @@ def process_image_for_ocr(image: Image.Image) -> Dict[str, Any]:
                 "raw_text": raw_text,
                 "has_text": has_text,
                 "confidence": avg_confidence,
-                "engine": "PaddleOCR",
+                "engine": "RapidOCR",
                 "text_regions": text_regions
             },
             "processing_time": processing_time
@@ -479,16 +498,16 @@ def _normalize_health_response(response):
 
 # Enable CORS for direct browser access
 CORS(app, origins=["*"], methods=["GET", "POST", "OPTIONS"])
-print("PaddleOCR service: CORS enabled for direct browser communication")
+print("RapidOCR service: CORS enabled for direct browser communication")
 
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    # Test if PaddleOCR is working by creating a small test image
+    # Test if RapidOCR is working by creating a small test image
     try:
         test_image = Image.new('RGB', (10, 10), color='white')
         test_array = np.array(test_image)
-        ocr_engine.ocr(test_array, cls=True)  # This will fail if OCR can't work
+        ocr_engine(test_array)  # This will fail if OCR can't work
         ocr_status = "loaded"
         status = "healthy"
     except Exception as e:
@@ -496,7 +515,7 @@ def health_check():
         status = "unhealthy"
         return jsonify({
             "status": status,
-            "reason": f"PaddleOCR engine error: {str(e)}",
+            "reason": f"RapidOCR engine error: {str(e)}",
             "service": "OCR Text Recognition"
         }), 503
     
@@ -505,14 +524,14 @@ def health_check():
         "service": "OCR Text Recognition",
         "ocr_engine": {
             "status": ocr_status,
-            "version": "PaddleOCR 2.x",
-            "languages": ["English", "Chinese", "80+ others"],
-            "gpu_enabled": True
+            "version": "RapidOCR ONNX Runtime",
+            "languages": ["English"],
+            "gpu_enabled": OCR_USE_CUDA
         },
         "features": {
             "text_angle_classification": True,
-            "multilingual_support": True,
-            "gpu_acceleration": True,
+            "multilingual_support": False,
+            "gpu_acceleration": OCR_USE_CUDA,
             "high_accuracy": True
         },
         "endpoints": [
