@@ -1,5 +1,5 @@
 [Unit]
-Description=RapidOCR API Service
+Description=EasyOCR GPU API Service
 After=network.target
 Conflicts=tesseract-api.service
 

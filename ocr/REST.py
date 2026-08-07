@@ -10,7 +10,8 @@ from typing import Dict, Any, Optional, List, Tuple
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
-from rapidocr_onnxruntime import RapidOCR
+import easyocr
+import torch
 from PIL import Image
 import numpy as np
 from nltk.corpus import stopwords
@@ -33,7 +34,7 @@ PORT_STR = os.getenv('PORT')
 PRIVATE_STR = os.getenv('PRIVATE')
 TIMEOUT_STR = os.getenv('TIMEOUT')
 AUTO_UPDATE_STR = os.getenv('AUTO_UPDATE')
-OCR_USE_CUDA_STR = os.getenv('OCR_USE_CUDA', 'false')
+OCR_REQUIRE_GPU_STR = os.getenv('OCR_REQUIRE_GPU', os.getenv('OCR_USE_CUDA', 'true'))
 
 # Step 2: Validate critical environment variables
 if not PORT_STR:
@@ -50,7 +51,9 @@ PORT = int(PORT_STR)
 PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
 TIMEOUT = float(TIMEOUT_STR)
 AUTO_UPDATE = AUTO_UPDATE_STR.lower() == 'true'
-OCR_USE_CUDA = OCR_USE_CUDA_STR.lower() in ['true', '1', 'yes']
+OCR_REQUIRE_GPU = OCR_REQUIRE_GPU_STR.lower() in ['true', '1', 'yes']
+OCR_CUDA_AVAILABLE = torch.cuda.is_available()
+OCR_DEVICE = "cuda" if OCR_CUDA_AVAILABLE else "cpu"
 
 MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
 
@@ -58,14 +61,15 @@ MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB d
 emoji_mappings = {}
 emoji_tokenizer = None
 
-# Initialize RapidOCR (run once). RapidOCR uses ONNX models and does not require Paddle.
-print("Initializing RapidOCR...")
-try:
-    ocr_engine = RapidOCR(det_use_cuda=OCR_USE_CUDA, cls_use_cuda=OCR_USE_CUDA, rec_use_cuda=OCR_USE_CUDA)
-except TypeError:
-    # Older rapidocr-onnxruntime releases do not expose CUDA flags in the constructor.
-    ocr_engine = RapidOCR()
-print("RapidOCR initialized successfully")
+# Initialize EasyOCR (run once). This service is intentionally GPU-required by
+# default; CPU fallback is not useful for the production OCR workload.
+print("Initializing EasyOCR...")
+if OCR_REQUIRE_GPU and not OCR_CUDA_AVAILABLE:
+    raise RuntimeError("OCR requires CUDA, but torch.cuda.is_available() is false. Install CUDA-enabled PyTorch for this platform.")
+if OCR_CUDA_AVAILABLE:
+    print(f"EasyOCR CUDA device: {torch.cuda.get_device_name(0)}")
+ocr_engine = easyocr.Reader(['en'], gpu=OCR_CUDA_AVAILABLE)
+print("EasyOCR initialized successfully")
 
 def create_ocr_response(data: Dict[str, Any], processing_time: float) -> Dict[str, Any]:
     """Create standardized OCR response with emoji mappings"""
@@ -107,27 +111,17 @@ def create_ocr_response(data: Dict[str, Any], processing_time: float) -> Dict[st
         "metadata": {
             "processing_time": round(processing_time, 3),
             "model_info": {
-                "framework": "RapidOCR",
-                "runtime": "ONNX Runtime"
+                "framework": "EasyOCR",
+                "runtime": "PyTorch",
+                "device": OCR_DEVICE
             }
         }
     }
 
-def _normalize_rapidocr_results(ocr_result: Any) -> List[Tuple[Any, str, float]]:
-    """Normalize RapidOCR result variants to (bbox, text, confidence)."""
+def _normalize_easyocr_results(ocr_result: Any) -> List[Tuple[Any, str, float]]:
+    """Normalize EasyOCR results to (bbox, text, confidence)."""
     if ocr_result is None:
         return []
-
-    # rapidocr-onnxruntime returns (results, elapsed); newer rapidocr versions may
-    # return an object with boxes/txts/scores or a plain iterable of detections.
-    if isinstance(ocr_result, tuple) and len(ocr_result) >= 1:
-        ocr_result = ocr_result[0]
-
-    if hasattr(ocr_result, 'boxes') and hasattr(ocr_result, 'txts') and hasattr(ocr_result, 'scores'):
-        boxes = ocr_result.boxes if ocr_result.boxes is not None else []
-        txts = ocr_result.txts if ocr_result.txts is not None else []
-        scores = ocr_result.scores if ocr_result.scores is not None else []
-        return list(zip(boxes, txts, scores))
 
     normalized = []
     for item in ocr_result or []:
@@ -329,7 +323,7 @@ def process_image_for_ocr(image: Image.Image) -> Dict[str, Any]:
     """
     Main processing function - takes PIL Image, returns OCR data
     This is the core business logic, separated from HTTP concerns
-    Uses pure in-memory processing with RapidOCR
+    Uses pure in-memory processing with EasyOCR
     """
     start_time = time.time()
     
@@ -338,18 +332,18 @@ def process_image_for_ocr(image: Image.Image) -> Dict[str, Any]:
         if image.mode != 'RGB':
             image = image.convert('RGB')
         
-        # Convert PIL Image to numpy array for RapidOCR
+        # Convert PIL Image to numpy array for EasyOCR
         image_array = np.array(image)
         
-        # Run RapidOCR
-        ocr_result = ocr_engine(image_array)
+        # Run EasyOCR
+        ocr_result = ocr_engine.readtext(image_array, detail=1, paragraph=False)
         
         # Extract text, confidence scores, and bounding boxes
         texts = []
         confidences = []
         text_regions = []
         
-        for bbox_coords, text_content, confidence in _normalize_rapidocr_results(ocr_result):
+        for bbox_coords, text_content, confidence in _normalize_easyocr_results(ocr_result):
             if not text_content:
                 continue
 
@@ -407,7 +401,7 @@ def process_image_for_ocr(image: Image.Image) -> Dict[str, Any]:
                 "raw_text": raw_text,
                 "has_text": has_text,
                 "confidence": avg_confidence,
-                "engine": "RapidOCR",
+                "engine": "EasyOCR",
                 "text_regions": text_regions
             },
             "processing_time": processing_time
@@ -498,16 +492,16 @@ def _normalize_health_response(response):
 
 # Enable CORS for direct browser access
 CORS(app, origins=["*"], methods=["GET", "POST", "OPTIONS"])
-print("RapidOCR service: CORS enabled for direct browser communication")
+print("EasyOCR service: CORS enabled for direct browser communication")
 
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    # Test if RapidOCR is working by creating a small test image
+    # Test if EasyOCR is working by creating a small test image
     try:
         test_image = Image.new('RGB', (10, 10), color='white')
         test_array = np.array(test_image)
-        ocr_engine(test_array)  # This will fail if OCR can't work
+        ocr_engine.readtext(test_array, detail=1, paragraph=False)  # This will fail if OCR can't work
         ocr_status = "loaded"
         status = "healthy"
     except Exception as e:
@@ -515,7 +509,7 @@ def health_check():
         status = "unhealthy"
         return jsonify({
             "status": status,
-            "reason": f"RapidOCR engine error: {str(e)}",
+            "reason": f"EasyOCR engine error: {str(e)}",
             "service": "OCR Text Recognition"
         }), 503
     
@@ -524,14 +518,18 @@ def health_check():
         "service": "OCR Text Recognition",
         "ocr_engine": {
             "status": ocr_status,
-            "version": "RapidOCR ONNX Runtime",
+            "version": "EasyOCR",
             "languages": ["English"],
-            "gpu_enabled": OCR_USE_CUDA
+            "gpu_required": OCR_REQUIRE_GPU,
+            "gpu_enabled": OCR_CUDA_AVAILABLE,
+            "device": OCR_DEVICE,
+            "torch_version": torch.__version__,
+            "cuda_device": torch.cuda.get_device_name(0) if OCR_CUDA_AVAILABLE else None
         },
         "features": {
             "text_angle_classification": True,
             "multilingual_support": False,
-            "gpu_acceleration": OCR_USE_CUDA,
+            "gpu_acceleration": OCR_CUDA_AVAILABLE,
             "high_accuracy": True
         },
         "endpoints": [
