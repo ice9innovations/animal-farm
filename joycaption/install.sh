@@ -83,7 +83,7 @@ pip install --upgrade pip
 pip install --no-cache-dir "torch==$TORCH_VERSION" "torchvision==$TORCHVISION_VERSION" --index-url "$TORCH_INDEX_URL"
 pip install --no-cache-dir -r "$SCRIPT_DIR/requirements.txt"
 
-chmod +x "$SCRIPT_DIR/run.sh" "$SCRIPT_DIR/rest.sh" "$SCRIPT_DIR/joycaption.sh"
+chmod +x "$SCRIPT_DIR/run.sh" "$SCRIPT_DIR/rest.sh" "$SCRIPT_DIR/joycaption.sh" "$SCRIPT_DIR/download_model.sh"
 
 mkdir -p "$SCRIPT_DIR/services"
 cat > "$SCRIPT_DIR/services/joycaption-api.service" <<EOF

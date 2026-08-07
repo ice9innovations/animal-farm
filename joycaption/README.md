@@ -62,6 +62,19 @@ The install script chooses PyTorch wheels from the detected GPU. Compute capabil
 ./run.sh
 ```
 
+## Download model cache
+
+The service normally downloads the Hugging Face model on first startup. If the machine
+was restored after a crash, is configured with offline Hugging Face flags, or you want
+to prefill the cache before starting CUDA inference, run:
+
+```bash
+./download_model.sh
+```
+
+This uses `MODEL_ID` and `MODEL_DIR` from `.env`, sets `HF_HOME` to `MODEL_DIR`, and
+temporarily clears `HF_HUB_OFFLINE` and `TRANSFORMERS_OFFLINE` for the download.
+
 Systemd:
 
 ```bash
