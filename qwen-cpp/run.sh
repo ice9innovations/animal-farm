@@ -3,6 +3,8 @@ SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 source "$SCRIPT_DIR/.env"
 
 LLAMA_BIN="${LLAMA_SERVER_BIN}"
+LLAMA_BIN_DIR="$(dirname "$(realpath "$LLAMA_BIN")")"
+export LD_LIBRARY_PATH="$LLAMA_BIN_DIR:${LD_LIBRARY_PATH:-}"
 
 # Start llama-server in the background
 "$LLAMA_BIN" \
