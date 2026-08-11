@@ -129,29 +129,88 @@ class TRTFaceAnalyzer:
     Drop-in replacement for FaceAnalyzer with the same output format.
     """
 
-    def __init__(self, model_path: str, use_gpu: bool = True):
+    def __init__(
+        self,
+        model_path: str,
+        use_gpu: bool = True,
+        require_gpu: bool = False,
+        provider_order: Optional[List[str]] = None,
+    ):
         os.makedirs(TRT_CACHE_DIR, exist_ok=True)
 
-        if use_gpu:
-            providers = [
-                ('TensorrtExecutionProvider', {
-                    'device_id': 0,
-                    'trt_max_workspace_size': 1 << 27,  # 128MB
-                    'trt_fp16_enable': True,
-                    'trt_engine_cache_enable': True,
-                    'trt_engine_cache_path': os.path.abspath(TRT_CACHE_DIR),
-                }),
-                ('CUDAExecutionProvider', {'device_id': 0}),
-                'CPUExecutionProvider',
-            ]
-        else:
-            providers = ['CPUExecutionProvider']
+        available_providers = set(ort.get_available_providers())
+        if use_gpu and require_gpu:
+            gpu_providers = {"TensorrtExecutionProvider", "CUDAExecutionProvider"}
+            if not available_providers.intersection(gpu_providers):
+                raise RuntimeError(
+                    "GPU execution was required, but ONNX Runtime exposes no TensorRT/CUDA providers. "
+                    f"Available providers: {sorted(available_providers)}"
+                )
 
+        providers = self._build_providers(
+            use_gpu=use_gpu,
+            require_gpu=require_gpu,
+            provider_order=provider_order or ["cuda", "tensorrt", "cpu"],
+            available_providers=available_providers,
+        )
+
+        logger.info(f"ONNX Runtime available providers: {sorted(available_providers)}")
+        logger.info(f"ONNX Runtime requested providers: {providers}")
+        logger.info(f"Creating face ONNX Runtime session: {model_path}")
         self.session = ort.InferenceSession(model_path, providers=providers)
+        logger.info(f"Created face ONNX Runtime session with providers: {self.session.get_providers()}")
         self.input_name = self.session.get_inputs()[0].name
 
         actual_provider = self.session.get_providers()[0]
+        if use_gpu and require_gpu and actual_provider == "CPUExecutionProvider":
+            raise RuntimeError(
+                "GPU execution was required, but ONNX Runtime selected CPUExecutionProvider. "
+                f"Session providers: {self.session.get_providers()}"
+            )
+        self.provider = actual_provider
+        self.providers = self.session.get_providers()
         logger.info(f"✅ TRTFaceAnalyzer initialized — provider: {actual_provider}")
+
+    def _build_providers(
+        self,
+        use_gpu: bool,
+        require_gpu: bool,
+        provider_order: List[str],
+        available_providers: set,
+    ) -> List[Any]:
+        if not use_gpu:
+            return ["CPUExecutionProvider"]
+
+        providers: List[Any] = []
+        cache = os.path.abspath(TRT_CACHE_DIR)
+        normalized = [item.strip().lower() for item in provider_order if item.strip()]
+        for provider in normalized:
+            if provider in {"trt", "tensorrt"} and "TensorrtExecutionProvider" in available_providers:
+                providers.append(
+                    (
+                        "TensorrtExecutionProvider",
+                        {
+                            "device_id": 0,
+                            "trt_max_workspace_size": 1 << 27,
+                            "trt_fp16_enable": True,
+                            "trt_engine_cache_enable": True,
+                            "trt_engine_cache_path": cache,
+                        },
+                    )
+                )
+            elif provider == "cuda" and "CUDAExecutionProvider" in available_providers:
+                providers.append(("CUDAExecutionProvider", {"device_id": 0}))
+            elif provider == "cpu" and not require_gpu:
+                providers.append("CPUExecutionProvider")
+
+        if not providers:
+            if require_gpu:
+                raise RuntimeError(
+                    "GPU execution was required, but none of the requested GPU providers are available. "
+                    f"Requested order: {provider_order}; available providers: {sorted(available_providers)}"
+                )
+            providers.append("CPUExecutionProvider")
+        return providers
 
     def _preprocess(self, pil_image: Image.Image) -> Tuple[np.ndarray, int, int]:
         """Resize to 256×256, normalise to [0,1], return batch tensor + original dims."""

@@ -18,16 +18,9 @@ from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from PIL import Image
 import numpy as np
-import mediapipe as mp
 import requests
 from datetime import datetime
 from urllib.parse import urlparse
-from face_analyzer import FaceAnalyzer
-try:
-    from trt_face_analyzer import TRTFaceAnalyzer
-    _TRT_AVAILABLE = True
-except ImportError:
-    _TRT_AVAILABLE = False
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -140,9 +133,24 @@ CORS(app)
 
 # GPU configuration
 USE_GPU = os.getenv('USE_GPU', 'true').lower() == 'true'
+REQUIRE_GPU = os.getenv('REQUIRE_GPU', 'true').lower() == 'true'
+FACE_BACKEND = os.getenv('FACE_BACKEND', 'auto').strip().lower()
+ONNX_PROVIDER_ORDER = [
+    item.strip()
+    for item in os.getenv('ONNX_PROVIDER_ORDER', 'cuda,tensorrt,cpu').split(',')
+    if item.strip()
+]
+FACE_MODEL_PATH = os.getenv(
+    'FACE_MODEL_PATH',
+    os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'models', 'face', 'face_detection_back_256x256_float32.onnx'))
+)
 
 # Global face analyzer - initialize once at startup
 face_analyzer = None
+_analyzer_framework = "unknown"
+_analyzer_backend = "unknown"
+_analyzer_provider = None
+_analyzer_version = None
 
 # Configuration
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
@@ -161,21 +169,58 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def initialize_face_analyzer():
-    """Initialize face analyzer once at startup. Tries TRT first, falls back to MediaPipe."""
-    global face_analyzer
+    """Initialize face analyzer once at startup."""
+    global face_analyzer, _analyzer_framework, _analyzer_backend, _analyzer_provider, _analyzer_version
 
-    trt_model = os.path.join(os.path.dirname(__file__), '..', 'models', 'face', 'face_detection_back_256x256_float32.onnx')
+    valid_backends = {"auto", "onnx", "trt", "mediapipe"}
+    if FACE_BACKEND not in valid_backends:
+        logger.error(f"Invalid FACE_BACKEND={FACE_BACKEND!r}. Expected one of: {sorted(valid_backends)}")
+        return False
 
-    if USE_GPU and _TRT_AVAILABLE and os.path.exists(trt_model):
-        try:
-            logger.info("Initializing TRT Face Analyzer (GPU)...")
-            face_analyzer = TRTFaceAnalyzer(model_path=trt_model, use_gpu=True)
-            logger.info("✅ TRT Face Analyzer initialized successfully")
-            return True
-        except Exception as e:
-            logger.warning(f"⚠️ TRT Face Analyzer failed ({e}), falling back to MediaPipe")
+    prefer_onnx = FACE_BACKEND in {"auto", "onnx", "trt"}
+    allow_fallback = False
+
+    if prefer_onnx:
+        if not os.path.exists(FACE_MODEL_PATH):
+            message = f"BlazeFace ONNX model file missing: {FACE_MODEL_PATH}"
+            if not allow_fallback:
+                logger.error(message)
+                return False
+                logger.warning(message)
+        else:
+            try:
+                from trt_face_analyzer import TRTFaceAnalyzer
+
+                logger.info(
+                    "Initializing BlazeFace ONNX analyzer "
+                    f"({'GPU providers allowed' if USE_GPU else 'CPU only'})..."
+                )
+                face_analyzer = TRTFaceAnalyzer(
+                    model_path=FACE_MODEL_PATH,
+                    use_gpu=USE_GPU,
+                    require_gpu=REQUIRE_GPU,
+                    provider_order=ONNX_PROVIDER_ORDER,
+                )
+                _analyzer_framework = "BlazeFace ONNX Runtime"
+                _analyzer_backend = "onnx"
+                _analyzer_provider = getattr(face_analyzer, "provider", None)
+                try:
+                    import onnxruntime as ort
+                    _analyzer_version = ort.__version__
+                except Exception:
+                    _analyzer_version = None
+                logger.info(f"✅ BlazeFace ONNX analyzer initialized with provider: {_analyzer_provider}")
+                return True
+            except Exception as e:
+                if not allow_fallback:
+                    logger.error(f"BlazeFace ONNX analyzer failed: {e}")
+                    return False
+                logger.warning(f"BlazeFace ONNX analyzer failed: {e}")
 
     try:
+        from face_analyzer import FaceAnalyzer
+        import mediapipe as mp
+
         gpu_status = "GPU" if USE_GPU else "CPU"
         logger.info(f"Initializing MediaPipe Face Analyzer ({gpu_status})...")
         face_analyzer = FaceAnalyzer(
@@ -183,6 +228,10 @@ def initialize_face_analyzer():
             model_selection=1,
             use_gpu=USE_GPU
         )
+        _analyzer_framework = "MediaPipe Face Detection"
+        _analyzer_backend = "mediapipe"
+        _analyzer_provider = "mediapipe"
+        _analyzer_version = mp.__version__
         logger.info(f"✅ MediaPipe Face Analyzer initialized ({gpu_status})")
         return True
 
@@ -340,7 +389,11 @@ def create_face_response(data: dict, processing_time: float) -> dict:
         "predictions": predictions,
         "metadata": {
             "processing_time": round(processing_time, 3),
-            "model_info": {"framework": "MediaPipe"}
+            "model_info": {
+                "framework": _analyzer_framework,
+                "backend": _analyzer_backend,
+                "provider": _analyzer_provider,
+            }
         }
     }
 
@@ -363,11 +416,15 @@ def health_check():
             'models': {
                 'face_detection': {
                     'status': face_status,
-                    'version': mp.__version__,
-                    'model': 'MediaPipe Face Detection (Full Range)',
+                    'version': _analyzer_version,
+                    'model': _analyzer_framework,
+                    'backend': _analyzer_backend,
+                    'provider': _analyzer_provider,
                     'fairness': 'Tested across demographics',
                     'keypoints': 6,
-                    'gpu_enabled': USE_GPU
+                    'gpu_enabled': USE_GPU,
+                    'gpu_required': REQUIRE_GPU,
+                    'provider_order': ONNX_PROVIDER_ORDER,
                 }
             },
             'endpoints': [
@@ -395,7 +452,7 @@ def build_error_response(error_message, start_time, status_code):
         "error": {"message": error_message},
         "metadata": {
             "processing_time": round(time.time() - start_time, 3),
-            "model_info": {"framework": "MediaPipe"}
+            "model_info": {"framework": _analyzer_framework}
         }
     }), status_code
 
@@ -563,6 +620,7 @@ if __name__ == '__main__':
     
     logger.info(f"Starting Face Detection Service on {host}:{PORT}")
     logger.info(f"Private mode: {PRIVATE_MODE}")
-    logger.info("Using MediaPipe framework for dedicated face detection and facial keypoints")
+    logger.info(f"Backend: {_analyzer_backend}, Provider: {_analyzer_provider}")
+    logger.info("Dedicated face detection and facial keypoints")
     logger.info("V3 API available at /v3/analyze endpoint with V2 backward compatibility")
     app.run(host=host, port=PORT, debug=False)

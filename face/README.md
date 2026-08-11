@@ -1,19 +1,20 @@
 # Face Detection Service
 
 **Port**: 7772  
-**Framework**: MediaPipe  
+**Framework**: BlazeFace ONNX Runtime  
 **Purpose**: AI-powered face detection and facial analysis with fairness optimization  
 **Status**: ✅ Active
 
 ## Overview
 
-The Face service provides state-of-the-art face detection using Google's MediaPipe framework. The service analyzes images to detect human faces and extract facial keypoints with fairness optimizations across demographics.
+The Face service detects human faces and extracts six facial keypoints using the exported BlazeFace ONNX model through ONNX Runtime. GPU is the default configuration, with CUDA first and TensorRT available as an explicit provider choice.
 
 ## Features
 
 - **Modern V3 API**: Clean, unified endpoint with intuitive parameters
 - **Unified Input Handling**: Single endpoint for both URL and file path analysis
-- **MediaPipe Framework**: Google's production-ready computer vision models
+- **GPU-First ONNX Backend**: BlazeFace ONNX Runtime with CUDA/TensorRT providers
+- **Explicit Compatibility Mode**: MediaPipe is available only when `FACE_BACKEND=mediapipe` is set intentionally
 - **Fairness Optimization**: Tested across demographics to reduce bias
 - **Focused Analysis**: Dedicated face detection with facial keypoints
 - **High Performance**: Optimized model initialization and processing pipeline
@@ -34,23 +35,26 @@ The Face service provides state-of-the-art face detection using Google's MediaPi
 # Navigate to face directory
 cd /home/sd/animal-farm/face
 
-# Create virtual environment
-python3 -m venv face_venv
-
-# Activate virtual environment
-source face_venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
+# Install full dependencies into face/venv
+bash install.sh
 ```
 
-### 2. Dependency Installation
-
-Install the required Python packages:
+For desktop Nvidia GPU hosts such as RTX 3090/5090:
 
 ```bash
-# Core dependencies
-pip install flask flask-cors pillow opencv-python mediapipe python-dotenv requests numpy
+bash install_gpu_desktop.sh
+```
+
+For Jetson Orin hosts:
+
+```bash
+bash install_jetson.sh
+```
+
+For CPU-only hosts such as Raspberry Pi:
+
+```bash
+bash install_onnx_cpu.sh
 ```
 
 ## Configuration
@@ -67,6 +71,13 @@ PRIVATE=false               # Access mode (false=public, true=localhost-only)
 # Configuration Updates (GitHub-first pattern)
 AUTO_UPDATE=true           # Refresh emoji mappings from GitHub on startup
 TIMEOUT=5                  # Timeout for remote config downloads (seconds)
+
+# Backend settings
+FACE_BACKEND=auto
+FACE_MODEL_PATH=/home/sd/animal-farm/models/face/face_detection_back_256x256_float32.onnx
+USE_GPU=true
+REQUIRE_GPU=true
+ONNX_PROVIDER_ORDER=cuda,tensorrt,cpu
 ```
 
 ### Configuration Details
@@ -77,10 +88,33 @@ TIMEOUT=5                  # Timeout for remote config downloads (seconds)
 | `PRIVATE` | Yes | - | Access control (false=public, true=localhost-only) |
 | `AUTO_UPDATE` | Yes | - | Refresh emoji mappings from GitHub on startup, then cache locally |
 | `TIMEOUT` | Yes | - | Timeout for remote config downloads |
+| `FACE_BACKEND` | No | `auto` | `auto` and `onnx` use BlazeFace ONNX. `mediapipe` is an explicit compatibility mode only. |
+| `FACE_MODEL_PATH` | No | `../models/face/face_detection_back_256x256_float32.onnx` | BlazeFace ONNX model path |
+| `USE_GPU` | No | `true` | Allow ONNX Runtime GPU providers |
+| `REQUIRE_GPU` | No | `true` | Fail startup when `USE_GPU=true` but ONNX Runtime only exposes CPU providers |
+| `ONNX_PROVIDER_ORDER` | No | `cuda,tensorrt,cpu` | Comma-separated ONNX Runtime provider preference |
+| `FACE_VENV` | No | - | Optional virtualenv directory override for `run.sh`; default is `venv` |
+
+### Backend Matrix
+
+| Host type | Recommended settings | Notes |
+|-----------|----------------------|-------|
+| RTX 3090 / RTX 5090 | `FACE_BACKEND=onnx`, `USE_GPU=true`, `REQUIRE_GPU=true` | Run `install_gpu_desktop.sh` to install `onnxruntime-gpu` into `venv`. |
+| Jetson Orin | `FACE_BACKEND=onnx`, `USE_GPU=true`, `REQUIRE_GPU=true`, `ONNX_PROVIDER_ORDER=cuda,tensorrt,cpu` | Run `install_jetson.sh`; it installs JetPack-compatible `onnxruntime-gpu` separately and verifies TensorRT/CUDA providers. |
+| Raspberry Pi | `FACE_BACKEND=onnx`, `USE_GPU=false`, `REQUIRE_GPU=false` | Run `install_onnx_cpu.sh`; this avoids the MediaPipe dependency path. |
+| Compatibility mode | `FACE_BACKEND=mediapipe` | Uses the original MediaPipe implementation only when explicitly selected. |
+
+The ONNX backend requires `models/face/face_detection_back_256x256_float32.onnx`. There is no automatic MediaPipe fallback in the normal path. TensorRT can spend time building engines at startup; the default provider order is CUDA-first for fast service startup.
+
+To install the model from a known-good source:
+
+```bash
+FACE_MODEL_URL=<url-to-face_detection_back_256x256_float32.onnx> bash download_model.sh
+```
 
 ### Model Configuration
 
-The service uses MediaPipe models with optimized settings:
+The service uses the BlazeFace ONNX model by default and can use MediaPipe only for explicit compatibility testing:
 
 | Component | Configuration | Purpose |
 |-----------|---------------|---------|

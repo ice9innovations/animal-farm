@@ -3,7 +3,12 @@ FROM python:3.9-slim
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    FACE_BACKEND=auto \
+    FACE_MODEL_PATH=/models/face/face_detection_back_256x256_float32.onnx \
+    USE_GPU=true \
+    REQUIRE_GPU=true \
+    ONNX_PROVIDER_ORDER=cuda,tensorrt,cpu
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
@@ -26,6 +31,11 @@ WORKDIR /usr/src/app
 
 COPY requirements.txt ./
 RUN pip3 install --no-cache-dir -r requirements.txt
+ARG ORT_PACKAGE=""
+RUN if [ -n "$ORT_PACKAGE" ]; then \
+      pip3 uninstall -y onnxruntime onnxruntime-gpu && \
+      pip3 install --no-cache-dir "$ORT_PACKAGE"; \
+    fi
 
 COPY . .
 

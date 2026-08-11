@@ -405,10 +405,21 @@ services:
     build:
       context: ./face
       dockerfile: Dockerfile
+      args:
+        ORT_PACKAGE: "${FACE_ORT_PACKAGE:-}"
     container_name: face
     environment:
       PORT: "7772"
       PRIVATE: "false"
+      AUTO_UPDATE: "true"
+      TIMEOUT: "2.0"
+      FACE_BACKEND: "auto"
+      FACE_MODEL_PATH: "/models/face/face_detection_back_256x256_float32.onnx"
+      USE_GPU: "true"
+      REQUIRE_GPU: "true"
+      ONNX_PROVIDER_ORDER: "cuda,tensorrt,cpu"
+    volumes:
+      - ./models:/models:ro
     ports:
       - "7772:7772"
     healthcheck:
