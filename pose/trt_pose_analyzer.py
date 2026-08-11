@@ -146,8 +146,9 @@ class TRTPoseAnalyzer:
         self.det_input    = self.det_session.get_inputs()[0].name
         self.lm_input     = self.lm_session.get_inputs()[0].name
 
-        provider = self.det_session.get_providers()[0]
-        logger.info(f"✅ TRTPoseAnalyzer (detection + landmark) — provider: {provider}")
+        self.provider = self.det_session.get_providers()[0]
+        self.providers = self.det_session.get_providers()
+        logger.info(f"✅ TRTPoseAnalyzer (detection + landmark) — provider: {self.provider}")
 
     # ------------------------------------------------------------------
     # Stage 1: detect person → compute aligned ROI

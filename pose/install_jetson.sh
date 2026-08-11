@@ -5,8 +5,9 @@
 #   - Uses pose_venv (not venv) to match pose.sh
 #   - Pins numpy<2 (Jetson ONNX wheel requires NumPy 1.x ABI)
 #   - Uses opencv-python 4.9 (opencv 4.12 requires numpy>=2)
+#   - Uses requirements-jetson.txt to avoid desktop MediaPipe/ONNX Runtime pins
 #   - Installs onnxruntime-gpu from Jetson index (PyPI wheel lacks nvgpu support)
-#   - Copies pre-configured services/pose-api.service instead of generating one
+#   - Generates a systemd service for this checkout path
 #
 # Usage:
 #   bash install_jetson.sh
@@ -17,23 +18,50 @@ set -e
 
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 VENV="$SCRIPT_DIR/pose_venv"
-SERVICE_SRC="$SCRIPT_DIR/services/pose-api.service"
+SERVICE_SRC="$SCRIPT_DIR/pose-api.service"
+CURRENT_USER="$(whoami)"
+JETSON_ORT_INDEX="${JETSON_ORT_INDEX:-https://pypi.jetson-ai-lab.io/jp6/cu126}"
+JETSON_ORT_PACKAGE="${JETSON_ORT_PACKAGE:-onnxruntime-gpu}"
 
 rm -rf "$VENV"
 python3 -m venv "$VENV"
 
 "$VENV/bin/pip" install --upgrade pip
 
-# Install requirements (already pins numpy<2 and opencv-python==4.9.0.80)
-"$VENV/bin/pip" install --no-cache-dir -r "$SCRIPT_DIR/requirements.txt"
+# Install service requirements without the desktop onnxruntime / mediapipe pins.
+"$VENV/bin/pip" install --no-cache-dir -r "$SCRIPT_DIR/requirements-jetson.txt"
 
-# Replace PyPI onnxruntime with Jetson GPU wheel (supports nvgpu / TensorRT)
+# Install Jetson GPU ONNX Runtime separately. Leave the package unpinned by default
+# because available versions vary by JetPack image and Python minor version.
 "$VENV/bin/pip" uninstall -y onnxruntime onnxruntime-gpu 2>/dev/null || true
-"$VENV/bin/pip" install --no-cache-dir onnxruntime-gpu \
-    --index-url https://pypi.jetson-ai-lab.io/jp6/cu126
+"$VENV/bin/pip" install --no-cache-dir "$JETSON_ORT_PACKAGE" \
+    --index-url "$JETSON_ORT_INDEX"
 
 echo ""
 echo "pose_venv ready."
+
+cat > "$SERVICE_SRC" <<EOF
+[Unit]
+Description=Pose Estimation REST API Service
+After=network.target
+StartLimitBurst=3
+StartLimitIntervalSec=300
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+User=$CURRENT_USER
+Group=$CURRENT_USER
+WorkingDirectory=$SCRIPT_DIR
+ExecStart=$SCRIPT_DIR/pose.sh
+EnvironmentFile=$SCRIPT_DIR/.env
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
 
 if [ "$(id -u)" = "0" ]; then
     cp "$SERVICE_SRC" /etc/systemd/system/pose-api.service

@@ -17,16 +17,9 @@ from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from PIL import Image
 import numpy as np
-import mediapipe as mp
 import requests
 from datetime import datetime
 from urllib.parse import urlparse
-from pose_analyzer import PoseAnalyzer
-try:
-    from trt_pose_analyzer import TRTPoseAnalyzer
-    _TRT_AVAILABLE = True
-except ImportError:
-    _TRT_AVAILABLE = False
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -56,6 +49,15 @@ POSE_MIN_TRACKING_CONFIDENCE = float(os.getenv('POSE_MIN_TRACKING_CONFIDENCE', '
 POSE_MODEL_COMPLEXITY = int(os.getenv('POSE_MODEL_COMPLEXITY', '2'))
 ENABLE_SEGMENTATION = os.getenv('ENABLE_SEGMENTATION', 'false').lower() == 'true'
 USE_GPU = os.getenv('USE_GPU', 'true').lower() == 'true'
+POSE_BACKEND = os.getenv('POSE_BACKEND', 'auto').strip().lower()
+POSE_DETECTION_MODEL = os.getenv(
+    'POSE_DETECTION_MODEL',
+    os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'models', 'pose', 'pose_detection.onnx'))
+)
+POSE_LANDMARK_MODEL = os.getenv(
+    'POSE_LANDMARK_MODEL',
+    os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'models', 'pose', 'pose_landmark_heavy.onnx'))
+)
 
 # Global emoji mappings - loaded from API on startup
 emoji_mappings = {}
@@ -141,6 +143,9 @@ CORS(app)
 # Global pose analyzer - initialize once at startup
 pose_analyzer = None
 _analyzer_framework = "MediaPipe Pose"
+_analyzer_backend = "unknown"
+_analyzer_provider = None
+_analyzer_version = None
 
 # Configuration
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
@@ -170,27 +175,62 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def initialize_pose_analyzer():
-    """Initialize pose analyzer once at startup. Tries TRT first, falls back to MediaPipe."""
-    global pose_analyzer, _analyzer_framework
+    """Initialize pose analyzer once at startup."""
+    global pose_analyzer, _analyzer_framework, _analyzer_backend, _analyzer_provider, _analyzer_version
 
-    trt_detection = os.path.join(os.path.dirname(__file__), '..', 'models', 'pose', 'pose_detection.onnx')
-    trt_landmark  = os.path.join(os.path.dirname(__file__), '..', 'models', 'pose', 'pose_landmark_heavy.onnx')
+    valid_backends = {"auto", "onnx", "trt", "mediapipe"}
+    if POSE_BACKEND not in valid_backends:
+        logger.error(f"Invalid POSE_BACKEND={POSE_BACKEND!r}. Expected one of: {sorted(valid_backends)}")
+        return False
 
-    if USE_GPU and _TRT_AVAILABLE and os.path.exists(trt_detection) and os.path.exists(trt_landmark):
-        try:
-            logger.info("Initializing TRT Pose Analyzer (GPU)...")
-            pose_analyzer = TRTPoseAnalyzer(
-                detection_model_path=trt_detection,
-                landmark_model_path=trt_landmark,
-                use_gpu=True
-            )
-            _analyzer_framework = "BlazePose TRT"
-            logger.info("✅ TRT Pose Analyzer initialized successfully")
-            return True
-        except Exception as e:
-            logger.warning(f"⚠️ TRT Pose Analyzer failed ({e}), falling back to MediaPipe")
+    prefer_onnx = POSE_BACKEND in {"auto", "onnx", "trt"}
+    allow_fallback = POSE_BACKEND == "auto"
+
+    if prefer_onnx:
+        missing_models = [
+            path for path in (POSE_DETECTION_MODEL, POSE_LANDMARK_MODEL)
+            if not os.path.exists(path)
+        ]
+        if missing_models:
+            message = f"BlazePose ONNX model file(s) missing: {missing_models}"
+            if not allow_fallback:
+                logger.error(message)
+                return False
+            logger.warning(f"{message}; falling back to MediaPipe")
+        else:
+            try:
+                from trt_pose_analyzer import TRTPoseAnalyzer
+
+                logger.info(
+                    "Initializing BlazePose ONNX analyzer "
+                    f"({'GPU providers allowed' if USE_GPU else 'CPU only'})..."
+                )
+                pose_analyzer = TRTPoseAnalyzer(
+                    detection_model_path=POSE_DETECTION_MODEL,
+                    landmark_model_path=POSE_LANDMARK_MODEL,
+                    use_gpu=USE_GPU
+                )
+                provider = getattr(pose_analyzer, "provider", None)
+                _analyzer_framework = "BlazePose ONNX Runtime"
+                _analyzer_backend = "onnx"
+                _analyzer_provider = provider
+                try:
+                    import onnxruntime as ort
+                    _analyzer_version = ort.__version__
+                except Exception:
+                    _analyzer_version = None
+                logger.info(f"✅ BlazePose ONNX analyzer initialized with provider: {provider}")
+                return True
+            except Exception as e:
+                if not allow_fallback:
+                    logger.error(f"BlazePose ONNX analyzer failed: {e}")
+                    return False
+                logger.warning(f"BlazePose ONNX analyzer failed ({e}), falling back to MediaPipe")
 
     try:
+        from pose_analyzer import PoseAnalyzer
+        import mediapipe as mp
+
         gpu_status = "GPU" if USE_GPU else "CPU"
         logger.info(f"Initializing MediaPipe Pose Analyzer ({gpu_status})...")
         pose_analyzer = PoseAnalyzer(
@@ -201,6 +241,9 @@ def initialize_pose_analyzer():
             use_gpu=USE_GPU
         )
         _analyzer_framework = "MediaPipe Pose"
+        _analyzer_backend = "mediapipe"
+        _analyzer_provider = "mediapipe"
+        _analyzer_version = mp.__version__
         logger.info(f"✅ MediaPipe Pose Analyzer initialized ({gpu_status})")
         return True
 
@@ -357,7 +400,11 @@ def create_pose_response(pose_data: dict, processing_time: float) -> dict:
         "predictions": enhanced_predictions,
         "metadata": {
             "processing_time": round(processing_time, 3),
-            "model_info": {"framework": _analyzer_framework}
+            "model_info": {
+                "framework": _analyzer_framework,
+                "backend": _analyzer_backend,
+                "provider": _analyzer_provider
+            }
         }
     }
 
@@ -394,8 +441,10 @@ def health_check():
             'models': {
                 'pose_estimation': {
                     'status': pose_status,
-                    'version': mp.__version__,
-                    'model': 'MediaPipe Pose',
+                    'version': _analyzer_version,
+                    'model': _analyzer_framework,
+                    'backend': _analyzer_backend,
+                    'provider': _analyzer_provider,
                     'landmarks': 33,
                     'complexity': POSE_MODEL_COMPLEXITY,
                     'gpu_enabled': USE_GPU
@@ -438,7 +487,7 @@ def analyze():
                     "error": {"message": "No file provided in POST request"},
                     "metadata": {
                         "processing_time": round(time.time() - start_time, 3),
-                        "model_info": {"framework": "MediaPipe Pose"}
+                        "model_info": {"framework": _analyzer_framework}
                     }
                 }), 400
             
@@ -451,7 +500,7 @@ def analyze():
                     "error": {"message": "No file selected"},
                     "metadata": {
                         "processing_time": round(time.time() - start_time, 3),
-                        "model_info": {"framework": "MediaPipe Pose"}
+                        "model_info": {"framework": _analyzer_framework}
                     }
                 }), 400
             
@@ -468,7 +517,7 @@ def analyze():
                     "error": {"message": f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB"},
                     "metadata": {
                         "processing_time": round(time.time() - start_time, 3),
-                        "model_info": {"framework": "MediaPipe Pose"}
+                        "model_info": {"framework": _analyzer_framework}
                     }
                 }), 400
             
@@ -485,7 +534,7 @@ def analyze():
                     "error": {"message": f"Failed to load uploaded image: {str(e)}"},
                     "metadata": {
                         "processing_time": round(time.time() - start_time, 3),
-                        "model_info": {"framework": "MediaPipe Pose"}
+                        "model_info": {"framework": _analyzer_framework}
                     }
                 }), 400
         
@@ -503,7 +552,7 @@ def analyze():
                     "error": {"message": "Must provide either 'url' or 'file' parameter"},
                     "metadata": {
                         "processing_time": round(time.time() - start_time, 3),
-                        "model_info": {"framework": "MediaPipe Pose"}
+                        "model_info": {"framework": _analyzer_framework}
                     }
                 }), 400
             
@@ -515,7 +564,7 @@ def analyze():
                     "error": {"message": "Cannot provide both 'url' and 'file' parameters - choose one"},
                     "metadata": {
                         "processing_time": round(time.time() - start_time, 3),
-                        "model_info": {"framework": "MediaPipe Pose"}
+                        "model_info": {"framework": _analyzer_framework}
                     }
                 }), 400
             
@@ -533,7 +582,7 @@ def analyze():
                     "error": {"message": str(e)},
                     "metadata": {
                         "processing_time": round(time.time() - start_time, 3),
-                        "model_info": {"framework": "MediaPipe Pose"}
+                        "model_info": {"framework": _analyzer_framework}
                     }
                 }), 400
         
@@ -550,7 +599,7 @@ def analyze():
                 "error": {"message": result['error']},
                 "metadata": {
                     "processing_time": round(processing_time, 3),
-                    "model_info": {"framework": "MediaPipe Pose"}
+                    "model_info": {"framework": _analyzer_framework}
                 }
             }), 500
         
@@ -565,7 +614,7 @@ def analyze():
             'predictions': [],
             'metadata': {
                 'processing_time': round(time.time() - start_time, 3),
-                'model_info': {'framework': 'MediaPipe Pose'}
+                'model_info': {'framework': _analyzer_framework}
             },
             'error': {'message': str(e)}
         }), 500
@@ -624,6 +673,7 @@ if __name__ == '__main__':
     
     logger.info(f"Starting Pose Analysis Service on {host}:{PORT}")
     logger.info(f"Private mode: {PRIVATE_MODE}")
+    logger.info(f"Backend: {_analyzer_backend}, Provider: {_analyzer_provider}")
     logger.info(f"Model complexity: {POSE_MODEL_COMPLEXITY}, Segmentation: {ENABLE_SEGMENTATION}")
     logger.info("Dedicated pose estimation service with enhanced pose classification")
     logger.info("Unified /analyze endpoint with V2/V3 backward compatibility")

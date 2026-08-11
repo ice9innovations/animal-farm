@@ -5,6 +5,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     CUDA_VISIBLE_DEVICES=0 \
+    POSE_BACKEND=auto \
+    POSE_DETECTION_MODEL=/models/pose/pose_detection.onnx \
+    POSE_LANDMARK_MODEL=/models/pose/pose_landmark_heavy.onnx \
     LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/lib:$LD_LIBRARY_PATH \
     PATH=/usr/local/cuda/bin:$PATH
 
@@ -38,9 +41,14 @@ WORKDIR /usr/src/app
 
 COPY requirements.txt ./
 RUN pip3 install --no-cache-dir -r requirements.txt
+ARG ORT_PACKAGE=""
+RUN if [ -n "$ORT_PACKAGE" ]; then \
+      pip3 uninstall -y onnxruntime onnxruntime-gpu && \
+      pip3 install --no-cache-dir "$ORT_PACKAGE"; \
+    fi
 
 # Copy only essential application files
-COPY REST.py pose_analyzer.py .env ./
+COPY REST.py pose_analyzer.py trt_pose_analyzer.py .env ./
 
 EXPOSE 7786
 

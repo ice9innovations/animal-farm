@@ -1,13 +1,13 @@
 # Pose Estimation Service
 
 **Port**: 7786  
-**Framework**: Google MediaPipe Pose  
+**Framework**: BlazePose ONNX Runtime or Google MediaPipe Pose  
 **Purpose**: Human pose landmark detection and joint angle analysis  
 **Status**: ✅ Active
 
 ## Overview
 
-MediaPipe Pose provides precise human pose estimation using Google's MediaPipe framework. The service analyzes images to detect 33 body landmarks with 3D coordinates and calculates joint angles for pose reconstruction. Optimized for reliability over speculation - returns only accurate MediaPipe data.
+The service analyzes images to detect 33 body landmarks with 3D coordinates and calculates joint angles for pose reconstruction. It can run the same exported BlazePose ONNX estimator across heterogeneous hosts while selecting the best local ONNX Runtime execution provider available: TensorRT/CUDA on Nvidia machines, or CPU on smaller hosts such as Raspberry Pi. MediaPipe remains available as an explicit backend or automatic fallback.
 
 ## Features
 
@@ -15,7 +15,8 @@ MediaPipe Pose provides precise human pose estimation using Google's MediaPipe f
 - **33 Body Landmarks**: Full-body pose detection with 3D coordinates and visibility scores
 - **Joint Angle Analysis**: Elbow and knee angle calculations for pose reconstruction
 - **Unified Input Handling**: Single endpoint for both URL and file path analysis
-- **MediaPipe Precision**: Reliable landmark data without speculative classifications
+- **Portable BlazePose ONNX Backend**: Same estimator can run on Nvidia GPU hosts and CPU-only hosts
+- **MediaPipe Fallback**: Optional backend for compatibility with older deployments
 - **Security**: File validation, size limits, secure cleanup
 - **Performance**: Optimized processing with configurable model complexity
 - **Optional Segmentation**: MediaPipe body segmentation can be enabled explicitly, but it is off by default and not returned by the current API
@@ -40,8 +41,26 @@ python3 -m venv pose_venv
 # Activate virtual environment
 source pose_venv/bin/activate
 
-# Install dependencies
+# Install full dependencies, including MediaPipe fallback
 pip install -r requirements.txt
+```
+
+For CPU-only hosts where MediaPipe wheels are unavailable or unnecessary, use the ONNX-only install:
+
+```bash
+bash install_onnx_cpu.sh
+```
+
+For Jetson Orin hosts, use the Jetson installer so ONNX Runtime comes from the JetPack-compatible wheel index:
+
+```bash
+bash install_jetson.sh
+```
+
+If the Jetson wheel index changes or your JetPack image needs a specific ONNX Runtime build, override the package or index:
+
+```bash
+JETSON_ORT_PACKAGE=onnxruntime-gpu JETSON_ORT_INDEX=https://pypi.jetson-ai-lab.io/jp6/cu126 bash install_jetson.sh
 ```
 
 ### 2. Service Configuration
@@ -71,7 +90,13 @@ PRIVATE=false                              # Access mode (false=public, true=loc
 AUTO_UPDATE=true                          # Refresh emoji mappings from GitHub on startup
 TIMEOUT=2.0                               # Network timeout for mapping fetches (seconds)
 
-# MediaPipe Pose Settings
+# Pose Backend Settings
+POSE_BACKEND=auto                         # auto, onnx, trt, or mediapipe
+POSE_DETECTION_MODEL=/home/sd/animal-farm/models/pose/pose_detection.onnx
+POSE_LANDMARK_MODEL=/home/sd/animal-farm/models/pose/pose_landmark_heavy.onnx
+USE_GPU=true                              # Allow ONNX Runtime GPU providers when available
+
+# Pose Analysis Settings
 POSE_MIN_DETECTION_CONFIDENCE=0.5         # Minimum detection confidence (0.0-1.0)
 POSE_MIN_TRACKING_CONFIDENCE=0.5          # Minimum tracking confidence (0.0-1.0)
 POSE_MODEL_COMPLEXITY=2                   # Model complexity (0=lite, 1=full, 2=heavy)
@@ -79,7 +104,6 @@ ENABLE_SEGMENTATION=false                 # Optional MediaPipe body segmentation
 
 # File Processing
 MAX_FILE_SIZE=33554432                    # Maximum file size in bytes (32MB default)
-USE_GPU=true                              # Allow MediaPipe GPU-backed execution when available
 ```
 
 ### Configuration Details
@@ -90,9 +114,29 @@ USE_GPU=true                              # Allow MediaPipe GPU-backed execution
 | `PRIVATE` | Yes | - | Access control (false=public, true=localhost-only) |
 | `AUTO_UPDATE` | No | `true` | Refresh emoji mappings from GitHub on startup, then cache locally |
 | `TIMEOUT` | No | `2.0` | Network timeout for remote mapping fetches |
+| `POSE_BACKEND` | No | `auto` | `auto` tries BlazePose ONNX first, then MediaPipe. `onnx` and `trt` require the ONNX backend. `mediapipe` requires MediaPipe. |
+| `POSE_DETECTION_MODEL` | No | `../models/pose/pose_detection.onnx` | BlazePose detector ONNX model path |
+| `POSE_LANDMARK_MODEL` | No | `../models/pose/pose_landmark_heavy.onnx` | BlazePose landmark ONNX model path |
 | `POSE_MODEL_COMPLEXITY` | No | 2 | Model accuracy (0=fastest, 2=most accurate) |
 | `ENABLE_SEGMENTATION` | No | `false` | Enable MediaPipe body segmentation internally |
-| `USE_GPU` | No | `true` | Allow MediaPipe GPU-backed execution when available |
+| `USE_GPU` | No | `true` | Allow ONNX Runtime TensorRT/CUDA providers when available; set `false` for CPU-only hosts |
+
+### Backend Matrix
+
+| Host type | Recommended settings | Notes |
+|-----------|----------------------|-------|
+| RTX 3090 / RTX 5090 | `POSE_BACKEND=onnx`, `USE_GPU=true` | Install or build with `onnxruntime-gpu`; ONNX Runtime will use TensorRT/CUDA providers when available. |
+| Jetson Orin | `POSE_BACKEND=onnx`, `USE_GPU=true` | Run `install_jetson.sh`; it uses `requirements-jetson.txt` and installs JetPack-compatible `onnxruntime-gpu` separately. |
+| Raspberry Pi | `POSE_BACKEND=onnx`, `USE_GPU=false` | Run `install_onnx_cpu.sh`; this avoids the MediaPipe dependency path. |
+| Compatibility fallback | `POSE_BACKEND=mediapipe` | Uses the original MediaPipe implementation where available. |
+
+For Docker, the default build uses the package pinned in `requirements.txt`. On Nvidia hosts that should use ONNX Runtime GPU, build with an override such as:
+
+```bash
+docker build --build-arg ORT_PACKAGE=onnxruntime-gpu==1.23.0 -t animal-farm-pose ./pose
+```
+
+Mount the repo-level models directory at `/models`, as shown in the root `docker-compose.yaml`.
 
 ### Model Complexity Options
 
@@ -119,7 +163,9 @@ GET /health
   "models": {
     "pose_estimation": {
       "status": "ready",
-      "model": "MediaPipe Pose",
+      "model": "BlazePose ONNX Runtime",
+      "backend": "onnx",
+      "provider": "CPUExecutionProvider",
       "landmarks": 33,
       "complexity": 2
     }
@@ -212,7 +258,9 @@ curl -X POST -F "file=@image.jpg" "http://localhost:7786/analyze"
   "metadata": {
     "processing_time": 0.101,
     "model_info": {
-      "framework": "MediaPipe Pose"
+      "framework": "BlazePose ONNX Runtime",
+      "backend": "onnx",
+      "provider": "CPUExecutionProvider"
     }
   }
 }
@@ -236,7 +284,9 @@ The `pose.sh` script handles virtual environment activation and service startup:
 #!/bin/bash
 cd "$(dirname "$0")"
 source pose_venv/bin/activate
+set -a
 source .env
+set +a
 python REST.py
 ```
 

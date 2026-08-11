@@ -378,6 +378,8 @@ services:
     build:
       context: ./pose
       dockerfile: Dockerfile
+      args:
+        ORT_PACKAGE: "${POSE_ORT_PACKAGE:-}"
     container_name: pose
     environment:
       PORT: "7786"
@@ -386,6 +388,11 @@ services:
       POSE_MIN_DETECTION_CONFIDENCE: "0.5"
       POSE_MIN_TRACKING_CONFIDENCE: "0.5"
       ENABLE_SEGMENTATION: "true"
+      POSE_BACKEND: "auto"
+      POSE_DETECTION_MODEL: "/models/pose/pose_detection.onnx"
+      POSE_LANDMARK_MODEL: "/models/pose/pose_landmark_heavy.onnx"
+    volumes:
+      - ./models:/models:ro
     ports:
       - "7786:7786"
     healthcheck:
