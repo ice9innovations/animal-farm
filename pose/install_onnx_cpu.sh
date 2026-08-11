@@ -6,8 +6,22 @@ set -e
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 VENV="$SCRIPT_DIR/venv"
 
+if [ -z "${PYTHON_BIN:-}" ]; then
+    for candidate in python3.11 python3.10 python3; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            PYTHON_BIN="$candidate"
+            break
+        fi
+    done
+fi
+
+if [ -z "${PYTHON_BIN:-}" ] || ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'; then
+    echo "install_onnx_cpu.sh requires Python >= 3.10. Set PYTHON_BIN=/path/to/python3.10+ if needed." >&2
+    exit 1
+fi
+
 rm -rf "$VENV"
-python3 -m venv "$VENV"
+"$PYTHON_BIN" -m venv "$VENV"
 
 "$VENV/bin/pip" install --upgrade pip
 "$VENV/bin/pip" install --no-cache-dir -r "$SCRIPT_DIR/requirements-onnx.txt"
