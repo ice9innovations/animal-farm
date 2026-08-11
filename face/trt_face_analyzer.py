@@ -26,6 +26,9 @@ from PIL import Image
 logger = logging.getLogger(__name__)
 
 MODEL_INPUT_SIZE = 256
+E2E_MODEL_INPUT_SIZE = 128
+CONF_THRESHOLD = 0.5
+MAX_DETECTIONS = 25
 TRT_CACHE_DIR = os.path.join(os.path.dirname(__file__), '..', 'models', 'trt_cache')
 
 # Score threshold before NMS
@@ -159,7 +162,9 @@ class TRTFaceAnalyzer:
         logger.info(f"Creating face ONNX Runtime session: {model_path}")
         self.session = ort.InferenceSession(model_path, providers=providers)
         logger.info(f"Created face ONNX Runtime session with providers: {self.session.get_providers()}")
+        self.inputs = {item.name: item for item in self.session.get_inputs()}
         self.input_name = self.session.get_inputs()[0].name
+        self.model_format = self._detect_model_format()
 
         actual_provider = self.session.get_providers()[0]
         if use_gpu and require_gpu and actual_provider == "CPUExecutionProvider":
@@ -169,7 +174,13 @@ class TRTFaceAnalyzer:
             )
         self.provider = actual_provider
         self.providers = self.session.get_providers()
-        logger.info(f"✅ TRTFaceAnalyzer initialized — provider: {actual_provider}")
+        logger.info(f"✅ TRTFaceAnalyzer initialized — provider: {actual_provider}, format: {self.model_format}")
+
+    def _detect_model_format(self) -> str:
+        input_names = set(self.inputs)
+        if {"image", "conf_threshold", "max_detections", "iou_threshold"}.issubset(input_names):
+            return "end_to_end_blazeface"
+        return "mediapipe_blazeface_back"
 
     def _build_providers(
         self,
@@ -219,6 +230,14 @@ class TRTFaceAnalyzer:
         arr = np.array(img, dtype=np.float32) / 255.0  # [256, 256, 3]
         return np.expand_dims(arr, 0), orig_w, orig_h   # [1, 256, 256, 3]
 
+    def _preprocess_end_to_end(self, pil_image: Image.Image) -> Tuple[np.ndarray, int, int]:
+        """Resize to 128x128, normalise to [0,1], return NCHW tensor + original dims."""
+        orig_w, orig_h = pil_image.size
+        img = pil_image.resize((E2E_MODEL_INPUT_SIZE, E2E_MODEL_INPUT_SIZE), Image.BILINEAR)
+        arr = np.asarray(img, dtype=np.float32) / 255.0
+        arr = np.transpose(arr, (2, 0, 1))[np.newaxis]
+        return np.ascontiguousarray(arr), orig_w, orig_h
+
     def analyze_faces_from_image(self, pil_image: Image.Image) -> Dict[str, Any]:
         """
         Detect faces in a PIL RGB image.
@@ -227,6 +246,9 @@ class TRTFaceAnalyzer:
         orig_w, orig_h = pil_image.size
 
         try:
+            if self.model_format == "end_to_end_blazeface":
+                return self._analyze_end_to_end(pil_image)
+
             inp, orig_w, orig_h = self._preprocess(pil_image)
             outputs = self.session.run(None, {self.input_name: inp})
 
@@ -291,3 +313,56 @@ class TRTFaceAnalyzer:
         except Exception as e:
             logger.error(f"TRT face detection error: {e}")
             return {'faces': [], 'dimensions': {'width': orig_w, 'height': orig_h}}
+
+    def _analyze_end_to_end(self, pil_image: Image.Image) -> Dict[str, Any]:
+        orig_w, orig_h = pil_image.size
+        inp, orig_w, orig_h = self._preprocess_end_to_end(pil_image)
+        outputs = self.session.run(
+            None,
+            {
+                "image": inp.astype(np.float32),
+                "conf_threshold": np.array([CONF_THRESHOLD], dtype=np.float32),
+                "max_detections": np.array([MAX_DETECTIONS], dtype=np.int64),
+                "iou_threshold": np.array([IOU_THRESHOLD], dtype=np.float32),
+            },
+        )
+
+        boxes = outputs[0][0]
+        if boxes.ndim == 1:
+            boxes = boxes.reshape(1, 16)
+        if boxes.size == 0:
+            return {'faces': [], 'dimensions': {'width': orig_w, 'height': orig_h}}
+
+        scores = outputs[1][0] if len(outputs) > 1 else np.ones(len(boxes), dtype=np.float32)
+        faces = []
+        for det, score in zip(boxes, scores):
+            (
+                top_y, top_x, bot_y, bot_x,
+                ley_x, ley_y, rey_x, rey_y,
+                nose_x, nose_y, mou_x, mou_y,
+                lea_x, lea_y, rea_x, rea_y,
+            ) = det
+            x1 = int(top_x * orig_w)
+            y1 = int(top_y * orig_h)
+            x2 = int(bot_x * orig_w)
+            y2 = int(bot_y * orig_h)
+            w = max(0, x2 - x1)
+            h = max(0, y2 - y1)
+            if w < 5 or h < 5:
+                continue
+
+            faces.append({
+                'bbox': [x1, y1, w, h],
+                'confidence': round(float(score), 3),
+                'keypoints': {
+                    'left_eye': [int(ley_x * orig_w), int(ley_y * orig_h)],
+                    'right_eye': [int(rey_x * orig_w), int(rey_y * orig_h)],
+                    'nose_tip': [int(nose_x * orig_w), int(nose_y * orig_h)],
+                    'mouth_center': [int(mou_x * orig_w), int(mou_y * orig_h)],
+                    'left_ear_tragion': [int(lea_x * orig_w), int(lea_y * orig_h)],
+                    'right_ear_tragion': [int(rea_x * orig_w), int(rea_y * orig_h)],
+                },
+                'method': 'blazeface_onnx',
+            })
+
+        return {'faces': faces, 'dimensions': {'width': orig_w, 'height': orig_h}}

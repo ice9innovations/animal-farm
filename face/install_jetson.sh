@@ -20,7 +20,7 @@ SERVICE_SRC="$SCRIPT_DIR/face-api.service"
 CURRENT_USER="$(whoami)"
 JETSON_ORT_INDEX="${JETSON_ORT_INDEX:-https://pypi.jetson-ai-lab.io/jp6/cu126}"
 JETSON_ORT_PACKAGE="${JETSON_ORT_PACKAGE:-onnxruntime-gpu}"
-FACE_MODEL_PATH="${FACE_MODEL_PATH:-$SCRIPT_DIR/../models/face/face_detection_back_256x256_float32.onnx}"
+FACE_MODEL_PATH="${FACE_MODEL_PATH:-$SCRIPT_DIR/../models/face/blaze.onnx}"
 
 set_env_value() {
     local key="$1"
@@ -82,9 +82,7 @@ set_env_value "USE_GPU" "true"
 set_env_value "REQUIRE_GPU" "true"
 set_env_value "ONNX_PROVIDER_ORDER" "cuda,tensorrt,cpu"
 if [ ! -f "$FACE_MODEL_PATH" ]; then
-    echo ""
-    echo "Warning: Face ONNX model is missing: $FACE_MODEL_PATH" >&2
-    echo "The service will not start with FACE_BACKEND=onnx until this model exists." >&2
+    FACE_MODEL_PATH="$FACE_MODEL_PATH" "$SCRIPT_DIR/download_model.sh"
 fi
 
 cat > "$SERVICE_SRC" <<EOF

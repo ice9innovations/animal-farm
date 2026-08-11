@@ -74,7 +74,7 @@ TIMEOUT=5                  # Timeout for remote config downloads (seconds)
 
 # Backend settings
 FACE_BACKEND=auto
-FACE_MODEL_PATH=/home/sd/animal-farm/models/face/face_detection_back_256x256_float32.onnx
+FACE_MODEL_PATH=/home/sd/animal-farm/models/face/blaze.onnx
 USE_GPU=true
 REQUIRE_GPU=true
 ONNX_PROVIDER_ORDER=cuda,tensorrt,cpu
@@ -89,7 +89,8 @@ ONNX_PROVIDER_ORDER=cuda,tensorrt,cpu
 | `AUTO_UPDATE` | Yes | - | Refresh emoji mappings from GitHub on startup, then cache locally |
 | `TIMEOUT` | Yes | - | Timeout for remote config downloads |
 | `FACE_BACKEND` | No | `auto` | `auto` and `onnx` use BlazeFace ONNX. `mediapipe` is an explicit compatibility mode only. |
-| `FACE_MODEL_PATH` | No | `../models/face/face_detection_back_256x256_float32.onnx` | BlazeFace ONNX model path |
+| `FACE_MODEL_PATH` | No | `../models/face/blaze.onnx` | BlazeFace ONNX model path |
+| `FACE_MODEL_URL` | No | Hugging Face `garavv/blazeface-onnx` | Model URL used by `download_model.sh` and installers |
 | `USE_GPU` | No | `true` | Allow ONNX Runtime GPU providers |
 | `REQUIRE_GPU` | No | `true` | Fail startup when `USE_GPU=true` but ONNX Runtime only exposes CPU providers |
 | `ONNX_PROVIDER_ORDER` | No | `cuda,tensorrt,cpu` | Comma-separated ONNX Runtime provider preference |
@@ -104,12 +105,12 @@ ONNX_PROVIDER_ORDER=cuda,tensorrt,cpu
 | Raspberry Pi | `FACE_BACKEND=onnx`, `USE_GPU=false`, `REQUIRE_GPU=false` | Run `install_onnx_cpu.sh`; this avoids the MediaPipe dependency path. |
 | Compatibility mode | `FACE_BACKEND=mediapipe` | Uses the original MediaPipe implementation only when explicitly selected. |
 
-The ONNX backend requires `models/face/face_detection_back_256x256_float32.onnx`. There is no automatic MediaPipe fallback in the normal path. TensorRT can spend time building engines at startup; the default provider order is CUDA-first for fast service startup.
+The ONNX backend requires `models/face/blaze.onnx`. Face installers download it automatically from `https://huggingface.co/garavv/blazeface-onnx/resolve/main/blaze.onnx` unless `FACE_MODEL_URL` is set. There is no automatic MediaPipe fallback in the normal path. TensorRT can spend time building engines at startup; the default provider order is CUDA-first for fast service startup.
 
-To install the model from a known-good source:
+To install or refresh the model manually:
 
 ```bash
-FACE_MODEL_URL=<url-to-face_detection_back_256x256_float32.onnx> bash download_model.sh
+bash download_model.sh
 ```
 
 ### Model Configuration

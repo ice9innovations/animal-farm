@@ -142,7 +142,7 @@ ONNX_PROVIDER_ORDER = [
 ]
 FACE_MODEL_PATH = os.getenv(
     'FACE_MODEL_PATH',
-    os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'models', 'face', 'face_detection_back_256x256_float32.onnx'))
+    os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'models', 'face', 'blaze.onnx'))
 )
 
 # Global face analyzer - initialize once at startup
