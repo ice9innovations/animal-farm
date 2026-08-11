@@ -35,14 +35,14 @@ The service analyzes images to detect 33 body landmarks with 3D coordinates and 
 # Navigate to pose directory
 cd /home/sd/animal-farm/pose
 
-# Create virtual environment
-python3 -m venv pose_venv
+# Install full dependencies into pose/venv, including MediaPipe fallback
+bash install.sh
+```
 
-# Activate virtual environment
-source pose_venv/bin/activate
+For desktop Nvidia GPU hosts such as RTX 3090/5090, use the GPU installer:
 
-# Install full dependencies, including MediaPipe fallback
-pip install -r requirements.txt
+```bash
+bash install_gpu_desktop.sh
 ```
 
 For CPU-only hosts where MediaPipe wheels are unavailable or unnecessary, use the ONNX-only install:
@@ -130,7 +130,7 @@ MAX_FILE_SIZE=33554432                    # Maximum file size in bytes (32MB def
 
 | Host type | Recommended settings | Notes |
 |-----------|----------------------|-------|
-| RTX 3090 / RTX 5090 | `POSE_BACKEND=onnx`, `USE_GPU=true` | Install or build with `onnxruntime-gpu`; ONNX Runtime will use TensorRT/CUDA providers when available. |
+| RTX 3090 / RTX 5090 | `POSE_BACKEND=onnx`, `USE_GPU=true`, `REQUIRE_GPU=true` | Run `install_gpu_desktop.sh` to install `onnxruntime-gpu` into `venv`. |
 | Jetson Orin | `POSE_BACKEND=onnx`, `USE_GPU=true`, `REQUIRE_GPU=true`, `ONNX_PROVIDER_ORDER=cuda,tensorrt` | Run `install_jetson.sh`; it uses `requirements-jetson.txt`, installs JetPack-compatible `onnxruntime-gpu` separately, and verifies TensorRT/CUDA providers. |
 | Raspberry Pi | `POSE_BACKEND=onnx`, `USE_GPU=false` | Run `install_onnx_cpu.sh`; this avoids the MediaPipe dependency path. |
 | Compatibility fallback | `POSE_BACKEND=mediapipe` | Uses the original MediaPipe implementation where available. |
