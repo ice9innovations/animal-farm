@@ -2,7 +2,6 @@
 # Install pose detection service for Nvidia Jetson Orin (JetPack 6, CUDA 12.6, TRT 10.3).
 #
 # Differences from install.sh:
-#   - Uses pose_venv (not venv) to match pose.sh
 #   - Pins numpy<2 (Jetson ONNX wheel requires NumPy 1.x ABI)
 #   - Uses opencv-python 4.9 (opencv 4.12 requires numpy>=2)
 #   - Uses requirements-jetson.txt to avoid desktop MediaPipe/ONNX Runtime pins
@@ -17,7 +16,7 @@
 set -e
 
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
-VENV="$SCRIPT_DIR/pose_venv"
+VENV="$SCRIPT_DIR/venv"
 SERVICE_SRC="$SCRIPT_DIR/pose-api.service"
 CURRENT_USER="$(whoami)"
 JETSON_ORT_INDEX="${JETSON_ORT_INDEX:-https://pypi.jetson-ai-lab.io/jp6/cu126}"
@@ -52,7 +51,7 @@ if not providers.intersection(required):
 PY
 
 echo ""
-echo "pose_venv ready."
+echo "venv ready."
 
 if [ -f "$SCRIPT_DIR/.env" ] && ! grep -q '^REQUIRE_GPU=' "$SCRIPT_DIR/.env"; then
     {
@@ -60,7 +59,6 @@ if [ -f "$SCRIPT_DIR/.env" ] && ! grep -q '^REQUIRE_GPU=' "$SCRIPT_DIR/.env"; th
         echo "REQUIRE_GPU=true"
     } >> "$SCRIPT_DIR/.env"
 fi
-
 cat > "$SERVICE_SRC" <<EOF
 [Unit]
 Description=Pose Estimation REST API Service
@@ -75,7 +73,7 @@ RestartSec=5
 User=$CURRENT_USER
 Group=$CURRENT_USER
 WorkingDirectory=$SCRIPT_DIR
-ExecStart=$SCRIPT_DIR/pose.sh
+ExecStart=$SCRIPT_DIR/run.sh
 EnvironmentFile=$SCRIPT_DIR/.env
 StandardOutput=journal
 StandardError=journal

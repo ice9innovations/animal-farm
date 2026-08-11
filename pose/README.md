@@ -122,6 +122,7 @@ MAX_FILE_SIZE=33554432                    # Maximum file size in bytes (32MB def
 | `ENABLE_SEGMENTATION` | No | `false` | Enable MediaPipe body segmentation internally |
 | `USE_GPU` | No | `true` | Allow ONNX Runtime TensorRT/CUDA providers when available; set `false` for CPU-only hosts |
 | `REQUIRE_GPU` | No | `false` | Fail startup when `USE_GPU=true` but ONNX Runtime only exposes CPU providers |
+| `POSE_VENV` | No | - | Optional virtualenv directory override for `run.sh`; default is `venv` |
 
 ### Backend Matrix
 

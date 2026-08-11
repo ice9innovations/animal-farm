@@ -185,7 +185,7 @@ def initialize_pose_analyzer():
         return False
 
     prefer_onnx = POSE_BACKEND in {"auto", "onnx", "trt"}
-    allow_fallback = POSE_BACKEND == "auto"
+    allow_fallback = POSE_BACKEND == "auto" and not REQUIRE_GPU
 
     if prefer_onnx:
         missing_models = [

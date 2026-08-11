@@ -6,7 +6,9 @@ source "$SCRIPT_DIR/.env"
 set +a
 
 cd "$SCRIPT_DIR"
-if [ -x "$SCRIPT_DIR/venv/bin/python" ]; then
+if [ -n "${POSE_VENV:-}" ] && [ -x "$SCRIPT_DIR/$POSE_VENV/bin/python" ]; then
+    "$SCRIPT_DIR/$POSE_VENV/bin/python" REST.py
+elif [ -x "$SCRIPT_DIR/venv/bin/python" ]; then
     "$SCRIPT_DIR/venv/bin/python" REST.py
 elif [ -x "$SCRIPT_DIR/pose_venv/bin/python" ]; then
     "$SCRIPT_DIR/pose_venv/bin/python" REST.py
