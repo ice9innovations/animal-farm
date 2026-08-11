@@ -69,6 +69,9 @@ if [ -f "$SCRIPT_DIR/.env" ] && ! grep -q '^REQUIRE_GPU=' "$SCRIPT_DIR/.env"; th
         echo "REQUIRE_GPU=true"
     } >> "$SCRIPT_DIR/.env"
 fi
+if [ -f "$SCRIPT_DIR/.env" ] && ! grep -q '^ONNX_PROVIDER_ORDER=' "$SCRIPT_DIR/.env"; then
+    echo "ONNX_PROVIDER_ORDER=cuda,tensorrt" >> "$SCRIPT_DIR/.env"
+fi
 cat > "$SERVICE_SRC" <<EOF
 [Unit]
 Description=Pose Estimation REST API Service

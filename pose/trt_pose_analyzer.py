@@ -121,29 +121,13 @@ class TRTPoseAnalyzer:
                  detection_model_path: str,
                  landmark_model_path: str,
                  use_gpu: bool = True,
-                 require_gpu: bool = False):
+                 require_gpu: bool = False,
+                 provider_order: Optional[List[str]] = None):
         os.makedirs(TRT_CACHE_DIR, exist_ok=True)
         cache = os.path.abspath(TRT_CACHE_DIR)
 
-        def _make_session(path: str) -> ort.InferenceSession:
-            if use_gpu:
-                providers = [
-                    ('TensorrtExecutionProvider', {
-                        'device_id': 0,
-                        'trt_max_workspace_size': 1 << 27,  # 128MB — two sessions, be conservative
-                        'trt_fp16_enable': False,   # FP16 causes NaN on BlazePose
-                        'trt_engine_cache_enable': True,
-                        'trt_engine_cache_path': cache,
-                    }),
-                    ('CUDAExecutionProvider', {'device_id': 0}),
-                    'CPUExecutionProvider',
-                ]
-            else:
-                providers = ['CPUExecutionProvider']
-            return ort.InferenceSession(path, providers=providers)
-
+        available_providers = set(ort.get_available_providers())
         if use_gpu and require_gpu:
-            available_providers = set(ort.get_available_providers())
             gpu_providers = {"TensorrtExecutionProvider", "CUDAExecutionProvider"}
             if not available_providers.intersection(gpu_providers):
                 raise RuntimeError(
@@ -151,8 +135,18 @@ class TRTPoseAnalyzer:
                     f"Available providers: {sorted(available_providers)}"
                 )
 
-        self.det_session  = _make_session(detection_model_path)
-        self.lm_session   = _make_session(landmark_model_path)
+        providers = self._build_providers(
+            use_gpu=use_gpu,
+            require_gpu=require_gpu,
+            provider_order=provider_order or ["tensorrt", "cuda", "cpu"],
+            available_providers=available_providers,
+            cache=cache,
+        )
+        logger.info(f"ONNX Runtime available providers: {sorted(available_providers)}")
+        logger.info(f"ONNX Runtime requested providers: {providers}")
+
+        self.det_session  = self._make_session(detection_model_path, providers, "detector")
+        self.lm_session   = self._make_session(landmark_model_path, providers, "landmark")
         self.det_input    = self.det_session.get_inputs()[0].name
         self.lm_input     = self.lm_session.get_inputs()[0].name
 
@@ -164,6 +158,53 @@ class TRTPoseAnalyzer:
                 f"Session providers: {self.providers}"
             )
         logger.info(f"✅ TRTPoseAnalyzer (detection + landmark) — provider: {self.provider}")
+
+    def _build_providers(
+        self,
+        use_gpu: bool,
+        require_gpu: bool,
+        provider_order: List[str],
+        available_providers: set,
+        cache: str,
+    ) -> List[Any]:
+        if not use_gpu:
+            return ["CPUExecutionProvider"]
+
+        providers: List[Any] = []
+        normalized = [item.strip().lower() for item in provider_order if item.strip()]
+        for provider in normalized:
+            if provider in {"trt", "tensorrt"} and "TensorrtExecutionProvider" in available_providers:
+                providers.append(
+                    (
+                        "TensorrtExecutionProvider",
+                        {
+                            "device_id": 0,
+                            "trt_max_workspace_size": 1 << 27,
+                            "trt_fp16_enable": False,
+                            "trt_engine_cache_enable": True,
+                            "trt_engine_cache_path": cache,
+                        },
+                    )
+                )
+            elif provider == "cuda" and "CUDAExecutionProvider" in available_providers:
+                providers.append(("CUDAExecutionProvider", {"device_id": 0}))
+            elif provider == "cpu" and not require_gpu:
+                providers.append("CPUExecutionProvider")
+
+        if not providers:
+            if require_gpu:
+                raise RuntimeError(
+                    "GPU execution was required, but none of the requested GPU providers are available. "
+                    f"Requested order: {provider_order}; available providers: {sorted(available_providers)}"
+                )
+            providers.append("CPUExecutionProvider")
+        return providers
+
+    def _make_session(self, path: str, providers: List[Any], label: str) -> ort.InferenceSession:
+        logger.info(f"Creating {label} ONNX Runtime session: {path}")
+        session = ort.InferenceSession(path, providers=providers)
+        logger.info(f"Created {label} ONNX Runtime session with providers: {session.get_providers()}")
+        return session
 
     # ------------------------------------------------------------------
     # Stage 1: detect person → compute aligned ROI

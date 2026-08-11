@@ -50,6 +50,11 @@ POSE_MODEL_COMPLEXITY = int(os.getenv('POSE_MODEL_COMPLEXITY', '2'))
 ENABLE_SEGMENTATION = os.getenv('ENABLE_SEGMENTATION', 'false').lower() == 'true'
 USE_GPU = os.getenv('USE_GPU', 'true').lower() == 'true'
 REQUIRE_GPU = os.getenv('REQUIRE_GPU', 'false').lower() == 'true'
+ONNX_PROVIDER_ORDER = [
+    item.strip()
+    for item in os.getenv('ONNX_PROVIDER_ORDER', 'tensorrt,cuda,cpu').split(',')
+    if item.strip()
+]
 POSE_BACKEND = os.getenv('POSE_BACKEND', 'auto').strip().lower()
 POSE_DETECTION_MODEL = os.getenv(
     'POSE_DETECTION_MODEL',
@@ -210,7 +215,8 @@ def initialize_pose_analyzer():
                     detection_model_path=POSE_DETECTION_MODEL,
                     landmark_model_path=POSE_LANDMARK_MODEL,
                     use_gpu=USE_GPU,
-                    require_gpu=REQUIRE_GPU
+                    require_gpu=REQUIRE_GPU,
+                    provider_order=ONNX_PROVIDER_ORDER
                 )
                 provider = getattr(pose_analyzer, "provider", None)
                 _analyzer_framework = "BlazePose ONNX Runtime"
@@ -448,6 +454,7 @@ def health_check():
                     'backend': _analyzer_backend,
                     'provider': _analyzer_provider,
                     'gpu_required': REQUIRE_GPU,
+                    'provider_order': ONNX_PROVIDER_ORDER,
                     'landmarks': 33,
                     'complexity': POSE_MODEL_COMPLEXITY,
                     'gpu_enabled': USE_GPU
