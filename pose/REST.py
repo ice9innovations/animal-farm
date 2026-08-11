@@ -190,7 +190,7 @@ def initialize_pose_analyzer():
         return False
 
     prefer_onnx = POSE_BACKEND in {"auto", "onnx", "trt"}
-    allow_fallback = POSE_BACKEND == "auto" and not REQUIRE_GPU
+    allow_fallback = False
 
     if prefer_onnx:
         missing_models = [
@@ -202,7 +202,7 @@ def initialize_pose_analyzer():
             if not allow_fallback:
                 logger.error(message)
                 return False
-            logger.warning(f"{message}; falling back to MediaPipe")
+            logger.warning(message)
         else:
             try:
                 from trt_pose_analyzer import TRTPoseAnalyzer
@@ -233,7 +233,7 @@ def initialize_pose_analyzer():
                 if not allow_fallback:
                     logger.error(f"BlazePose ONNX analyzer failed: {e}")
                     return False
-                logger.warning(f"BlazePose ONNX analyzer failed ({e}), falling back to MediaPipe")
+                logger.warning(f"BlazePose ONNX analyzer failed: {e}")
 
     try:
         from pose_analyzer import PoseAnalyzer

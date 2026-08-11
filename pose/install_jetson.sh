@@ -21,6 +21,8 @@ SERVICE_SRC="$SCRIPT_DIR/pose-api.service"
 CURRENT_USER="$(whoami)"
 JETSON_ORT_INDEX="${JETSON_ORT_INDEX:-https://pypi.jetson-ai-lab.io/jp6/cu126}"
 JETSON_ORT_PACKAGE="${JETSON_ORT_PACKAGE:-onnxruntime-gpu}"
+POSE_DETECTION_MODEL="${POSE_DETECTION_MODEL:-$SCRIPT_DIR/../models/pose/pose_detection.onnx}"
+POSE_LANDMARK_MODEL="${POSE_LANDMARK_MODEL:-$SCRIPT_DIR/../models/pose/pose_landmark_heavy.onnx}"
 
 set_env_value() {
     local key="$1"
@@ -77,6 +79,9 @@ PY
 echo ""
 echo "venv ready."
 
+set_env_value "POSE_BACKEND" "onnx"
+set_env_value "POSE_DETECTION_MODEL" "$(realpath -m "$POSE_DETECTION_MODEL")"
+set_env_value "POSE_LANDMARK_MODEL" "$(realpath -m "$POSE_LANDMARK_MODEL")"
 set_env_value "USE_GPU" "true"
 set_env_value "REQUIRE_GPU" "true"
 set_env_value "ONNX_PROVIDER_ORDER" "cuda,tensorrt,cpu"

@@ -5,6 +5,8 @@ set -e
 
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 VENV="$SCRIPT_DIR/venv"
+POSE_DETECTION_MODEL="${POSE_DETECTION_MODEL:-$SCRIPT_DIR/../models/pose/pose_detection.onnx}"
+POSE_LANDMARK_MODEL="${POSE_LANDMARK_MODEL:-$SCRIPT_DIR/../models/pose/pose_landmark_heavy.onnx}"
 
 if [ -z "${PYTHON_BIN:-}" ]; then
     for candidate in python3.11 python3.10 python3; do
@@ -42,6 +44,9 @@ set_env_value() {
     fi
 }
 
+set_env_value "POSE_BACKEND" "onnx"
+set_env_value "POSE_DETECTION_MODEL" "$(realpath -m "$POSE_DETECTION_MODEL")"
+set_env_value "POSE_LANDMARK_MODEL" "$(realpath -m "$POSE_LANDMARK_MODEL")"
 set_env_value "USE_GPU" "false"
 set_env_value "REQUIRE_GPU" "false"
 echo "Set POSE_BACKEND=onnx, USE_GPU=false, and REQUIRE_GPU=false in $SCRIPT_DIR/.env before starting."
