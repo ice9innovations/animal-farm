@@ -77,7 +77,7 @@ FACE_BACKEND=auto
 FACE_MODEL_PATH=/home/sd/animal-farm/models/face/blaze.onnx
 USE_GPU=true
 REQUIRE_GPU=true
-ONNX_PROVIDER_ORDER=cuda,tensorrt,cpu
+ONNX_PROVIDER_ORDER=cuda,cpu
 ```
 
 ### Configuration Details
@@ -93,7 +93,7 @@ ONNX_PROVIDER_ORDER=cuda,tensorrt,cpu
 | `FACE_MODEL_URL` | No | Hugging Face `garavv/blazeface-onnx` | Model URL used by `download_model.sh` and installers |
 | `USE_GPU` | No | `true` | Allow ONNX Runtime GPU providers |
 | `REQUIRE_GPU` | No | `true` | Fail startup when `USE_GPU=true` but ONNX Runtime only exposes CPU providers |
-| `ONNX_PROVIDER_ORDER` | No | `cuda,tensorrt,cpu` | Comma-separated ONNX Runtime provider preference |
+| `ONNX_PROVIDER_ORDER` | No | `cuda,cpu` | Comma-separated ONNX Runtime provider preference |
 | `FACE_VENV` | No | - | Optional virtualenv directory override for `run.sh`; default is `venv` |
 
 ### Backend Matrix
@@ -101,11 +101,11 @@ ONNX_PROVIDER_ORDER=cuda,tensorrt,cpu
 | Host type | Recommended settings | Notes |
 |-----------|----------------------|-------|
 | RTX 3090 / RTX 5090 | `FACE_BACKEND=onnx`, `USE_GPU=true`, `REQUIRE_GPU=true` | Run `install_gpu_desktop.sh` to install `onnxruntime-gpu` into `venv`. |
-| Jetson Orin | `FACE_BACKEND=onnx`, `USE_GPU=true`, `REQUIRE_GPU=true`, `ONNX_PROVIDER_ORDER=cuda,tensorrt,cpu` | Run `install_jetson.sh`; it installs JetPack-compatible `onnxruntime-gpu` separately and verifies TensorRT/CUDA providers. |
+| Jetson Orin | `FACE_BACKEND=onnx`, `USE_GPU=true`, `REQUIRE_GPU=true`, `ONNX_PROVIDER_ORDER=cuda,cpu` | Run `install_jetson.sh`; it installs JetPack-compatible `onnxruntime-gpu` separately and verifies TensorRT/CUDA providers. |
 | Raspberry Pi | `FACE_BACKEND=onnx`, `USE_GPU=false`, `REQUIRE_GPU=false` | Run `install_onnx_cpu.sh`; this avoids the MediaPipe dependency path. |
 | Compatibility mode | `FACE_BACKEND=mediapipe` | Uses the original MediaPipe implementation only when explicitly selected. |
 
-The ONNX backend requires `models/face/blaze.onnx`. Face installers download it automatically from `https://huggingface.co/garavv/blazeface-onnx/resolve/main/blaze.onnx` unless `FACE_MODEL_URL` is set. There is no automatic MediaPipe fallback in the normal path. TensorRT can spend time building engines at startup; the default provider order is CUDA-first for fast service startup.
+The ONNX backend requires `models/face/blaze.onnx`. Face installers download it automatically from `https://huggingface.co/garavv/blazeface-onnx/resolve/main/blaze.onnx` unless `FACE_MODEL_URL` is set. There is no automatic MediaPipe fallback in the normal path. This end-to-end BlazeFace graph should use CUDA by default; TensorRT currently rejects one of its dynamic-shape subgraphs unless the model is re-exported or shape-inferred for TensorRT.
 
 To install or refresh the model manually:
 

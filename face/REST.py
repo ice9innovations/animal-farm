@@ -137,7 +137,7 @@ REQUIRE_GPU = os.getenv('REQUIRE_GPU', 'true').lower() == 'true'
 FACE_BACKEND = os.getenv('FACE_BACKEND', 'auto').strip().lower()
 ONNX_PROVIDER_ORDER = [
     item.strip()
-    for item in os.getenv('ONNX_PROVIDER_ORDER', 'cuda,tensorrt,cpu').split(',')
+    for item in os.getenv('ONNX_PROVIDER_ORDER', 'cuda,cpu').split(',')
     if item.strip()
 ]
 FACE_MODEL_PATH = os.getenv(

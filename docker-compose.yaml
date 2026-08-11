@@ -417,7 +417,7 @@ services:
       FACE_MODEL_PATH: "/models/face/blaze.onnx"
       USE_GPU: "true"
       REQUIRE_GPU: "true"
-      ONNX_PROVIDER_ORDER: "cuda,tensorrt,cpu"
+      ONNX_PROVIDER_ORDER: "cuda,cpu"
     volumes:
       - ./models:/models:ro
     ports:
