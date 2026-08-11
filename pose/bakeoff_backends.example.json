@@ -1,0 +1,28 @@
+[
+  {
+    "name": "mediapipe_cpu",
+    "display_name": "MediaPipe CPU",
+    "type": "internal",
+    "backend": "mediapipe",
+    "use_cpu": true,
+    "timeout_sec": 60
+  },
+  {
+    "name": "blazepose_onnx_cpu",
+    "display_name": "BlazePose ONNX CPU",
+    "type": "internal",
+    "backend": "onnx",
+    "use_cpu": true,
+    "detection_model": "../models/pose/pose_detection.onnx",
+    "landmark_model": "../models/pose/pose_landmark_heavy.onnx",
+    "timeout_sec": 60
+  },
+  {
+    "name": "rtmpose_placeholder",
+    "display_name": "RTMPose Placeholder",
+    "enabled": false,
+    "type": "command",
+    "command": "/home/sd/animal-farm/pose/pose_venv/bin/python /path/to/rtmpose_export.py --image {image} --output {output}",
+    "timeout_sec": 60
+  }
+]
