@@ -30,6 +30,7 @@ E2E_MODEL_INPUT_SIZE = 128
 CONF_THRESHOLD = 0.5
 MAX_DETECTIONS = 25
 TRT_CACHE_DIR = os.path.join(os.path.dirname(__file__), '..', 'models', 'trt_cache')
+CUDA_GPU_MEM_LIMIT_MB = os.getenv("ORT_CUDA_GPU_MEM_LIMIT_MB", "").strip()
 
 # Score threshold before NMS
 SCORE_THRESHOLD = 0.5
@@ -210,7 +211,7 @@ class TRTFaceAnalyzer:
                     )
                 )
             elif provider == "cuda" and "CUDAExecutionProvider" in available_providers:
-                providers.append(("CUDAExecutionProvider", {"device_id": 0}))
+                providers.append(("CUDAExecutionProvider", self._cuda_provider_options()))
             elif provider == "cpu" and not require_gpu:
                 providers.append("CPUExecutionProvider")
 
@@ -222,6 +223,19 @@ class TRTFaceAnalyzer:
                 )
             providers.append("CPUExecutionProvider")
         return providers
+
+    def _cuda_provider_options(self) -> Dict[str, Any]:
+        options: Dict[str, Any] = {"device_id": 0}
+        if CUDA_GPU_MEM_LIMIT_MB:
+            try:
+                limit_mb = int(CUDA_GPU_MEM_LIMIT_MB)
+            except ValueError as exc:
+                raise RuntimeError(
+                    f"Invalid ORT_CUDA_GPU_MEM_LIMIT_MB={CUDA_GPU_MEM_LIMIT_MB!r}; expected integer MB"
+                ) from exc
+            options["gpu_mem_limit"] = limit_mb * 1024 * 1024
+            options["arena_extend_strategy"] = "kSameAsRequested"
+        return options
 
     def _preprocess(self, pil_image: Image.Image) -> Tuple[np.ndarray, int, int]:
         """Resize to 256×256, normalise to [0,1], return batch tensor + original dims."""
