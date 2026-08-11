@@ -28,14 +28,12 @@ rm -rf "$VENV"
 "$VENV/bin/pip" install --upgrade pip
 "$VENV/bin/pip" install --no-cache-dir -r "$SCRIPT_DIR/requirements-onnx.txt"
 
-echo ""
-echo "ONNX CPU venv ready."
 set_env_value() {
     local key="$1"
     local value="$2"
     local env_file="$SCRIPT_DIR/.env"
     if [ ! -f "$env_file" ]; then
-        return
+        : > "$env_file"
     fi
     if grep -q "^$key=" "$env_file"; then
         sed -i "s|^$key=.*|$key=$value|" "$env_file"
@@ -44,9 +42,16 @@ set_env_value() {
     fi
 }
 
+set_env_value "PORT" "7786"
+set_env_value "PRIVATE" "false"
+set_env_value "AUTO_UPDATE" "true"
+set_env_value "TIMEOUT" "2.0"
 set_env_value "POSE_BACKEND" "onnx"
 set_env_value "POSE_DETECTION_MODEL" "$(realpath -m "$POSE_DETECTION_MODEL")"
 set_env_value "POSE_LANDMARK_MODEL" "$(realpath -m "$POSE_LANDMARK_MODEL")"
 set_env_value "USE_GPU" "false"
 set_env_value "REQUIRE_GPU" "false"
-echo "Set POSE_BACKEND=onnx, USE_GPU=false, and REQUIRE_GPU=false in $SCRIPT_DIR/.env before starting."
+set_env_value "ONNX_PROVIDER_ORDER" "cpu"
+
+echo ""
+echo "ONNX CPU venv ready."

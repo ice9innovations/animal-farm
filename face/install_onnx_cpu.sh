@@ -25,7 +25,7 @@ set_env_value() {
     local value="$2"
     local env_file="$SCRIPT_DIR/.env"
     if [ ! -f "$env_file" ]; then
-        return
+        : > "$env_file"
     fi
     if grep -q "^$key=" "$env_file"; then
         sed -i "s|^$key=.*|$key=$value|" "$env_file"
@@ -40,10 +40,15 @@ rm -rf "$VENV"
 "$VENV/bin/pip" install --upgrade pip
 "$VENV/bin/pip" install --no-cache-dir -r "$SCRIPT_DIR/requirements-onnx.txt"
 
+set_env_value "PORT" "7772"
+set_env_value "PRIVATE" "false"
+set_env_value "AUTO_UPDATE" "true"
+set_env_value "TIMEOUT" "2.0"
 set_env_value "FACE_BACKEND" "onnx"
 set_env_value "FACE_MODEL_PATH" "$(realpath -m "$FACE_MODEL_PATH")"
 set_env_value "USE_GPU" "false"
 set_env_value "REQUIRE_GPU" "false"
+set_env_value "ONNX_PROVIDER_ORDER" "cpu"
 if [ ! -f "$FACE_MODEL_PATH" ]; then
     FACE_MODEL_PATH="$FACE_MODEL_PATH" "$SCRIPT_DIR/download_model.sh"
 fi

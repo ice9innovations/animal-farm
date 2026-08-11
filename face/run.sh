@@ -1,6 +1,11 @@
 #!/bin/bash
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 
+if [ ! -f "$SCRIPT_DIR/.env" ]; then
+    echo "Missing $SCRIPT_DIR/.env. Run install.sh, install_jetson.sh, or install_onnx_cpu.sh first." >&2
+    exit 1
+fi
+
 set -a
 source "$SCRIPT_DIR/.env"
 set +a

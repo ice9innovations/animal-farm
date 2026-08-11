@@ -24,7 +24,7 @@ set_env_value() {
     local value="$2"
     local env_file="$SCRIPT_DIR/.env"
     if [ ! -f "$env_file" ]; then
-        return
+        : > "$env_file"
     fi
     if grep -q "^$key=" "$env_file"; then
         sed -i "s|^$key=.*|$key=$value|" "$env_file"
@@ -51,6 +51,10 @@ else:
     print("ONNX Runtime providers:", ", ".join(ort.get_available_providers()))
 PY
 
+set_env_value "PORT" "7772"
+set_env_value "PRIVATE" "false"
+set_env_value "AUTO_UPDATE" "true"
+set_env_value "TIMEOUT" "2.0"
 set_env_value "FACE_BACKEND" "onnx"
 set_env_value "FACE_MODEL_PATH" "$(realpath -m "$FACE_MODEL_PATH")"
 set_env_value "USE_GPU" "true"
