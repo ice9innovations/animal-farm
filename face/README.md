@@ -35,14 +35,8 @@ The Face service detects human faces and extracts six facial keypoints using the
 # Navigate to face directory
 cd /home/sd/animal-farm/face
 
-# Install full dependencies into face/venv
+# Install GPU-first dependencies into face/venv
 bash install.sh
-```
-
-For desktop Nvidia GPU hosts such as RTX 3090/5090:
-
-```bash
-bash install_gpu_desktop.sh
 ```
 
 For Jetson Orin hosts:
@@ -100,7 +94,7 @@ ONNX_PROVIDER_ORDER=cuda,cpu
 
 | Host type | Recommended settings | Notes |
 |-----------|----------------------|-------|
-| RTX 3090 / RTX 5090 | `FACE_BACKEND=onnx`, `USE_GPU=true`, `REQUIRE_GPU=true` | Run `install_gpu_desktop.sh` to install `onnxruntime-gpu` into `venv`. |
+| RTX 3090 / RTX 5090 | `FACE_BACKEND=onnx`, `USE_GPU=true`, `REQUIRE_GPU=true` | Run `install.sh`; it installs `onnxruntime-gpu` into `venv`. |
 | Jetson Orin | `FACE_BACKEND=onnx`, `USE_GPU=true`, `REQUIRE_GPU=true`, `ONNX_PROVIDER_ORDER=cuda,cpu` | Run `install_jetson.sh`; it installs JetPack-compatible `onnxruntime-gpu` separately and verifies TensorRT/CUDA providers. |
 | Raspberry Pi | `FACE_BACKEND=onnx`, `USE_GPU=false`, `REQUIRE_GPU=false` | Run `install_onnx_cpu.sh`; this avoids the MediaPipe dependency path. |
 | Compatibility mode | `FACE_BACKEND=mediapipe` | Uses the original MediaPipe implementation only when explicitly selected. |
