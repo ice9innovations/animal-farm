@@ -14,4 +14,20 @@ python3 -m venv "$VENV"
 
 echo ""
 echo "ONNX CPU venv ready."
-echo "Set POSE_BACKEND=onnx and USE_GPU=false in $SCRIPT_DIR/.env before starting."
+set_env_value() {
+    local key="$1"
+    local value="$2"
+    local env_file="$SCRIPT_DIR/.env"
+    if [ ! -f "$env_file" ]; then
+        return
+    fi
+    if grep -q "^$key=" "$env_file"; then
+        sed -i "s|^$key=.*|$key=$value|" "$env_file"
+    else
+        echo "$key=$value" >> "$env_file"
+    fi
+}
+
+set_env_value "USE_GPU" "false"
+set_env_value "REQUIRE_GPU" "false"
+echo "Set POSE_BACKEND=onnx, USE_GPU=false, and REQUIRE_GPU=false in $SCRIPT_DIR/.env before starting."

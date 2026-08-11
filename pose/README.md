@@ -95,8 +95,8 @@ POSE_BACKEND=auto                         # auto, onnx, trt, or mediapipe
 POSE_DETECTION_MODEL=/home/sd/animal-farm/models/pose/pose_detection.onnx
 POSE_LANDMARK_MODEL=/home/sd/animal-farm/models/pose/pose_landmark_heavy.onnx
 USE_GPU=true                              # Allow ONNX Runtime GPU providers when available
-REQUIRE_GPU=false                         # Fail startup if USE_GPU=true but only CPU providers are available
-ONNX_PROVIDER_ORDER=tensorrt,cuda,cpu     # Provider order; use cuda,tensorrt on Jetson to avoid TRT build latency
+REQUIRE_GPU=true                          # Fail startup if USE_GPU=true but only CPU providers are available
+ONNX_PROVIDER_ORDER=cuda,tensorrt,cpu     # CUDA first avoids TensorRT engine-build latency on normal startup
 
 # Pose Analysis Settings
 POSE_MIN_DETECTION_CONFIDENCE=0.5         # Minimum detection confidence (0.0-1.0)
@@ -122,8 +122,8 @@ MAX_FILE_SIZE=33554432                    # Maximum file size in bytes (32MB def
 | `POSE_MODEL_COMPLEXITY` | No | 2 | Model accuracy (0=fastest, 2=most accurate) |
 | `ENABLE_SEGMENTATION` | No | `false` | Enable MediaPipe body segmentation internally |
 | `USE_GPU` | No | `true` | Allow ONNX Runtime TensorRT/CUDA providers when available; set `false` for CPU-only hosts |
-| `REQUIRE_GPU` | No | `false` | Fail startup when `USE_GPU=true` but ONNX Runtime only exposes CPU providers |
-| `ONNX_PROVIDER_ORDER` | No | `tensorrt,cuda,cpu` | Comma-separated ONNX Runtime provider preference. Jetson installer sets `cuda,tensorrt`. |
+| `REQUIRE_GPU` | No | `true` | Fail startup when `USE_GPU=true` but ONNX Runtime only exposes CPU providers |
+| `ONNX_PROVIDER_ORDER` | No | `cuda,tensorrt,cpu` | Comma-separated ONNX Runtime provider preference. Put `tensorrt` first only when startup engine-build latency is acceptable. |
 | `POSE_VENV` | No | - | Optional virtualenv directory override for `run.sh`; default is `venv` |
 
 ### Backend Matrix
@@ -132,8 +132,10 @@ MAX_FILE_SIZE=33554432                    # Maximum file size in bytes (32MB def
 |-----------|----------------------|-------|
 | RTX 3090 / RTX 5090 | `POSE_BACKEND=onnx`, `USE_GPU=true`, `REQUIRE_GPU=true` | Run `install_gpu_desktop.sh` to install `onnxruntime-gpu` into `venv`. |
 | Jetson Orin | `POSE_BACKEND=onnx`, `USE_GPU=true`, `REQUIRE_GPU=true`, `ONNX_PROVIDER_ORDER=cuda,tensorrt` | Run `install_jetson.sh`; it uses `requirements-jetson.txt`, installs JetPack-compatible `onnxruntime-gpu` separately, and verifies TensorRT/CUDA providers. |
-| Raspberry Pi | `POSE_BACKEND=onnx`, `USE_GPU=false` | Run `install_onnx_cpu.sh`; this avoids the MediaPipe dependency path. |
+| Raspberry Pi | `POSE_BACKEND=onnx`, `USE_GPU=false`, `REQUIRE_GPU=false` | Run `install_onnx_cpu.sh`; this avoids the MediaPipe dependency path. |
 | Compatibility fallback | `POSE_BACKEND=mediapipe` | Uses the original MediaPipe implementation where available. |
+
+TensorRT can spend minutes building engines at startup, especially on Jetson. Engines are cached under `models/trt_cache`, but the normal GPU default is CUDA-first to keep service startup fast. Use `ONNX_PROVIDER_ORDER=tensorrt,cuda,cpu` only when TensorRT startup/build latency is acceptable for that host.
 
 For Docker, the default build uses the package pinned in `requirements.txt`. On Nvidia hosts that should use ONNX Runtime GPU, build with an override such as:
 

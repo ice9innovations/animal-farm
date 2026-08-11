@@ -22,6 +22,20 @@ CURRENT_USER="$(whoami)"
 JETSON_ORT_INDEX="${JETSON_ORT_INDEX:-https://pypi.jetson-ai-lab.io/jp6/cu126}"
 JETSON_ORT_PACKAGE="${JETSON_ORT_PACKAGE:-onnxruntime-gpu}"
 
+set_env_value() {
+    local key="$1"
+    local value="$2"
+    local env_file="$SCRIPT_DIR/.env"
+    if [ ! -f "$env_file" ]; then
+        return
+    fi
+    if grep -q "^$key=" "$env_file"; then
+        sed -i "s|^$key=.*|$key=$value|" "$env_file"
+    else
+        echo "$key=$value" >> "$env_file"
+    fi
+}
+
 rm -rf "$VENV"
 python3 -m venv "$VENV"
 
@@ -63,15 +77,9 @@ PY
 echo ""
 echo "venv ready."
 
-if [ -f "$SCRIPT_DIR/.env" ] && ! grep -q '^REQUIRE_GPU=' "$SCRIPT_DIR/.env"; then
-    {
-        echo ""
-        echo "REQUIRE_GPU=true"
-    } >> "$SCRIPT_DIR/.env"
-fi
-if [ -f "$SCRIPT_DIR/.env" ] && ! grep -q '^ONNX_PROVIDER_ORDER=' "$SCRIPT_DIR/.env"; then
-    echo "ONNX_PROVIDER_ORDER=cuda,tensorrt" >> "$SCRIPT_DIR/.env"
-fi
+set_env_value "USE_GPU" "true"
+set_env_value "REQUIRE_GPU" "true"
+set_env_value "ONNX_PROVIDER_ORDER" "cuda,tensorrt,cpu"
 cat > "$SERVICE_SRC" <<EOF
 [Unit]
 Description=Pose Estimation REST API Service

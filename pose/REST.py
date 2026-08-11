@@ -49,10 +49,10 @@ POSE_MIN_TRACKING_CONFIDENCE = float(os.getenv('POSE_MIN_TRACKING_CONFIDENCE', '
 POSE_MODEL_COMPLEXITY = int(os.getenv('POSE_MODEL_COMPLEXITY', '2'))
 ENABLE_SEGMENTATION = os.getenv('ENABLE_SEGMENTATION', 'false').lower() == 'true'
 USE_GPU = os.getenv('USE_GPU', 'true').lower() == 'true'
-REQUIRE_GPU = os.getenv('REQUIRE_GPU', 'false').lower() == 'true'
+REQUIRE_GPU = os.getenv('REQUIRE_GPU', 'true').lower() == 'true'
 ONNX_PROVIDER_ORDER = [
     item.strip()
-    for item in os.getenv('ONNX_PROVIDER_ORDER', 'tensorrt,cuda,cpu').split(',')
+    for item in os.getenv('ONNX_PROVIDER_ORDER', 'cuda,tensorrt,cpu').split(',')
     if item.strip()
 ]
 POSE_BACKEND = os.getenv('POSE_BACKEND', 'auto').strip().lower()
