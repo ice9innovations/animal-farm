@@ -33,20 +33,30 @@ python3 -m venv "$VENV"
 # Install Jetson GPU ONNX Runtime separately. Leave the package unpinned by default
 # because available versions vary by JetPack image and Python minor version.
 "$VENV/bin/pip" uninstall -y onnxruntime onnxruntime-gpu 2>/dev/null || true
+echo "Installing Jetson ONNX Runtime package: $JETSON_ORT_PACKAGE"
+echo "Using Jetson ONNX Runtime index: $JETSON_ORT_INDEX"
 "$VENV/bin/pip" install --no-cache-dir "$JETSON_ORT_PACKAGE" \
     --index-url "$JETSON_ORT_INDEX"
 
 "$VENV/bin/python" - <<'PY'
 import onnxruntime as ort
+import subprocess
+import sys
 
 providers = set(ort.get_available_providers())
 required = {"TensorrtExecutionProvider", "CUDAExecutionProvider"}
+print("ONNX Runtime version:", ort.__version__)
 print("ONNX Runtime providers:", ", ".join(sorted(providers)))
+subprocess.run(
+    [sys.executable, "-m", "pip", "show", "onnxruntime", "onnxruntime-gpu"],
+    check=False,
+)
 if not providers.intersection(required):
     raise SystemExit(
         "Jetson ONNX Runtime GPU provider check failed. "
-        "Install a JetPack-matched onnxruntime-gpu wheel or set "
-        "JETSON_ORT_PACKAGE/JETSON_ORT_INDEX before rerunning install_jetson.sh."
+        "This venv is still using a CPU-only ONNX Runtime build. "
+        "Set JETSON_ORT_PACKAGE/JETSON_ORT_INDEX to a JetPack-matched "
+        "onnxruntime-gpu wheel before rerunning install_jetson.sh."
     )
 PY
 
