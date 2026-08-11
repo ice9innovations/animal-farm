@@ -120,7 +120,8 @@ class TRTPoseAnalyzer:
     def __init__(self,
                  detection_model_path: str,
                  landmark_model_path: str,
-                 use_gpu: bool = True):
+                 use_gpu: bool = True,
+                 require_gpu: bool = False):
         os.makedirs(TRT_CACHE_DIR, exist_ok=True)
         cache = os.path.abspath(TRT_CACHE_DIR)
 
@@ -141,6 +142,15 @@ class TRTPoseAnalyzer:
                 providers = ['CPUExecutionProvider']
             return ort.InferenceSession(path, providers=providers)
 
+        if use_gpu and require_gpu:
+            available_providers = set(ort.get_available_providers())
+            gpu_providers = {"TensorrtExecutionProvider", "CUDAExecutionProvider"}
+            if not available_providers.intersection(gpu_providers):
+                raise RuntimeError(
+                    "GPU execution was required, but ONNX Runtime exposes no TensorRT/CUDA providers. "
+                    f"Available providers: {sorted(available_providers)}"
+                )
+
         self.det_session  = _make_session(detection_model_path)
         self.lm_session   = _make_session(landmark_model_path)
         self.det_input    = self.det_session.get_inputs()[0].name
@@ -148,6 +158,11 @@ class TRTPoseAnalyzer:
 
         self.provider = self.det_session.get_providers()[0]
         self.providers = self.det_session.get_providers()
+        if use_gpu and require_gpu and self.provider == "CPUExecutionProvider":
+            raise RuntimeError(
+                "GPU execution was required, but ONNX Runtime selected CPUExecutionProvider. "
+                f"Session providers: {self.providers}"
+            )
         logger.info(f"✅ TRTPoseAnalyzer (detection + landmark) — provider: {self.provider}")
 
     # ------------------------------------------------------------------

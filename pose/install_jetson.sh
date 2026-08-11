@@ -37,8 +37,29 @@ python3 -m venv "$VENV"
 "$VENV/bin/pip" install --no-cache-dir "$JETSON_ORT_PACKAGE" \
     --index-url "$JETSON_ORT_INDEX"
 
+"$VENV/bin/python" - <<'PY'
+import onnxruntime as ort
+
+providers = set(ort.get_available_providers())
+required = {"TensorrtExecutionProvider", "CUDAExecutionProvider"}
+print("ONNX Runtime providers:", ", ".join(sorted(providers)))
+if not providers.intersection(required):
+    raise SystemExit(
+        "Jetson ONNX Runtime GPU provider check failed. "
+        "Install a JetPack-matched onnxruntime-gpu wheel or set "
+        "JETSON_ORT_PACKAGE/JETSON_ORT_INDEX before rerunning install_jetson.sh."
+    )
+PY
+
 echo ""
 echo "pose_venv ready."
+
+if [ -f "$SCRIPT_DIR/.env" ] && ! grep -q '^REQUIRE_GPU=' "$SCRIPT_DIR/.env"; then
+    {
+        echo ""
+        echo "REQUIRE_GPU=true"
+    } >> "$SCRIPT_DIR/.env"
+fi
 
 cat > "$SERVICE_SRC" <<EOF
 [Unit]

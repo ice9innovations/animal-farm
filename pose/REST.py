@@ -49,6 +49,7 @@ POSE_MIN_TRACKING_CONFIDENCE = float(os.getenv('POSE_MIN_TRACKING_CONFIDENCE', '
 POSE_MODEL_COMPLEXITY = int(os.getenv('POSE_MODEL_COMPLEXITY', '2'))
 ENABLE_SEGMENTATION = os.getenv('ENABLE_SEGMENTATION', 'false').lower() == 'true'
 USE_GPU = os.getenv('USE_GPU', 'true').lower() == 'true'
+REQUIRE_GPU = os.getenv('REQUIRE_GPU', 'false').lower() == 'true'
 POSE_BACKEND = os.getenv('POSE_BACKEND', 'auto').strip().lower()
 POSE_DETECTION_MODEL = os.getenv(
     'POSE_DETECTION_MODEL',
@@ -208,7 +209,8 @@ def initialize_pose_analyzer():
                 pose_analyzer = TRTPoseAnalyzer(
                     detection_model_path=POSE_DETECTION_MODEL,
                     landmark_model_path=POSE_LANDMARK_MODEL,
-                    use_gpu=USE_GPU
+                    use_gpu=USE_GPU,
+                    require_gpu=REQUIRE_GPU
                 )
                 provider = getattr(pose_analyzer, "provider", None)
                 _analyzer_framework = "BlazePose ONNX Runtime"
@@ -445,6 +447,7 @@ def health_check():
                     'model': _analyzer_framework,
                     'backend': _analyzer_backend,
                     'provider': _analyzer_provider,
+                    'gpu_required': REQUIRE_GPU,
                     'landmarks': 33,
                     'complexity': POSE_MODEL_COMPLEXITY,
                     'gpu_enabled': USE_GPU
