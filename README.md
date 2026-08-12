@@ -13,7 +13,8 @@ Animal Farm consists of multiple specialized AI services that work together in a
 ## Services
 
 The current Animal Farm services live in this repository. Older model zoo services
-have been moved to `/home/sd/zoo` and are listed separately below.
+have been moved to the [Zoo repository](https://github.com/ice9innovations/zoo)
+and are listed separately below.
 
 | Service | Port | Description |
 |---------|------|-------------|
@@ -48,7 +49,8 @@ their own directory using their service README.
 
 ### Archived Services
 
-Archived and retired services are kept in `/home/sd/zoo` for reference. These
+Archived and retired services are kept in the
+[Zoo repository](https://github.com/ice9innovations/zoo) for reference. These
 include BLIP v1, CLIP, CLIP_detection, clip-score, Detectron2, HAILO YOLO,
 Ollama API, RT-DETRv2, RTMDet, SpeciesNet, Xception, Xception detection,
 YOLO Objects365, and YOLO Open Images v7.
