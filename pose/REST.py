@@ -52,7 +52,7 @@ USE_GPU = os.getenv('USE_GPU', 'true').lower() == 'true'
 REQUIRE_GPU = os.getenv('REQUIRE_GPU', 'true').lower() == 'true'
 ONNX_PROVIDER_ORDER = [
     item.strip()
-    for item in os.getenv('ONNX_PROVIDER_ORDER', 'cuda,tensorrt,cpu').split(',')
+    for item in os.getenv('ONNX_PROVIDER_ORDER', 'cuda,cpu').split(',')
     if item.strip()
 ]
 POSE_BACKEND = os.getenv('POSE_BACKEND', 'auto').strip().lower()

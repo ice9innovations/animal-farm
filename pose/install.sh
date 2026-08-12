@@ -6,7 +6,7 @@
 #   bash install.sh
 #
 # Optional override:
-#   POSE_ORT_PACKAGE=onnxruntime-gpu==1.22.1 bash install.sh
+#   POSE_ORT_PACKAGE=onnxruntime-gpu==1.23.2 bash install.sh
 #
 # After install, start the service with:
 #   bash run.sh  (RunPod)
@@ -16,7 +16,7 @@ set -e
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 SERVICE_NAME="pose"
 CURRENT_USER="$(whoami)"
-POSE_ORT_PACKAGE="${POSE_ORT_PACKAGE:-onnxruntime-gpu==1.22.1}"
+POSE_ORT_PACKAGE="${POSE_ORT_PACKAGE:-onnxruntime-gpu==1.23.2}"
 POSE_DETECTION_MODEL="${POSE_DETECTION_MODEL:-$SCRIPT_DIR/../models/pose/pose_detection.onnx}"
 POSE_LANDMARK_MODEL="${POSE_LANDMARK_MODEL:-$SCRIPT_DIR/../models/pose/pose_landmark_heavy.onnx}"
 
@@ -58,7 +58,7 @@ set_env_value "POSE_DETECTION_MODEL" "$(realpath -m "$POSE_DETECTION_MODEL")"
 set_env_value "POSE_LANDMARK_MODEL" "$(realpath -m "$POSE_LANDMARK_MODEL")"
 set_env_value "USE_GPU" "true"
 set_env_value "REQUIRE_GPU" "true"
-set_env_value "ONNX_PROVIDER_ORDER" "cuda,tensorrt,cpu"
+set_env_value "ONNX_PROVIDER_ORDER" "cuda,cpu"
 
 # Generate systemd service file
 SERVICE_FILE="$SCRIPT_DIR/$SERVICE_NAME.service"

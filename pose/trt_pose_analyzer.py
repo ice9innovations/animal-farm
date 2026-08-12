@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TensorRT-accelerated Pose Analyzer using ONNX Runtime
+ONNX Runtime Pose Analyzer using CUDA/TensorRT/CPU providers.
 
 Two-stage BlazePose pipeline:
   Stage 1 — pose_detection.onnx (224×224):
@@ -16,6 +16,7 @@ landmark quality high via rotation normalisation.
 """
 
 import cv2
+import ctypes.util
 import numpy as np
 import onnxruntime as ort
 import logging
@@ -32,6 +33,10 @@ DETECTION_SCORE_THRESH = 0.5
 DETECTION_IOU_THRESH   = 0.3
 HEATMAP_KERNEL_SIZE    = 7
 HEATMAP_MIN_CONFIDENCE = 0.5
+
+
+def _has_tensorrt_libraries() -> bool:
+    return ctypes.util.find_library("nvinfer") is not None
 
 TRT_CACHE_DIR = os.path.join(os.path.dirname(__file__), '..', 'models', 'trt_cache')
 
@@ -138,7 +143,7 @@ class TRTPoseAnalyzer:
         providers = self._build_providers(
             use_gpu=use_gpu,
             require_gpu=require_gpu,
-            provider_order=provider_order or ["tensorrt", "cuda", "cpu"],
+            provider_order=provider_order or ["cuda", "cpu"],
             available_providers=available_providers,
             cache=cache,
         )
@@ -172,8 +177,12 @@ class TRTPoseAnalyzer:
 
         providers: List[Any] = []
         normalized = [item.strip().lower() for item in provider_order if item.strip()]
+        tensorrt_available = _has_tensorrt_libraries()
         for provider in normalized:
             if provider in {"trt", "tensorrt"} and "TensorrtExecutionProvider" in available_providers:
+                if not tensorrt_available:
+                    logger.info("Skipping TensorRT provider because TensorRT libraries are not installed")
+                    continue
                 providers.append(
                     (
                         "TensorrtExecutionProvider",
