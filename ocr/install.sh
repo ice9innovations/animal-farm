@@ -13,8 +13,15 @@ set -e
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 SERVICE_NAME="ocr"
 CURRENT_USER="$(whoami)"
-WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
 PYTHON_BIN="${PYTHON_BIN:-python3.11}"
+
+if [ -z "${WORKSPACE_DIR:-}" ]; then
+    if [ -d /workspace ] && [ -w /workspace ]; then
+        WORKSPACE_DIR=/workspace
+    else
+        WORKSPACE_DIR="$SCRIPT_DIR/.workspace"
+    fi
+fi
 
 export TMPDIR="${TMPDIR:-$WORKSPACE_DIR/tmp}"
 mkdir -p "$TMPDIR"
