@@ -1,4 +1,10 @@
 # Byte-compiled / optimized / DLL files
+llama-cpp/models/
+.farm_state
+.pids
+*.service
+Makefile
+ocr/models
 .codex
 yolov8/yolo-venv/
 qwen-cpp/models/
