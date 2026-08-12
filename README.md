@@ -12,26 +12,46 @@ Animal Farm consists of multiple specialized AI services that work together in a
 
 ## Services
 
+The current Animal Farm services live in this repository. Older model zoo services
+have been moved to `/home/sd/zoo` and are listed separately below.
+
 | Service | Port | Description |
 |---------|------|-------------|
-| **BLIP2** | 7777 | Image captioning |
-| **CLIP** | 7778 | Image-text similarity analysis and caption scoring |
-| **CLIP_detection** | 7788 | Two-stage object detection with CLIP classification |
-| **colors** | 7770 | Color analysis and palette extraction |
-| **detectron2** | 7771 | Object detection and instance segmentation |
-| **face** | 7772 | Face detection and analysis |
-| **metadata** | 7781 | Image metadata extraction (EXIF, GPS, camera info) |
-| **nsfw2** | 7774 | Content safety detection |
-| **ocr** | 7775 | Optical character recognition |
-| **ollama-api** | 7782 | Multi-modal large language model analysis |
-| **pose** | 7786 | Human pose estimation with MediaPipe |
-| **rtdetr** | 7780 | Transformer-based object detection |
-| **rtmdet** | 7792 | Transformer-based object detection |
-| **xception** | 7779 | Xception-based ImageNet classification |
-| **xception_detection** | 7799 | Two-stage object detection with Xception classification |
-| **yolo_365** | 7790 | YOLO object detection with Objects365 dataset (365 classes) |
-| **yolo_oi7** | 7791 | YOLO object detection with OpenImages v7 dataset |
-| **yolov8** | 7773 | Real-time object detection |
+| **[gemini-api](gemini-api/)** | 7767 | Google Gemini vision API wrapper with emoji mapping |
+| **[rembg](rembg/)** | 7768 | Background removal returning alpha masks |
+| **[colors](colors/)** | 7770 | Color analysis and palette extraction |
+| **[face](face/)** | 7772 | Face detection and facial keypoint analysis |
+| **[yolov8](yolov8/)** | 7773 | Real-time COCO object detection |
+| **[nsfw2](nsfw2/)** | 7774 | OpenNSFW2 content safety detection |
+| **[ocr](ocr/)** | 7775 | GPU-backed OCR text extraction |
+| **[BLIP2](BLIP2/)** | 7777 | BLIP2 image captioning |
+| **[metadata](metadata/)** | 7781 | Image metadata extraction (EXIF, GPS, camera info) |
+| **[llama-cpp](llama-cpp/)** | 7782 | Local LLaVA/Llama vision-language inference via llama.cpp |
+| **[pose](pose/)** | 7786 | Human pose landmark detection and joint angle analysis |
+| **[nudenet](nudenet/)** | 7789 | NudeNet+ category-level content moderation |
+| **[moondream](moondream/)** | 7795 | Lightweight local vision-language captioning |
+| **[qwen-cpp](qwen-cpp/)** | 7796 | Local Qwen3-VL inference via llama.cpp |
+| **[claude-api](claude-api/)** | 7797 | Anthropic Claude/Haiku vision API wrapper |
+| **[joycaption](joycaption/)** | 7798 | Local JoyCaption Hugging Face vision model wrapper |
+| **[caption-summary](caption-summary/)** | 7799 | Caption and noun/verb consensus summarization |
+| **[gpt-nano](gpt-nano/)** | 7800 | OpenAI GPT nano vision API wrapper |
+| **[qr](qr/)** | 7801 | QR code and barcode detection and decoding |
+| **[florence2](florence2/)** | 7803 | Florence-2 multi-task vision: captioning, detection, OCR, grounding, and segmentation |
+| **[xai](xai/)** | 7805 | xAI Grok vision API wrapper |
+| **[sam3](sam3/)** | 9779 | Text-prompted open-vocabulary image segmentation |
+
+The root `docker-compose.yaml` currently covers the main RunPod deployment set:
+BLIP2, Florence-2, Moondream, llama-cpp, qwen-cpp, Claude/Haiku, Gemini,
+GPT Nano, YOLOv8, NudeNet, rembg, OCR, pose, face, colors, metadata, QR, and
+caption-summary. Services that are not in the compose file can still be run from
+their own directory using their service README.
+
+### Archived Services
+
+Archived and retired services are kept in `/home/sd/zoo` for reference. These
+include BLIP v1, CLIP, CLIP_detection, clip-score, Detectron2, HAILO YOLO,
+Ollama API, RT-DETRv2, RTMDet, SpeciesNet, Xception, Xception detection,
+YOLO Objects365, and YOLO Open Images v7.
 
 ## Quick Start
 
@@ -62,33 +82,12 @@ Animal Farm consists of multiple specialized AI services that work together in a
    ./[service-name].sh
    ```
 
-## Animal Farm Democracy: The Voting System
+## Windmill Orchestration
 
-**Consensus is Truth, Evidence is Democracy, Algorithms are Liberation**
-
-Animal Farm employs a sophisticated democratic voting system inspired by Orwell's famous quote: *"All animals are equal, but some animals are more equal than others."* 
-
-### How Voting Works
-
-**Democratic Foundation**: Every AI service gets exactly one vote per detection - no arbitrary service favoritism or weighting.
-
-**Evidence-Based Consensus**: Services become "more equal than others" through verifiable evidence:
-
-- **Spatial Consensus**: When multiple object detection services (YOLO, Detectron2, RT-DETR) agree on bounding box locations, they receive consensus bonuses equal to `detection_count - 1`
-- **Content Consensus**: When semantic services (BLIP2, Ollama) and classification services (CLIP, Xception) agree on the same emoji, they receive consensus bonuses equal to `total_agreeing_services - 1`
-- **Instance Weighting**: Multiple detected instances vote proportionally - 3 people detected gets 3x the spatial votes of 1 person detected
-
-**Specialist Authority**: Each specialist service is authoritative but not exclusive in their domain:
-- **Face**: Authoritative for face detection, validates person emojis
-- **OCR**: Authoritative for text reading, contributes to emoji discovery through text mining  
-- **NSFW**: Authoritative for content safety, requires human context for validation
-
-**Post-Processing Curation**: Clean +1/-1 adjustments ensure logical consistency:
-- Face detection validates person detection (+1)
-- Pose detection validates person detection (+1)
-- NSFW detection without human context receives skepticism (-1)
-
-This creates an intelligent democracy where consensus amplifies evidence rather than arbitrary algorithmic favoritism determining outcomes.
+Voting, consensus, and downstream post-processing are handled by the Windmill
+pipeline. Keep voting behavior documented with the Windmill flows and workers;
+this repository documents the service APIs and deployment wrappers that Windmill
+calls.
 
 ## API Integration
 
@@ -128,7 +127,7 @@ curl -X POST -F "file=@/path/to/image.jpg" http://192.168.0.101:7777/analyze | j
 - **Multi-Modal AI**: Text, vision, and multimodal analysis capabilities
 - **Distributed Architecture**: Services can run on separate machines for load distribution
 - **GPU Acceleration**: Optimized for NVIDIA GPU deployment with CUDA support
-- **Animal Farm Democracy**: Intelligent consensus voting system where all services are equal, but some are more equal than others
+- **Windmill Integration**: Service APIs are designed to be orchestrated by Windmill flows and workers
 - **Edge Computing Ready**: Low power consumption suitable for field deployment
 - **Docker Support**: Containerized deployment options available
 - **Comprehensive Logging**: Detailed logging and monitoring across all services
