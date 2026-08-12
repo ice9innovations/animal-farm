@@ -51,8 +51,8 @@ pip install -r requirements.txt
 The service includes automatic CUDA configuration:
 
 ```bash
-# GPU setup handled by nsfw2.sh startup script
-# Includes CUDA 12.2 paths and cuDNN library setup
+# GPU setup handled by run.sh
+# Uses TensorFlow's pip-provided NVIDIA CUDA/cuDNN libraries first
 # Automatic memory growth and XLA compilation
 ```
 
@@ -410,7 +410,7 @@ nvcc --version
 
 # Desktop/server TensorFlow reinstall
 pip uninstall tensorflow
-pip install tensorflow[and-cuda]
+pip install 'tensorflow[and-cuda]==2.18.0'
 ```
 
 **Problem**: `MODE=gpu but TensorFlow found no GPU devices` on Jetson

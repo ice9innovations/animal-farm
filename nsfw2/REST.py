@@ -1,4 +1,5 @@
 import os
+from contextlib import contextmanager
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,6 +16,23 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '-1' if MODE == 'cpu' else '0'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 REQUIRE_GPU = os.getenv('NSFW_REQUIRE_GPU', 'true').lower() in ('true', '1', 'yes')
 
+
+@contextmanager
+def _suppress_native_stderr(enabled: bool):
+    if not enabled:
+        yield
+        return
+
+    stderr_fd = os.dup(2)
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(devnull_fd, 2)
+        yield
+    finally:
+        os.dup2(stderr_fd, 2)
+        os.close(stderr_fd)
+        os.close(devnull_fd)
+
 import json
 import requests
 import uuid
@@ -25,9 +43,10 @@ import inspect
 import threading
 from typing import Dict, Any
 
-import tensorflow as tf
-from absl import logging as absl_logging
-import opennsfw2 as n2
+with _suppress_native_stderr(MODE == 'cpu'):
+    import tensorflow as tf
+    from absl import logging as absl_logging
+    import opennsfw2 as n2
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from PIL import Image
@@ -116,11 +135,12 @@ except (TypeError, ValueError):
 def _load_nsfw_model() -> None:
     """Warm TensorFlow/OpenNSFW2 once at process startup instead of on first request."""
     try:
-        if WARMUP_ENABLED:
-            warmup_start = time.time()
-            warmup_image = Image.new('RGB', (NSFW_WARMUP_SIZE, NSFW_WARMUP_SIZE), color='black')
-            _predict_nsfw_probability(warmup_image)
-            _MODEL_STATUS["warmup_time"] = round(time.time() - warmup_start, 3)
+        with _suppress_native_stderr(MODE == 'cpu'):
+            if WARMUP_ENABLED:
+                warmup_start = time.time()
+                warmup_image = Image.new('RGB', (NSFW_WARMUP_SIZE, NSFW_WARMUP_SIZE), color='black')
+                _predict_nsfw_probability(warmup_image)
+                _MODEL_STATUS["warmup_time"] = round(time.time() - warmup_start, 3)
 
         _MODEL_STATUS["status"] = "loaded"
     except Exception as e:
