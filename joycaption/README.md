@@ -54,13 +54,16 @@ The install script chooses PyTorch wheels from the detected GPU. Compute capabil
 
 `DISABLE_CUDNN=auto` disables cuDNN on compute capability 12.x GPUs. This avoids cuDNN workspace allocation failures in the SigLIP vision tower on RTX 5090 while leaving cuDNN enabled on older GPUs. Set `DISABLE_CUDNN=false` to force cuDNN back on.
 
-`MODEL_DIR` maps to `HF_HOME`. If `MODEL_DIR` is blank, `install.sh` uses `/mnt/models/workspace/huggingface` when `/mnt/models/workspace` exists and is writable, otherwise it falls back to a service-local `.cache/huggingface`. The same cache root is used for pip cache and temporary files, which keeps large CUDA wheel installs off small root volumes. Set `JOYCAPTION_VENV_DIR` if the virtualenv itself should live on the model/workspace drive; `install.sh` will symlink `./venv` to it so runtime scripts keep working.
+`MODEL_DIR` is the Hugging Face storage root for this service. Set it in `.env` to put the model on a large disk, for example `MODEL_DIR=/mnt/models/workspace/huggingface`. Runtime sets `HF_HOME=$MODEL_DIR`, so the downloaded snapshot lives under `$MODEL_DIR/hub/models--fancyfeast--llama-joycaption-beta-one-hf-llava/...` instead of the default user cache. If `MODEL_DIR` is blank, `install.sh`, `run.sh`, and `download_model.sh` use `/mnt/models/workspace/huggingface` when `/mnt/models/workspace` exists and is writable, otherwise they fall back to a service-local `.cache/huggingface`. The same cache root is used for pip cache and temporary files, which keeps large CUDA wheel installs off small root volumes. Set `JOYCAPTION_VENV_DIR` if the virtualenv itself should live on the model/workspace drive; `install.sh` will symlink `./venv` to it so runtime scripts keep working.
 
 ## Run
 
 ```bash
 ./run.sh
 ```
+
+If the model is missing from `MODEL_DIR`, `run.sh` automatically calls
+`download_model.sh` before starting the Flask service.
 
 ## Download model cache
 
@@ -72,8 +75,9 @@ to prefill the cache before starting CUDA inference, run:
 ./download_model.sh
 ```
 
-This uses `MODEL_ID` and `MODEL_DIR` from `.env`, sets `HF_HOME` to `MODEL_DIR`, and
-temporarily clears `HF_HUB_OFFLINE` and `TRANSFORMERS_OFFLINE` for the download.
+This uses `MODEL_ID` and `MODEL_DIR` from `.env`, sets `HF_HOME` to `MODEL_DIR`,
+downloads into `$MODEL_DIR/hub`, and temporarily clears `HF_HUB_OFFLINE` and
+`TRANSFORMERS_OFFLINE` for the download.
 
 Systemd:
 

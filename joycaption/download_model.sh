@@ -42,10 +42,12 @@ import os
 from huggingface_hub import snapshot_download
 
 model_id = os.environ["MODEL_ID"]
-cache_dir = os.environ["MODEL_DIR"]
+hf_home = os.environ["HF_HOME"]
+cache_dir = os.path.join(hf_home, "hub")
 
 print(f"Downloading {model_id}")
-print(f"Hugging Face cache: {cache_dir}")
+print(f"Hugging Face home: {hf_home}")
+print(f"Hugging Face hub cache: {cache_dir}")
 path = snapshot_download(repo_id=model_id, cache_dir=cache_dir, resume_download=True)
 print(f"Model snapshot ready: {path}")
 PY
