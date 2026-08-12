@@ -23,8 +23,7 @@ python3.11 -m venv "$SCRIPT_DIR/venv"
 
 "$SCRIPT_DIR/venv/bin/pip" install --upgrade pip
 "$SCRIPT_DIR/venv/bin/pip" install --no-cache-dir \
-    torch==2.5.1+cu121 torchvision==0.20.1+cu121 \
-    --index-url https://download.pytorch.org/whl/cu121
+    torch==2.5.1 torchvision==0.20.1
 "$SCRIPT_DIR/venv/bin/pip" install --no-cache-dir -r "$SCRIPT_DIR/requirements.txt"
 
 # Generate systemd service file

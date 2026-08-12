@@ -45,6 +45,18 @@ source yolo_venv/bin/activate
 pip install -r requirements.txt
 ```
 
+The local installer installs `torch==2.5.1` and `torchvision==0.20.1`
+separately from normal PyPI so PyTorch can resolve its matching CUDA runtime
+packages.
+
+On Jetson, use the Jetson installer. It creates the venv with `python3` and
+`--system-site-packages` so the service uses the JetPack-provided
+`torch`/`torchvision` packages instead of installing desktop PyPI wheels:
+
+```bash
+bash install_jetson.sh
+```
+
 ### 2. Model Installation
 
 ```bash

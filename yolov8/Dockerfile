@@ -30,11 +30,11 @@ RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1
 WORKDIR /usr/src/app
 
 COPY requirements.txt ./
-RUN pip3 install --no-cache-dir -r requirements.txt --index-url https://download.pytorch.org/whl/cu121
+RUN pip3 install --no-cache-dir torch==2.5.1 torchvision==0.20.1 \
+ && pip3 install --no-cache-dir -r requirements.txt
 
 COPY . .
 
 EXPOSE 7773
 
 CMD ["python3", "REST.py"]
-
