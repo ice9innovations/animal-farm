@@ -24,6 +24,13 @@ logger = logging.getLogger(__name__)
 # Configuration
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB - camera trap images can be large
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'tif', 'tiff', 'webp'}
+RAW_IMAGE_CONTENT_TYPES = {
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'image/tiff',
+    'application/octet-stream',
+}
 
 PRIVATE_STR = os.getenv('PRIVATE')
 PORT_STR = os.getenv('PORT')
@@ -41,6 +48,10 @@ CONFIDENCE_THRESHOLD = float(os.getenv('CONFIDENCE_THRESHOLD', '0.5'))
 
 # Global SpeciesNet model - initialize once at startup
 speciesnet_model = None
+
+
+def is_raw_image_request() -> bool:
+    return (request.content_type or '').split(';', 1)[0].strip().lower() in RAW_IMAGE_CONTENT_TYPES
 
 # Taxonomy → group mappings loaded from family_groups.csv
 # The same CSV feeds three dicts keyed by family, order, and class names.
@@ -447,8 +458,20 @@ def analyze():
         geo = dict(country=country, admin1_region=admin1_region,
                    latitude=latitude, longitude=longitude)
 
+        if request.method == 'POST' and is_raw_image_request():
+            file_data = request.get_data(cache=False)
+            if not file_data:
+                return error_response("No image body provided")
+            if len(file_data) > MAX_FILE_SIZE:
+                return error_response("File too large")
+
+            img_width, img_height = image_size_from_bytes(file_data)
+            ext = ext_from_content_type(request.content_type or '')
+            with temp_image_file(file_data, ext) as filepath:
+                prediction = run_prediction(filepath, **geo)
+
         # --- File upload (multipart POST) ---
-        if request.method == 'POST' and 'file' in request.files:
+        elif request.method == 'POST' and 'file' in request.files:
             uploaded_file = request.files['file']
             if uploaded_file.filename == '':
                 return error_response("No file selected")

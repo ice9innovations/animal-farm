@@ -56,10 +56,20 @@ OCR_CUDA_AVAILABLE = torch.cuda.is_available()
 OCR_DEVICE = "cuda" if OCR_CUDA_AVAILABLE else "cpu"
 
 MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
+RAW_IMAGE_CONTENT_TYPES = {
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/octet-stream',
+}
 
 # Global emoji mappings and MWE tokenizer - loaded from API on startup
 emoji_mappings = {}
 emoji_tokenizer = None
+
+
+def is_raw_image_request() -> bool:
+    return (request.content_type or '').split(';', 1)[0].strip().lower() in RAW_IMAGE_CONTENT_TYPES
 
 # Initialize EasyOCR (run once). This service is intentionally GPU-required by
 # default; CPU fallback is not useful for the production OCR workload.
@@ -557,7 +567,19 @@ def analyze():
     
     try:
         # Step 1: Get image into memory from any source
-        if request.method == 'POST' and 'file' in request.files:
+        if request.method == 'POST' and is_raw_image_request():
+            try:
+                from io import BytesIO
+                file_data = request.get_data(cache=False)
+                if not file_data:
+                    return error_response("No image body provided")
+                if len(file_data) > MAX_FILE_SIZE:
+                    return error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB")
+                image = Image.open(BytesIO(file_data)).convert('RGB')
+            except Exception as e:
+                return error_response(f"Failed to process raw image body: {str(e)}", 500)
+
+        elif request.method == 'POST' and 'file' in request.files:
             # Handle file upload
             uploaded_file = request.files['file']
             if uploaded_file.filename == '':

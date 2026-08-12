@@ -40,6 +40,12 @@ logger = logging.getLogger(__name__)
 
 MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
+RAW_IMAGE_CONTENT_TYPES = {
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/octet-stream',
+}
 
 PRIVATE = os.getenv('PRIVATE', 'false').lower() == 'true'
 PORT = int(os.getenv('PORT', '7803'))
@@ -365,6 +371,10 @@ def is_allowed_file(filename: str) -> bool:
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def is_raw_image_request() -> bool:
+    return (request.content_type or '').split(';', 1)[0].strip().lower() in RAW_IMAGE_CONTENT_TYPES
+
+
 # ---------------------------------------------------------------------------
 # Startup
 # ---------------------------------------------------------------------------
@@ -540,7 +550,18 @@ def analyze():
 
         # Step 1: Get image
         image = None
-        if request.method == 'POST' and 'file' in request.files:
+        if request.method == 'POST' and is_raw_image_request():
+            file_data = request.get_data(cache=False)
+            if not file_data:
+                return error_response("No image body provided")
+            if len(file_data) > MAX_FILE_SIZE:
+                return error_response("File too large")
+            try:
+                image = Image.open(BytesIO(file_data)).convert('RGB')
+            except Exception as e:
+                return error_response(f"Failed to process raw image body: {str(e)}", 500)
+
+        elif request.method == 'POST' and 'file' in request.files:
             uploaded_file = request.files['file']
             if uploaded_file.filename == '':
                 return error_response("No file selected")
@@ -592,6 +613,17 @@ def _load_image_from_request() -> tuple:
     Shared image loading for both single and batch endpoints.
     Returns (image, error_message). One of the two will be None.
     """
+    if request.method == 'POST' and is_raw_image_request():
+        file_data = request.get_data(cache=False)
+        if not file_data:
+            return None, "No image body provided"
+        if len(file_data) > MAX_FILE_SIZE:
+            return None, "File too large"
+        try:
+            return Image.open(BytesIO(file_data)).convert('RGB'), None
+        except Exception as e:
+            return None, f"Failed to process raw image body: {str(e)}"
+
     if request.method == 'POST' and 'file' in request.files:
         uploaded_file = request.files['file']
         if uploaded_file.filename == '':

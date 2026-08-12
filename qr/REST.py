@@ -24,8 +24,18 @@ if not PORT_STR:
 PORT = int(PORT_STR)
 
 MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
+RAW_IMAGE_CONTENT_TYPES = {
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/octet-stream',
+}
 
 app = Flask(__name__)
+
+
+def is_raw_image_request() -> bool:
+    return (request.content_type or '').split(';', 1)[0].strip().lower() in RAW_IMAGE_CONTENT_TYPES
 
 
 def _normalize_health_payload(payload):
@@ -154,6 +164,17 @@ def _image_from_request():
     Accepts multipart file upload (POST), or url/file query params.
     Returns (image, None) on success, (None, error_str) on failure.
     """
+    if request.method == 'POST' and is_raw_image_request():
+        data = request.get_data(cache=False)
+        if not data:
+            return None, 'No image body provided'
+        if len(data) > MAX_FILE_SIZE:
+            return None, f'File too large (max {MAX_FILE_SIZE // 1024 // 1024}MB)'
+        try:
+            return Image.open(io.BytesIO(data)), None
+        except Exception as e:
+            return None, f'Failed to open raw image body: {e}'
+
     if request.method == 'POST' and 'file' in request.files:
         uploaded = request.files['file']
         if not uploaded.filename:

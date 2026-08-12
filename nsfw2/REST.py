@@ -80,6 +80,12 @@ PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
 NSFW_THRESHOLD = float(NSFW_THRESHOLD_STR)
 
 MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
+RAW_IMAGE_CONTENT_TYPES = {
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/octet-stream',
+}
 NSFW_WARMUP_SIZE = int(os.getenv('NSFW_WARMUP_SIZE', '224'))
 NSFW_PREPROCESSING_NAME = os.getenv('NSFW_PREPROCESSING', 'YAHOO').upper()
 _PREPROCESSING_ENUM = getattr(n2, "Preprocessing", None)
@@ -235,6 +241,10 @@ def create_nsfw_response(data: Dict[str, Any], processing_time: float) -> Dict[s
 app = Flask(__name__)
 
 
+def is_raw_image_request() -> bool:
+    return (request.content_type or '').split(';', 1)[0].strip().lower() in RAW_IMAGE_CONTENT_TYPES
+
+
 def _normalize_health_payload(payload):
     """Ensure every /health response exposes the common Animal Farm health shape."""
     if not isinstance(payload, dict):
@@ -361,7 +371,19 @@ def analyze():
     
     try:
         # Step 1: Get image into memory from any source
-        if request.method == 'POST' and 'file' in request.files:
+        if request.method == 'POST' and is_raw_image_request():
+            try:
+                from io import BytesIO
+                file_data = request.get_data(cache=False)
+                if not file_data:
+                    return error_response("No image body provided")
+                if len(file_data) > MAX_FILE_SIZE:
+                    return error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB")
+                image = Image.open(BytesIO(file_data)).convert('RGB')
+            except Exception as e:
+                return error_response(f"Failed to process raw image body: {str(e)}", 500)
+
+        elif request.method == 'POST' and 'file' in request.files:
             # Handle file upload
             uploaded_file = request.files['file']
             if uploaded_file.filename == '':

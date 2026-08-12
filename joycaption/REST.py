@@ -41,6 +41,12 @@ AUTO_UPDATE = os.getenv("AUTO_UPDATE", "true").lower() == "true"
 TIMEOUT = float(os.getenv("TIMEOUT", "15.0"))
 MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", str(32 * 1024 * 1024)))
 MAX_RESPONSE_LENGTH = int(os.getenv("MAX_RESPONSE_LENGTH", "4000"))
+RAW_IMAGE_CONTENT_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "application/octet-stream",
+}
 
 MODEL_ID = os.getenv("MODEL_ID", DEFAULT_MODEL)
 DEVICE = os.getenv("DEVICE", "auto")
@@ -166,7 +172,19 @@ def request_value(name: str, default: Any = None) -> Any:
     return request.args.get(name, default)
 
 
+def is_raw_image_request() -> bool:
+    return (request.content_type or "").split(";", 1)[0].strip().lower() in RAW_IMAGE_CONTENT_TYPES
+
+
 def image_from_request() -> Image.Image:
+    if request.method == "POST" and is_raw_image_request():
+        data = request.get_data(cache=False)
+        if not data:
+            raise ValueError("No image body provided")
+        if len(data) > MAX_FILE_SIZE:
+            raise ValueError(f"Image too large. Maximum size: {MAX_FILE_SIZE // 1024 // 1024}MB")
+        return Image.open(BytesIO(data)).convert("RGB")
+
     if request.method == "POST" and "file" in request.files:
         uploaded_file = request.files["file"]
         if uploaded_file.filename == "":

@@ -46,9 +46,19 @@ FOLDER = './'
 MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
 MAX_IMAGE_PIXELS = int(os.getenv('MAX_IMAGE_PIXELS', str(50_000_000)))  # 50MP default
 Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+RAW_IMAGE_CONTENT_TYPES = {
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/octet-stream',
+}
 
 # Global analyzer instance
 analyzer = None
+
+
+def is_raw_image_request() -> bool:
+    return (request.content_type or '').split(';', 1)[0].strip().lower() in RAW_IMAGE_CONTENT_TYPES
 
 
 def hex2rgb(hexcode):
@@ -582,7 +592,23 @@ def analyze():
     
     try:
         # Step 1: Get image into memory from any source
-        if request.method == 'POST' and 'file' in request.files:
+        if request.method == 'POST' and is_raw_image_request():
+            try:
+                from io import BytesIO
+                file_data = request.get_data(cache=False)
+                if not file_data:
+                    return error_response("No image body provided")
+                if len(file_data) > MAX_FILE_SIZE:
+                    return error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB")
+
+                image = Image.open(BytesIO(file_data))
+                dimension_error = validate_image_dimensions(image)
+                if dimension_error:
+                    return error_response(dimension_error)
+            except Exception as e:
+                return error_response(f"Failed to process raw image body: {str(e)}", 500)
+
+        elif request.method == 'POST' and 'file' in request.files:
             # Handle file upload
             uploaded_file = request.files['file']
             if uploaded_file.filename == '':

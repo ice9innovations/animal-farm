@@ -41,6 +41,16 @@ PORT = int(PORT_STR)
 
 MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
 EXIFTOOL_PATH = '/usr/bin/exiftool'
+RAW_IMAGE_CONTENT_TYPES = {
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/octet-stream',
+}
+
+
+def is_raw_image_request() -> bool:
+    return (request.content_type or '').split(';', 1)[0].strip().lower() in RAW_IMAGE_CONTENT_TYPES
 
 def serialize_metadata_value(value):
     """Convert EXIF/metadata values to JSON-serializable format"""
@@ -1476,7 +1486,51 @@ def analyze():
         url = None
         file_path = None
 
-        if request.method == 'POST':
+        if request.method == 'POST' and is_raw_image_request():
+            image_bytes = request.get_data(cache=False)
+            source_name = request.headers.get('X-Ice9-Image-Filename') or None
+            source_kind = 'raw_body'
+            received_at = datetime.utcnow().isoformat() + 'Z'
+
+            if not image_bytes:
+                return jsonify({
+                    "service": "metadata",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": "No image body provided"},
+                    "metadata": {
+                        "processing_time": round(time.time() - start_time, 3),
+                        "model_info": {"framework": "ExifTool + PIL + OpenCV + NumPy"}
+                    }
+                }), 400
+
+            if len(image_bytes) > MAX_FILE_SIZE:
+                return jsonify({
+                    "service": "metadata",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB"},
+                    "metadata": {
+                        "processing_time": round(time.time() - start_time, 3),
+                        "model_info": {"framework": "ExifTool + PIL + OpenCV + NumPy"}
+                    }
+                }), 400
+
+            try:
+                Image.open(io.BytesIO(image_bytes)).verify()
+            except Exception as e:
+                return jsonify({
+                    "service": "metadata",
+                    "status": "error",
+                    "predictions": [],
+                    "error": {"message": f"Invalid image: {str(e)}"},
+                    "metadata": {
+                        "processing_time": round(time.time() - start_time, 3),
+                        "model_info": {"framework": "ExifTool + PIL + OpenCV + NumPy"}
+                    }
+                }), 400
+
+        elif request.method == 'POST':
             # Handle POST file upload
             if 'file' not in request.files:
                 return jsonify({

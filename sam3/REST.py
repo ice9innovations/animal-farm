@@ -37,6 +37,13 @@ SAM3_CHECKPOINT = os.getenv('SAM3_CHECKPOINT')  # optional; None = auto-download
 PORT = int(os.getenv('PORT', 9779))
 PRIVATE = os.getenv('PRIVATE', 'true').lower() in ('true', '1', 'yes')
 CONFIDENCE_THRESHOLD = float(os.getenv('CONFIDENCE_THRESHOLD', '0.5'))
+MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))
+RAW_IMAGE_CONTENT_TYPES = {
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/octet-stream',
+}
 
 sys.path.insert(0, SAM3_PATH)
 
@@ -166,6 +173,14 @@ def segment_nouns(image: Image.Image, nouns: list[str]) -> dict:
 
 def _load_image_from_request(req) -> Image.Image:
     """Extract a PIL image from a Flask request (file upload, URL, or base64)."""
+    if (req.content_type or '').split(';', 1)[0].strip().lower() in RAW_IMAGE_CONTENT_TYPES:
+        raw = req.get_data(cache=False)
+        if not raw:
+            raise ValueError("No image body provided")
+        if len(raw) > MAX_FILE_SIZE:
+            raise ValueError(f"File too large. Maximum size: {MAX_FILE_SIZE // 1024 // 1024}MB")
+        return Image.open(io.BytesIO(raw))
+
     if req.content_type and 'multipart/form-data' in req.content_type:
         f = req.files.get('file')
         if not f:
@@ -301,7 +316,14 @@ def analyze():
     try:
         # --- resolve nouns ---
         nouns = None
-        if request.content_type and 'multipart/form-data' in request.content_type:
+        content_type = (request.content_type or '').split(';', 1)[0].strip().lower()
+        if content_type in RAW_IMAGE_CONTENT_TYPES:
+            raw = request.args.get('nouns') or request.headers.get('X-Ice9-Nouns') or ''
+            try:
+                nouns = json.loads(raw) if raw.startswith('[') else [n.strip() for n in raw.split(',')]
+            except Exception:
+                nouns = [n.strip() for n in raw.split(',')]
+        elif request.content_type and 'multipart/form-data' in request.content_type:
             raw = request.form.get('nouns', '')
             try:
                 nouns = json.loads(raw) if raw.startswith('[') else [n.strip() for n in raw.split(',')]

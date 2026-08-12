@@ -56,6 +56,12 @@ CONFIDENCE_THRESHOLD = float(CONFIDENCE_THRESHOLD_STR) if CONFIDENCE_THRESHOLD_S
 UPLOAD_FOLDER = './uploads'
 MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
+RAW_IMAGE_CONTENT_TYPES = {
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/octet-stream',
+}
 IMAGE_SIZE = 160
 
 
@@ -64,6 +70,10 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # Global variables
 analyzer = None
+
+
+def is_raw_image_request() -> bool:
+    return (request.content_type or '').split(';', 1)[0].strip().lower() in RAW_IMAGE_CONTENT_TYPES
 
 # Load emoji mappings from local JSON file
 emoji_mappings = {}
@@ -417,7 +427,19 @@ def analyze():
     
     try:
         # Step 1: Get image into memory from any source
-        if request.method == 'POST' and 'file' in request.files:
+        if request.method == 'POST' and is_raw_image_request():
+            try:
+                from io import BytesIO
+                file_data = request.get_data(cache=False)
+                if not file_data:
+                    return error_response("No image body provided")
+                if len(file_data) > MAX_FILE_SIZE:
+                    return error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB")
+                image = Image.open(BytesIO(file_data)).convert('RGB')
+            except Exception as e:
+                return error_response(f"Failed to process raw image body: {str(e)}", 500)
+
+        elif request.method == 'POST' and 'file' in request.files:
             # Handle file upload
             uploaded_file = request.files['file']
             if uploaded_file.filename == '':
@@ -585,4 +607,3 @@ if __name__ == '__main__':
         use_reloader=False,
         threaded=True
     )
-

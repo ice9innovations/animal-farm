@@ -32,6 +32,12 @@ if not CLIP_MODEL:
 PORT = int(PORT_STR)
 PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
 MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
+RAW_IMAGE_CONTENT_TYPES = {
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/octet-stream',
+}
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 if torch.backends.mps.is_available():
@@ -45,6 +51,10 @@ if device == "cuda":
     logger.info("Applied FP16 — 50% VRAM reduction")
 
 logger.info(f"CLIP model {CLIP_MODEL} ready")
+
+
+def is_raw_image_request() -> bool:
+    return (request.content_type or '').split(';', 1)[0].strip().lower() in RAW_IMAGE_CONTENT_TYPES
 
 
 def encode_image_only(image: Image.Image) -> Optional[list]:
@@ -310,7 +320,18 @@ def embeddings():
     try:
         image = None
 
-        if 'file' in request.files:
+        if is_raw_image_request():
+            file_data = request.get_data(cache=False)
+            if not file_data:
+                return error_response("No image body provided")
+            if len(file_data) > MAX_FILE_SIZE:
+                return error_response(f"File too large (max {MAX_FILE_SIZE // 1024 // 1024}MB)")
+            try:
+                image = Image.open(BytesIO(file_data)).convert('RGB')
+            except Exception as e:
+                return error_response(f"Failed to open raw image body: {e}", 500)
+
+        elif 'file' in request.files:
             uploaded_file = request.files['file']
             if uploaded_file.filename == '':
                 return error_response("No file selected")
@@ -407,7 +428,18 @@ def score():
         # --- get image ---
         image = None
 
-        if request.method == 'POST' and 'file' in request.files:
+        if request.method == 'POST' and is_raw_image_request():
+            file_data = request.get_data(cache=False)
+            if not file_data:
+                return error_response("No image body provided")
+            if len(file_data) > MAX_FILE_SIZE:
+                return error_response(f"File too large (max {MAX_FILE_SIZE // 1024 // 1024}MB)")
+            try:
+                image = Image.open(BytesIO(file_data)).convert('RGB')
+            except Exception as e:
+                return error_response(f"Failed to open raw image body: {e}", 500)
+
+        elif request.method == 'POST' and 'file' in request.files:
             uploaded_file = request.files['file']
             if uploaded_file.filename == '':
                 return error_response("No file selected")

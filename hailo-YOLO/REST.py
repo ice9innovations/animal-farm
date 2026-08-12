@@ -49,6 +49,12 @@ PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
 # Configuration
 MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
+RAW_IMAGE_CONTENT_TYPES = {
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/octet-stream',
+}
 CONFIDENCE_THRESHOLD = 0.25
 IOU_THRESHOLD = 0.3
 MAX_DETECTIONS = 100
@@ -78,6 +84,10 @@ COCO_CLASSES = [
 
 # Load emoji mappings from GitHub
 emoji_mappings = {}
+
+
+def is_raw_image_request() -> bool:
+    return (request.content_type or '').split(';', 1)[0].strip().lower() in RAW_IMAGE_CONTENT_TYPES
 
 def load_emoji_mappings():
     """Load emoji mappings from GitHub, fall back to local cache"""
@@ -777,7 +787,18 @@ def analyze():
     try:
         image = None
 
-        if request.method == 'POST' and 'file' in request.files:
+        if request.method == 'POST' and is_raw_image_request():
+            try:
+                file_data = request.get_data(cache=False)
+                if not file_data:
+                    return error_response("No image body provided")
+                if len(file_data) > MAX_FILE_SIZE:
+                    return error_response(f"File too large. Maximum size: {MAX_FILE_SIZE // 1024 // 1024}MB")
+                image = Image.open(BytesIO(file_data)).convert('RGB')
+            except Exception as e:
+                return error_response(f"Failed to process raw image body: {str(e)}", 500)
+
+        elif request.method == 'POST' and 'file' in request.files:
             uploaded_file = request.files['file']
             if uploaded_file.filename == '':
                 return error_response("No file selected")

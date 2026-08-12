@@ -71,6 +71,12 @@ sys.path.insert(0, str(rtdetrv2_path))
 # Configuration
 MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'}
+RAW_IMAGE_CONTENT_TYPES = {
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/octet-stream',
+}
 
 # COCO class names (same as your other services)
 COCO_CLASSES = [
@@ -348,6 +354,11 @@ def load_model():
 def allowed_file(filename: str) -> bool:
     """Check if file extension is allowed"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def is_raw_image_request() -> bool:
+    return (request.content_type or '').split(';', 1)[0].strip().lower() in RAW_IMAGE_CONTENT_TYPES
+
 
 def lookup_emoji(class_name: str) -> Optional[str]:
     """Look up emoji for a given class name using local emoji service (optimized - no HTTP requests)"""
@@ -679,7 +690,19 @@ def analyze():
 
     try:
         # Step 1: Get image into memory from any source
-        if request.method == 'POST' and 'file' in request.files:
+        if request.method == 'POST' and is_raw_image_request():
+            try:
+                from io import BytesIO
+                file_data = request.get_data(cache=False)
+                if not file_data:
+                    return error_response("No image body provided")
+                if len(file_data) > MAX_FILE_SIZE:
+                    return error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB")
+                image = Image.open(BytesIO(file_data)).convert('RGB')
+            except Exception as e:
+                return error_response(f"Failed to process raw image body: {str(e)}", 500)
+
+        elif request.method == 'POST' and 'file' in request.files:
             # Handle file upload
             uploaded_file = request.files['file']
             if uploaded_file.filename == '':

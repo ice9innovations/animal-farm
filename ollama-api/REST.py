@@ -10,6 +10,7 @@ import logging
 import random
 import nltk
 from nltk.tokenize import MWETokenizer
+from io import BytesIO
 from typing import Dict, Any, Optional, List
 
 
@@ -57,6 +58,12 @@ PORT = int(PORT_STR)
 TEMPERATURE = float(TEMPERATURE_STR)
 MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
 MAX_RESPONSE_LENGTH = 4000  # Reasonable limit for responses
+RAW_IMAGE_CONTENT_TYPES = {
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/octet-stream',
+}
 
 # Ensure upload directory exists
 os.makedirs(FOLDER, exist_ok=True)
@@ -71,6 +78,10 @@ COMMON_MODELS = {
 # Load emoji mappings from central API
 emoji_mappings = {}
 emoji_tokenizer = None
+
+
+def is_raw_image_request() -> bool:
+    return (request.content_type or '').split(';', 1)[0].strip().lower() in RAW_IMAGE_CONTENT_TYPES
 
 def load_emoji_mappings():
     """Load emoji mappings from GitHub, fall back to local cache"""
@@ -644,7 +655,19 @@ def analyze():
         temperature = float(temperature_param) if temperature_param else TEMPERATURE
         
         # Step 1: Get image into memory from any source
-        if request.method == 'POST' and 'file' in request.files:
+        if request.method == 'POST' and is_raw_image_request():
+            try:
+                from io import BytesIO
+                file_data = request.get_data(cache=False)
+                if not file_data:
+                    return error_response("No image body provided")
+                if len(file_data) > MAX_FILE_SIZE:
+                    return error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB")
+                image = Image.open(BytesIO(file_data)).convert('RGB')
+            except Exception as e:
+                return error_response(f"Failed to process raw image body: {str(e)}", 500)
+
+        elif request.method == 'POST' and 'file' in request.files:
             # Handle file upload
             uploaded_file = request.files['file']
             if uploaded_file.filename == '':
@@ -732,8 +755,12 @@ def analyze_image_with_prompt():
     """Analyze uploaded image with custom prompt"""
     try:
         # Get prompt from form data or JSON (handle different content types)
-        prompt = request.form.get('prompt')
-        model = request.form.get('model')
+        prompt = request.args.get('prompt') or request.headers.get('X-Ice9-Prompt')
+        model = request.args.get('model') or request.headers.get('X-Ice9-Model')
+
+        if not is_raw_image_request():
+            prompt = prompt or request.form.get('prompt')
+            model = model or request.form.get('model')
         
         # Fallback to JSON if form data is empty and content-type is JSON
         if not prompt and request.is_json:
@@ -745,6 +772,33 @@ def analyze_image_with_prompt():
         # Set defaults
         prompt = prompt or VISION_PROMPT
         model = model or VISION_MODEL
+
+        if is_raw_image_request():
+            file_data = request.get_data(cache=False)
+            if not file_data:
+                return jsonify({
+                    "error": "No image body provided",
+                    "status": "error"
+                }), 400
+            if len(file_data) > MAX_FILE_SIZE:
+                return jsonify({
+                    "error": f"File too large. Maximum size: {MAX_FILE_SIZE // 1024 // 1024}MB",
+                    "status": "error"
+                }), 400
+            try:
+                image = Image.open(BytesIO(file_data)).convert('RGB')
+                result = process_image_for_ollama(image, prompt, model)
+                if not result.get("success"):
+                    return jsonify({
+                        "error": result.get("error", "Image analysis failed"),
+                        "status": "error"
+                    }), 500
+                return jsonify(result)
+            except Exception as e:
+                return jsonify({
+                    "error": f"Image analysis failed: {str(e)}",
+                    "status": "error"
+                }), 500
         
         if not request.files:
             return jsonify({
@@ -752,37 +806,28 @@ def analyze_image_with_prompt():
                 "status": "error"
             }), 400
         
-        filepath = None  # Initialize for proper cleanup
         for field_name, file_data in request.files.items():
             if not file_data.filename:
                 continue
                 
             try:
-                filename = uuid.uuid4().hex + ".jpg"
-                filepath = os.path.join(FOLDER, filename)
-                file_data.save(filepath)
-                
-                file_size = os.path.getsize(filepath)
-                if file_size > MAX_FILE_SIZE:
-                    cleanup_file(filepath)
+                image_bytes = file_data.read()
+                if len(image_bytes) > MAX_FILE_SIZE:
                     return jsonify({
                         "error": f"File too large. Maximum size: {MAX_FILE_SIZE // 1024 // 1024}MB",
                         "status": "error"
                     }), 400
-                
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                result = loop.run_until_complete(process_image_with_ollama(filename, prompt, model))
-                loop.close()
-                
-                # Cleanup after successful processing
-                cleanup_file(filepath)
+
+                image = Image.open(BytesIO(image_bytes)).convert('RGB')
+                result = process_image_for_ollama(image, prompt, model)
+                if not result.get("success"):
+                    return jsonify({
+                        "error": result.get("error", "Image analysis failed"),
+                        "status": "error"
+                    }), 500
                 return jsonify(result)
                 
             except Exception as e:
-                # Cleanup on error
-                if filepath:
-                    cleanup_file(filepath)
                 return jsonify({
                     "error": f"Image analysis failed: {str(e)}",
                     "status": "error"
