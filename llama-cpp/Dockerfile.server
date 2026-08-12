@@ -4,8 +4,8 @@ FROM nvidia/cuda:12.2.0-devel-ubuntu22.04 AS builder
 # Override at build time for your target GPU:
 #   docker build --build-arg CUDA_ARCH=80 ...   (A100)
 #   docker build --build-arg CUDA_ARCH=89 ...   (RTX 4090 / L40)
-# Default covers the most common RunPod GPUs.
-ARG CUDA_ARCH=80;86;89;90
+# Docker builds cannot reliably detect the host GPU, so this is required.
+ARG CUDA_ARCH
 
 RUN apt-get update && apt-get install -y \
     git \
@@ -20,7 +20,8 @@ WORKDIR /build/llama.cpp
 
 RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1
 
-RUN CC=/usr/bin/gcc-11 CXX=/usr/bin/g++-11 \
+RUN test -n "$CUDA_ARCH" && \
+    CC=/usr/bin/gcc-11 CXX=/usr/bin/g++-11 \
     cmake -B build \
     -DGGML_CUDA=ON \
     -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCH}" \

@@ -220,12 +220,11 @@ docker stop qwen-cpp && docker rm qwen-cpp && docker rmi qwen-cpp
 
 Builds `llama-server` from source in a CUDA devel stage, then packages it with the Flask wrapper. No host binary required. Models are volume-mounted at runtime.
 
-The `CUDA_ARCH` build arg defaults to `80;86;89;90` (A100, RTX 3090/4090, L40). Override for your specific GPU to reduce binary size and build time.
+The local install script detects the machine's GPU architecture and builds only that target. If detection is unavailable, pass the architecture explicitly, for example `bash install.sh 86`.
+
+Docker builds cannot reliably detect the host GPU, so pass `CUDA_ARCH` explicitly.
 
 ```bash
-# Build (default multi-arch)
-docker build -f Dockerfile.server -t qwen-cpp-server /home/sd/animal-farm/qwen-cpp/
-
 # Build for a specific GPU (e.g. RTX 3090 = SM 8.6)
 docker build -f Dockerfile.server --build-arg CUDA_ARCH=86 -t qwen-cpp-server /home/sd/animal-farm/qwen-cpp/
 
