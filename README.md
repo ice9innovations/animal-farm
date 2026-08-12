@@ -2,7 +2,9 @@
 
 **All animals are equal, but some animals are more equal than others**
 
-Animal Farm is an edge-computing, distributed AI solution based on the technology developed in Window to the World. Using less than 100W of power, Animal Farm supports field deployments in low power or battery-only environments. Window to the World, the technology that Animal Farm is based on, is a new form of emergent AI that uses a novel consensus-based architecture and detailed data storage to create and map a complex system. It uses emergent intelligence to make decisions about any data the system can analyze. The result is an open system that is a powerful and generalizable AI. It is able to make decisions about any form of data that it has the models to analyze.
+Animal Farm is a distributed AI inference platform that orchestrates specialized models across heterogeneous compute resources, from low-power edge devices to high-performance GPUs. Workloads can be matched to the hardware best suited to run them, allowing Animal Farm to support both low-power deployments and substantially more capable multi-GPU systems.
+
+Rather than relying on a single general-purpose model, Animal Farm combines the outputs of specialized models through a consensus-based architecture. Each model contributes what it can observe, and those results can be combined and analyzed to produce a richer understanding of the input. The system is extensible: new models and capabilities can be added without requiring the rest of the architecture to understand how those models work.
 
 ## Architecture
 
