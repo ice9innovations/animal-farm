@@ -2,9 +2,9 @@
 
 **All animals are equal, but some animals are more equal than others**
 
-Animal Farm is a distributed AI inference platform that orchestrates specialized models across heterogeneous compute resources, from low-power edge devices to high-performance GPUs. Workloads can be matched to the hardware best suited to run them, allowing Animal Farm to support both low-power deployments and substantially more capable multi-GPU systems.
+Animal Farm is a distributed AI inference platform that orchestrates specialized models across diverse compute resources. It consumes a minimum of 25W of power in its smallest configuration. Workloads can be matched to the hardware best suited to run them allowing Animal Farm to support both low-power deployments and substantially more capable multi-GPU systems. 
 
-Rather than relying on a single general-purpose model, Animal Farm combines the outputs of specialized models through a consensus-based architecture. Each model contributes what it can observe, and those results can be combined and analyzed to produce a richer understanding of the input. The system is extensible: new models and capabilities can be added without requiring the rest of the architecture to understand how those models work.
+The system is extensible. New models and capabilities can be added without requiring the rest of the architecture to understand how those models work. Instead of relying on a single general-purpose model, Animal Farm combines the outputs of specialized models through a consensus-based architecture. Each model contributes what it can observe, and those results can be combined and analyzed to produce a richer understanding of the input. 
 
 ## Architecture
 
