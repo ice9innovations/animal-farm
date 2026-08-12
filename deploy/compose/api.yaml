@@ -1,0 +1,28 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: ../../api
+      dockerfile: Dockerfile
+    container_name: api
+    environment:
+      - PORT=8080
+      - API_HOST=api
+      - PUBLIC_URL=http://api:8080
+      - UPLOAD_DIR=uploads
+      - MAX_FILE_SIZE=10485760
+    volumes:
+      - api_uploads:/usr/src/app/uploads
+      - ../../api/service_config.compose.json:/usr/src/app/service_config.json:ro
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  api_uploads:
+

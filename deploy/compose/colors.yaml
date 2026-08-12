@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  colors:
+    build:
+      context: ../../colors
+      dockerfile: Dockerfile
+    container_name: colors
+    environment:
+      - PRIVATE=false
+      - PORT=7770
+      - COLOR_SYSTEM=copic
+      - MAX_FILE_SIZE=33554432
+      - MAX_IMAGE_PIXELS=50000000
+    volumes:
+      - colors_uploads:/usr/src/app/uploads
+    ports:
+      - "7770:7770"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7770/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  colors_uploads:

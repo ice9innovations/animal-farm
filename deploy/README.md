@@ -28,4 +28,3 @@ docker compose -f deploy/compose/ollama-api.yaml up -d --build --scale ollama-ap
 ### Notes
 - GPU access uses `device_requests` (NVIDIA runtime).
 - For CPU-only runs, remove the `device_requests` section.
-
