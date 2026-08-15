@@ -109,8 +109,10 @@ SYNTHESIS_PROMPT_INSTRUCTION = (
     "summary was constructed. Describe visible content directly; avoid phrases like "
     "\"as indicated by\", \"based on\", or \"according to\". Use neutral visual "
     "language and avoid body-size judgments or sexualized emphasis unless that detail "
-    "is explicit in the preferred caption and central to the image. Return exactly one "
-    "image-description sentence and nothing else."
+    "is explicit in the preferred caption and central to the image. Keep it short, "
+    "ideally 12 to 25 words. Prefer a simple subject, action, and setting. Avoid "
+    "semicolons, long qualification clauses, and uncertainty phrases unless necessary. "
+    "Return exactly one image-description sentence and nothing else."
 )
 
 SUMMARY_META_PATTERN = re.compile(
@@ -220,6 +222,11 @@ def clean_summary(summary: str) -> str:
     meta_phrase_match = SUMMARY_META_PHRASE_PATTERN.search(summary)
     if meta_phrase_match:
         summary = summary[:meta_phrase_match.start()].strip()
+
+    if ";" in summary:
+        first_clause = summary.split(";", 1)[0].strip()
+        if len(first_clause.split()) >= 6:
+            summary = first_clause
 
     summary = summary.rstrip(" ;,:-—")
     if summary and summary[-1] not in ".!?":
