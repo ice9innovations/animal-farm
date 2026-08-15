@@ -112,7 +112,10 @@ SYNTHESIS_PROMPT_INSTRUCTION = (
     "is explicit in the preferred caption and central to the image. Keep it short, "
     "ideally 12 to 25 words. Prefer a simple subject, action, and setting. Avoid "
     "semicolons, long qualification clauses, and uncertainty phrases unless necessary. "
-    "Return exactly one image-description sentence and nothing else."
+    "Choose one clear posture or action; do not combine conflicting words like sitting "
+    "and lying. Omit generic background details such as walls, curtains, or indoor "
+    "settings unless they are visually distinctive or needed for the scene. Return "
+    "exactly one image-description sentence and nothing else."
 )
 
 SUMMARY_META_PATTERN = re.compile(
