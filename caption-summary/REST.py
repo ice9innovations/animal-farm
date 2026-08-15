@@ -41,6 +41,7 @@ import sys
 import json
 import time
 import logging
+import re
 import requests
 
 from flask import Flask, request, jsonify
@@ -101,9 +102,19 @@ SYNTHESIS_PROMPT_INSTRUCTION = (
     "at the start of the rewritten summary. Preserve any gendered subject references "
     "that appear in the captions, especially the preferred caption, unless the captions "
     "clearly conflict. Do not mention captions, models, conflicts between models, "
-    "or what other models did or did not describe. Do not add statements about absent "
-    "animals, text, objects, or content unless that absence is the main visual subject. "
-    "Return only the sentence."
+    "consensus data, vote counts, confidence, evidence, or what other models did or "
+    "did not describe. Do not add statements about absent animals, text, objects, or "
+    "content unless that absence is the main visual subject. Do not include notes, "
+    "explanations, caveats, rationale, markdown, or any statement about how the "
+    "summary was constructed. Describe visible content directly; avoid phrases like "
+    "\"as indicated by\", \"based on\", or \"according to\". Use neutral visual "
+    "language and avoid body-size judgments or sexualized emphasis unless that detail "
+    "is explicit in the preferred caption and central to the image. Return exactly one "
+    "image-description sentence and nothing else."
+)
+
+SUMMARY_META_PATTERN = re.compile(
+    r"(?is)(?:^|\s+)(?:note|explanation|rationale|reasoning|analysis|commentary)\s*:"
 )
 
 
@@ -174,6 +185,19 @@ def build_prompt(
     parts.append(_format_captions(captions, preferred_caption_service))
     parts.append(SYNTHESIS_PROMPT_INSTRUCTION)
     return "\n\n".join(parts)
+
+
+def clean_summary(summary: str) -> str:
+    """Remove common LLM wrappers while preserving the generated caption text."""
+    summary = summary.strip()
+    summary = re.sub(r"^```(?:\w+)?\s*|\s*```$", "", summary).strip()
+    summary = re.sub(r"(?i)^(?:summary|caption|description)\s*:\s*", "", summary).strip()
+
+    meta_match = SUMMARY_META_PATTERN.search(summary)
+    if meta_match:
+        summary = summary[:meta_match.start()].strip()
+
+    return summary.strip(' "\'')
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +379,7 @@ def summarize():
             preferred_caption_service = None
 
         prompt = build_prompt(captions, nouns, verbs, preferred_caption_service)
-        summary = synthesize(prompt)
+        summary = clean_summary(synthesize(prompt))
 
         if not summary:
             return jsonify({"status": "error", "error": "Empty response from LLM backend"}), 500
