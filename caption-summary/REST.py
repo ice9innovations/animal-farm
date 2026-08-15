@@ -117,6 +117,26 @@ SUMMARY_META_PATTERN = re.compile(
     r"(?is)(?:^|\s+)(?:note|explanation|rationale|reasoning|analysis|commentary)\s*:"
 )
 
+SUMMARY_META_PHRASE_PATTERN = re.compile(
+    r"(?is)"
+    r"(?:\s*[—-]\s*)?"
+    r"(?:"
+    r"\bthis (?:depiction|description|summary|sentence)\b|"
+    r"\b(?:the )?depiction is consistent\b|"
+    r"\bconsistent across\b|"
+    r"\bacross most models\b|"
+    r"\bmodel-specific\b|"
+    r"\bmodels?' descriptions\b|"
+    r"\bas indicated by\b|"
+    r"\bbased on\b|"
+    r"\baccording to\b|"
+    r"\bprovided information\b|"
+    r"\bdoes not contradict\b|"
+    r"\bdo not contradict\b|"
+    r"\bwithout repeating\b"
+    r")"
+)
+
 
 def _format_noun_consensus(nouns: list) -> str:
     if not nouns:
@@ -196,6 +216,14 @@ def clean_summary(summary: str) -> str:
     meta_match = SUMMARY_META_PATTERN.search(summary)
     if meta_match:
         summary = summary[:meta_match.start()].strip()
+
+    meta_phrase_match = SUMMARY_META_PHRASE_PATTERN.search(summary)
+    if meta_phrase_match:
+        summary = summary[:meta_phrase_match.start()].strip()
+
+    summary = summary.rstrip(" ;,:-—")
+    if summary and summary[-1] not in ".!?":
+        summary = f"{summary}."
 
     return summary.strip(' "\'')
 
