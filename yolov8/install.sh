@@ -24,8 +24,12 @@ rm -rf "$SCRIPT_DIR/venv"
 python3.11 -m venv "$SCRIPT_DIR/venv"
 
 "$SCRIPT_DIR/venv/bin/pip" install --upgrade pip
+
+# PyTorch with CUDA 12.8 (required for Blackwell/RTX 50-series sm_120 support)
 "$SCRIPT_DIR/venv/bin/pip" install --no-cache-dir \
-    torch==2.5.1 torchvision==0.20.1
+    torch==2.10.0+cu128 \
+    torchvision==0.25.0+cu128 \
+    --index-url https://download.pytorch.org/whl/cu128
 "$SCRIPT_DIR/venv/bin/pip" install --no-cache-dir -r "$SCRIPT_DIR/requirements.txt"
 
 # Generate systemd service file
