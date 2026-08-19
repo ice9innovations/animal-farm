@@ -133,7 +133,6 @@ CORS(app)
 
 # GPU configuration
 USE_GPU = os.getenv('USE_GPU', 'true').lower() == 'true'
-REQUIRE_GPU = os.getenv('REQUIRE_GPU', 'true').lower() == 'true'
 FACE_BACKEND = os.getenv('FACE_BACKEND', 'auto').strip().lower()
 ONNX_PROVIDER_ORDER = [
     item.strip()
@@ -201,12 +200,25 @@ def initialize_face_analyzer():
                     "Initializing BlazeFace ONNX analyzer "
                     f"({'GPU providers allowed' if USE_GPU else 'CPU only'})..."
                 )
-                face_analyzer = TRTFaceAnalyzer(
-                    model_path=FACE_MODEL_PATH,
-                    use_gpu=USE_GPU,
-                    require_gpu=REQUIRE_GPU,
-                    provider_order=ONNX_PROVIDER_ORDER,
-                )
+                try:
+                    face_analyzer = TRTFaceAnalyzer(
+                        model_path=FACE_MODEL_PATH,
+                        use_gpu=USE_GPU,
+                        provider_order=ONNX_PROVIDER_ORDER,
+                    )
+                    face_analyzer.warmup()
+                except Exception as gpu_error:
+                    if not USE_GPU:
+                        raise
+                    logger.warning(
+                        f"BlazeFace ONNX GPU initialization failed; falling back to CPU: {gpu_error}"
+                    )
+                    face_analyzer = TRTFaceAnalyzer(
+                        model_path=FACE_MODEL_PATH,
+                        use_gpu=False,
+                        provider_order=["cpu"],
+                    )
+                    face_analyzer.warmup()
                 _analyzer_framework = "BlazeFace ONNX Runtime"
                 _analyzer_backend = "onnx"
                 _analyzer_provider = getattr(face_analyzer, "provider", None)
@@ -433,7 +445,6 @@ def health_check():
                     'fairness': 'Tested across demographics',
                     'keypoints': 6,
                     'gpu_enabled': USE_GPU,
-                    'gpu_required': REQUIRE_GPU,
                     'provider_order': ONNX_PROVIDER_ORDER,
                 }
             },

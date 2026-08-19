@@ -7,7 +7,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
     FACE_BACKEND=auto \
     FACE_MODEL_PATH=/models/face/blaze.onnx \
     USE_GPU=true \
-    REQUIRE_GPU=true \
     ONNX_PROVIDER_ORDER=cuda,cpu
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

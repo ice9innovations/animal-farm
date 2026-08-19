@@ -83,7 +83,6 @@ set_env_value "TIMEOUT" "2.0"
 set_env_value "FACE_BACKEND" "onnx"
 set_env_value "FACE_MODEL_PATH" "$(realpath -m "$FACE_MODEL_PATH")"
 set_env_value "USE_GPU" "true"
-set_env_value "REQUIRE_GPU" "true"
 set_env_value "ONNX_PROVIDER_ORDER" "cuda,cpu"
 set_env_value "ORT_CUDA_GPU_MEM_LIMIT_MB" "512"
 if [ ! -f "$FACE_MODEL_PATH" ]; then

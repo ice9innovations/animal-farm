@@ -58,7 +58,6 @@ set_env_value "TIMEOUT" "2.0"
 set_env_value "FACE_BACKEND" "onnx"
 set_env_value "FACE_MODEL_PATH" "$(realpath -m "$FACE_MODEL_PATH")"
 set_env_value "USE_GPU" "true"
-set_env_value "REQUIRE_GPU" "true"
 set_env_value "ONNX_PROVIDER_ORDER" "cuda,cpu"
 if [ ! -f "$FACE_MODEL_PATH" ]; then
     FACE_MODEL_PATH="$FACE_MODEL_PATH" "$SCRIPT_DIR/download_model.sh"

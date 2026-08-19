@@ -177,6 +177,23 @@ class TRTFaceAnalyzer:
         self.providers = self.session.get_providers()
         logger.info(f"✅ TRTFaceAnalyzer initialized — provider: {actual_provider}, format: {self.model_format}")
 
+    def warmup(self) -> None:
+        blank = Image.new("RGB", (MODEL_INPUT_SIZE, MODEL_INPUT_SIZE))
+        if self.model_format == "end_to_end_blazeface":
+            inp, _, _ = self._preprocess_end_to_end(blank)
+            self.session.run(
+                None,
+                {
+                    "image": inp.astype(np.float32),
+                    "conf_threshold": np.array([CONF_THRESHOLD], dtype=np.float32),
+                    "max_detections": np.array([MAX_DETECTIONS], dtype=np.int64),
+                    "iou_threshold": np.array([IOU_THRESHOLD], dtype=np.float32),
+                },
+            )
+        else:
+            inp, _, _ = self._preprocess(blank)
+            self.session.run(None, {self.input_name: inp})
+
     def _detect_model_format(self) -> str:
         input_names = set(self.inputs)
         if {"image", "conf_threshold", "max_detections", "iou_threshold"}.issubset(input_names):
