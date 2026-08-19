@@ -5,6 +5,8 @@ import uuid
 import time
 import io
 import subprocess
+import socket
+import struct
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 import hashlib
@@ -20,7 +22,6 @@ from dotenv import load_dotenv
 from PIL import Image, ExifTags, ImageStat, ImageFilter
 from PIL.ExifTags import TAGS, GPSTAGS
 from fractions import Fraction
-import exiftool
 import imagehash
 
 load_dotenv()
@@ -40,13 +41,49 @@ PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
 PORT = int(PORT_STR)
 
 MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
-EXIFTOOL_PATH = '/usr/bin/exiftool'
 RAW_IMAGE_CONTENT_TYPES = {
     'image/jpeg',
     'image/png',
     'image/webp',
     'application/octet-stream',
 }
+
+# --- Persistent ExifTool daemon -------------------------------------------
+# Spawning a fresh "exiftool" process per request pays full Perl interpreter
+# + Image::ExifTool module load cost every time (~50ms measured on this
+# machine). exiftool_daemon.pl loads the module once and answers requests
+# over a Unix domain socket for the life of this process; see that file's
+# header comment for the wire protocol and the two request modes.
+#
+# The daemon's lifecycle (start, readiness wait, cleanup on stop) is owned by
+# run.sh, the same way llama-cpp/qwen-cpp's run.sh owns llama-server - not by
+# this process. By the time REST.py runs, the daemon is expected to already
+# be up; see the reachability check in __main__ below.
+EXIFTOOL_DAEMON_SOCKET = f'/tmp/animal-farm-metadata-exiftool-{PORT}.sock'
+
+
+def _recv_exact(sock: socket.socket, n: int) -> bytes:
+    buf = b''
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            raise ConnectionError("exiftool daemon closed connection unexpectedly")
+        buf += chunk
+    return buf
+
+
+def query_exiftool_daemon(mode: bytes, payload: bytes) -> Dict[str, Any]:
+    """Send one request to the persistent ExifTool daemon and return the parsed tag dict.
+
+    mode b'P': payload is a UTF-8 file path. mode b'D': payload is raw image
+    bytes, sent as-is and never written to disk by either side.
+    """
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+        sock.connect(EXIFTOOL_DAEMON_SOCKET)
+        sock.sendall(mode + struct.pack('>I', len(payload)) + payload)
+        length = struct.unpack('>I', _recv_exact(sock, 4))[0]
+        body = _recv_exact(sock, length)
+    return json.loads(body.decode('utf-8'))
 
 
 def is_raw_image_request() -> bool:
@@ -285,65 +322,29 @@ def extract_pil_metadata_bytes(image_bytes: bytes) -> Dict[str, Any]:
     except Exception as e:
         return {"error": f"PIL extraction failed: {str(e)}"}
 
-def extract_exiftool_metadata(filepath: str) -> Dict[str, Any]:
-    """Extract comprehensive metadata using ExifTool"""
+def _extract_exiftool_metadata(mode: bytes, payload: bytes) -> Dict[str, Any]:
+    """Query the persistent ExifTool daemon and post-process the result.
+
+    Both call sites below produce the same flat, human-readable output shape
+    (see exiftool_daemon.pl) - they only differ in whether the daemon reads
+    the image from a file path or from in-memory bytes.
+    """
     try:
-        with exiftool.ExifTool() as et:
-            metadata = et.get_metadata(filepath)
+        metadata = query_exiftool_daemon(mode, payload)
 
-            # Remove the SourceFile entry
-            if 'SourceFile' in metadata:
-                del metadata['SourceFile']
-
-            # Define fields to exclude (large binary data that's rarely useful)
-            exclude_fields = {
-                'ICC_Profile:BlueTRC',
-                'ICC_Profile:GreenTRC',
-                'ICC_Profile:RedTRC',
-                'PIL:icc_profile',
-                'PIL:exif',  # Raw EXIF binary - we get this parsed elsewhere
-            }
-
-            # Process metadata to handle different data types
-            processed = {}
-            for key, value in metadata.items():
-                # Skip large binary fields that clutter output
-                if key in exclude_fields:
-                    processed[key] = "<Excluded: Large binary data>"
-                    continue
-
-                processed[key] = serialize_metadata_value(value)
-
-            return processed
-
-    except Exception as e:
-        return {"error": f"ExifTool extraction failed: {str(e)}"}
-
-def extract_exiftool_metadata_bytes(image_bytes: bytes) -> Dict[str, Any]:
-    """Extract metadata with ExifTool from stdin instead of a temp file."""
-    try:
-        proc = subprocess.run(
-            [EXIFTOOL_PATH, '-j', '-'],
-            input=image_bytes,
-            capture_output=True,
-            check=True,
-        )
-        payload = json.loads(proc.stdout.decode('utf-8'))
-        metadata = payload[0] if payload else {}
-
-        if 'SourceFile' in metadata:
-            del metadata['SourceFile']
-
+        # Define fields to exclude (large binary data that's rarely useful)
         exclude_fields = {
             'ICC_Profile:BlueTRC',
             'ICC_Profile:GreenTRC',
             'ICC_Profile:RedTRC',
             'PIL:icc_profile',
-            'PIL:exif',
+            'PIL:exif',  # Raw EXIF binary - we get this parsed elsewhere
         }
 
+        # Process metadata to handle different data types
         processed = {}
         for key, value in metadata.items():
+            # Skip large binary fields that clutter output
             if key in exclude_fields:
                 processed[key] = "<Excluded: Large binary data>"
                 continue
@@ -354,6 +355,14 @@ def extract_exiftool_metadata_bytes(image_bytes: bytes) -> Dict[str, Any]:
 
     except Exception as e:
         return {"error": f"ExifTool extraction failed: {str(e)}"}
+
+def extract_exiftool_metadata(filepath: str) -> Dict[str, Any]:
+    """Extract metadata using ExifTool from an on-disk file."""
+    return _extract_exiftool_metadata(b'P', filepath.encode('utf-8'))
+
+def extract_exiftool_metadata_bytes(image_bytes: bytes) -> Dict[str, Any]:
+    """Extract metadata using ExifTool from in-memory bytes - never written to disk."""
+    return _extract_exiftool_metadata(b'D', image_bytes)
 
 def detect_ai_generation_markers(metadata: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -1425,13 +1434,12 @@ print("Metadata service: CORS enabled for direct browser communication")
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    # Test ExifTool availability
+    # Test ExifTool daemon availability
     exiftool_available = True
     exiftool_version = None
     try:
-        with exiftool.ExifTool() as et:
-            # Test with a simple command
-            exiftool_version = "Available"
+        result = query_exiftool_daemon(b'D', b'')
+        exiftool_version = f"Available (daemon): {result.get('ExifToolVersion', 'unknown')}"
     except Exception as e:
         exiftool_available = False
         exiftool_version = f"Error: {str(e)}"
@@ -1723,14 +1731,14 @@ def analyze_v2_compat():
 
 
 if __name__ == '__main__':
-    # Test ExifTool availability
+    # run.sh starts exiftool_daemon.pl and waits for it before launching
+    # this process - verify it's actually reachable rather than assuming.
     try:
-        with exiftool.ExifTool() as et:
-            print("ExifTool: Available and working")
+        result = query_exiftool_daemon(b'D', b'')
+        print(f"ExifTool daemon: reachable (socket {EXIFTOOL_DAEMON_SOCKET}, version {result.get('ExifToolVersion', 'unknown')})")
     except Exception as e:
-        print(f"WARNING: ExifTool not available: {e}")
-        print("Install with: sudo apt-get install exiftool")
-    
+        raise RuntimeError(f"exiftool_daemon not reachable at {EXIFTOOL_DAEMON_SOCKET}: {e}")
+
     host = "0.0.0.0" if not PRIVATE else "127.0.0.1"
     print(f"Starting Metadata Extraction API on {host}:{PORT}")
     print(f"Private mode: {PRIVATE}")
