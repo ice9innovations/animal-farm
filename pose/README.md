@@ -88,9 +88,9 @@ TIMEOUT=2.0                               # Network timeout for mapping fetches 
 POSE_BACKEND=auto                         # auto, onnx, trt, or mediapipe
 POSE_DETECTION_MODEL=/home/sd/animal-farm/models/pose/pose_detection.onnx
 POSE_LANDMARK_MODEL=/home/sd/animal-farm/models/pose/pose_landmark_heavy.onnx
-USE_GPU=true                              # Allow ONNX Runtime GPU providers when available
-REQUIRE_GPU=true                          # Fail startup if USE_GPU=true but only CPU providers are available
+USE_GPU=true                              # Try ONNX Runtime GPU providers first, then CPU
 ONNX_PROVIDER_ORDER=cuda,cpu              # Use TensorRT only on hosts with TensorRT installed
+ORT_CUDA_GPU_MEM_LIMIT_MB=512             # Optional CUDA arena memory cap for Jetson
 
 # Pose Analysis Settings
 POSE_MIN_DETECTION_CONFIDENCE=0.5         # Minimum detection confidence (0.0-1.0)
@@ -115,18 +115,18 @@ MAX_FILE_SIZE=33554432                    # Maximum file size in bytes (32MB def
 | `POSE_LANDMARK_MODEL` | No | `../models/pose/pose_landmark_heavy.onnx` | BlazePose landmark ONNX model path |
 | `POSE_MODEL_COMPLEXITY` | No | 2 | Model accuracy (0=fastest, 2=most accurate) |
 | `ENABLE_SEGMENTATION` | No | `false` | Enable MediaPipe body segmentation internally |
-| `USE_GPU` | No | `true` | Allow ONNX Runtime TensorRT/CUDA providers when available; set `false` for CPU-only hosts |
-| `REQUIRE_GPU` | No | `true` | Fail startup when `USE_GPU=true` but ONNX Runtime only exposes CPU providers |
+| `USE_GPU` | No | `true` | Try ONNX Runtime TensorRT/CUDA providers first; if initialization or warmup fails, fall back to CPU |
 | `ONNX_PROVIDER_ORDER` | No | `cuda,cpu` | Comma-separated ONNX Runtime provider preference. Add `tensorrt` only on hosts with TensorRT installed. |
+| `ORT_CUDA_GPU_MEM_LIMIT_MB` | No | - | Optional CUDA arena memory cap in MB, useful on Jetson unified-memory systems |
 | `POSE_VENV` | No | - | Optional virtualenv directory override for `run.sh`; default is `venv` |
 
 ### Backend Matrix
 
 | Host type | Recommended settings | Notes |
 |-----------|----------------------|-------|
-| RTX 3090 / RTX 5090 | `POSE_BACKEND=onnx`, `USE_GPU=true`, `REQUIRE_GPU=true` | Run `install.sh`; it installs the PyPI `onnxruntime-gpu==1.23.2` wheel into `venv`. |
-| Jetson Orin | `POSE_BACKEND=onnx`, `USE_GPU=true`, `REQUIRE_GPU=true`, `ONNX_PROVIDER_ORDER=cuda,tensorrt` | Run `install_jetson.sh`; it uses `requirements-jetson.txt`, installs JetPack-compatible `onnxruntime-gpu` separately, and verifies TensorRT/CUDA providers. |
-| Raspberry Pi | `POSE_BACKEND=onnx`, `USE_GPU=false`, `REQUIRE_GPU=false` | Run `install_onnx_cpu.sh`; this avoids the MediaPipe dependency path. |
+| RTX 3090 / RTX 5090 | `POSE_BACKEND=onnx`, `USE_GPU=true` | Run `install.sh`; it installs the PyPI `onnxruntime-gpu==1.23.2` wheel into `venv`. |
+| Jetson Orin | `POSE_BACKEND=onnx`, `USE_GPU=true`, `ONNX_PROVIDER_ORDER=cuda,tensorrt`, `ORT_CUDA_GPU_MEM_LIMIT_MB=512` | Run `install_jetson.sh`; it uses `requirements-jetson.txt`, installs JetPack-compatible `onnxruntime-gpu` separately, and verifies TensorRT/CUDA providers. |
+| Raspberry Pi | `POSE_BACKEND=onnx`, `USE_GPU=false` | Run `install_onnx_cpu.sh`; this avoids the MediaPipe dependency path. |
 | Compatibility mode | `POSE_BACKEND=mediapipe` | Uses the original MediaPipe implementation only when explicitly selected. |
 
 The ONNX backend requires `models/pose/pose_detection.onnx` and `models/pose/pose_landmark_heavy.onnx`. These model files are bundled with the repository.

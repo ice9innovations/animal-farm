@@ -39,6 +39,7 @@ def _has_tensorrt_libraries() -> bool:
     return ctypes.util.find_library("nvinfer") is not None
 
 TRT_CACHE_DIR = os.path.join(os.path.dirname(__file__), '..', 'models', 'trt_cache')
+CUDA_GPU_MEM_LIMIT_MB = os.getenv("ORT_CUDA_GPU_MEM_LIMIT_MB", "").strip()
 
 LANDMARK_NAMES = [
     'nose', 'left_eye_inner', 'left_eye', 'left_eye_outer',
@@ -196,7 +197,7 @@ class TRTPoseAnalyzer:
                     )
                 )
             elif provider == "cuda" and "CUDAExecutionProvider" in available_providers:
-                providers.append(("CUDAExecutionProvider", {"device_id": 0}))
+                providers.append(("CUDAExecutionProvider", self._cuda_provider_options()))
             elif provider == "cpu" and not require_gpu:
                 providers.append("CPUExecutionProvider")
 
@@ -209,11 +210,30 @@ class TRTPoseAnalyzer:
             providers.append("CPUExecutionProvider")
         return providers
 
+    def _cuda_provider_options(self) -> Dict[str, Any]:
+        options: Dict[str, Any] = {"device_id": 0}
+        if CUDA_GPU_MEM_LIMIT_MB:
+            try:
+                limit_mb = int(CUDA_GPU_MEM_LIMIT_MB)
+            except ValueError as exc:
+                raise RuntimeError(
+                    f"Invalid ORT_CUDA_GPU_MEM_LIMIT_MB={CUDA_GPU_MEM_LIMIT_MB!r}; expected integer MB"
+                ) from exc
+            options["gpu_mem_limit"] = limit_mb * 1024 * 1024
+            options["arena_extend_strategy"] = "kSameAsRequested"
+        return options
+
     def _make_session(self, path: str, providers: List[Any], label: str) -> ort.InferenceSession:
         logger.info(f"Creating {label} ONNX Runtime session: {path}")
         session = ort.InferenceSession(path, providers=providers)
         logger.info(f"Created {label} ONNX Runtime session with providers: {session.get_providers()}")
         return session
+
+    def warmup(self) -> None:
+        det_input = np.zeros((1, DETECTION_INPUT_SIZE, DETECTION_INPUT_SIZE, 3), dtype=np.float32)
+        lm_input = np.zeros((1, LANDMARK_INPUT_SIZE, LANDMARK_INPUT_SIZE, 3), dtype=np.float32)
+        self.det_session.run(None, {self.det_input: det_input})
+        self.lm_session.run(None, {self.lm_input: lm_input})
 
     # ------------------------------------------------------------------
     # Stage 1: detect person → compute aligned ROI

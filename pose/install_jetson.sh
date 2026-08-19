@@ -87,8 +87,8 @@ set_env_value "POSE_BACKEND" "onnx"
 set_env_value "POSE_DETECTION_MODEL" "$(realpath -m "$POSE_DETECTION_MODEL")"
 set_env_value "POSE_LANDMARK_MODEL" "$(realpath -m "$POSE_LANDMARK_MODEL")"
 set_env_value "USE_GPU" "true"
-set_env_value "REQUIRE_GPU" "true"
 set_env_value "ONNX_PROVIDER_ORDER" "cuda,tensorrt,cpu"
+set_env_value "ORT_CUDA_GPU_MEM_LIMIT_MB" "512"
 cat > "$SERVICE_SRC" <<EOF
 [Unit]
 Description=Pose Estimation REST API Service

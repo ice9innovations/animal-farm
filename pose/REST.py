@@ -49,7 +49,6 @@ POSE_MIN_TRACKING_CONFIDENCE = float(os.getenv('POSE_MIN_TRACKING_CONFIDENCE', '
 POSE_MODEL_COMPLEXITY = int(os.getenv('POSE_MODEL_COMPLEXITY', '2'))
 ENABLE_SEGMENTATION = os.getenv('ENABLE_SEGMENTATION', 'false').lower() == 'true'
 USE_GPU = os.getenv('USE_GPU', 'true').lower() == 'true'
-REQUIRE_GPU = os.getenv('REQUIRE_GPU', 'true').lower() == 'true'
 ONNX_PROVIDER_ORDER = [
     item.strip()
     for item in os.getenv('ONNX_PROVIDER_ORDER', 'cuda,cpu').split(',')
@@ -217,13 +216,27 @@ def initialize_pose_analyzer():
                     "Initializing BlazePose ONNX analyzer "
                     f"({'GPU providers allowed' if USE_GPU else 'CPU only'})..."
                 )
-                pose_analyzer = TRTPoseAnalyzer(
-                    detection_model_path=POSE_DETECTION_MODEL,
-                    landmark_model_path=POSE_LANDMARK_MODEL,
-                    use_gpu=USE_GPU,
-                    require_gpu=REQUIRE_GPU,
-                    provider_order=ONNX_PROVIDER_ORDER
-                )
+                try:
+                    pose_analyzer = TRTPoseAnalyzer(
+                        detection_model_path=POSE_DETECTION_MODEL,
+                        landmark_model_path=POSE_LANDMARK_MODEL,
+                        use_gpu=USE_GPU,
+                        provider_order=ONNX_PROVIDER_ORDER
+                    )
+                    pose_analyzer.warmup()
+                except Exception as gpu_error:
+                    if not USE_GPU:
+                        raise
+                    logger.warning(
+                        f"BlazePose ONNX GPU initialization failed; falling back to CPU: {gpu_error}"
+                    )
+                    pose_analyzer = TRTPoseAnalyzer(
+                        detection_model_path=POSE_DETECTION_MODEL,
+                        landmark_model_path=POSE_LANDMARK_MODEL,
+                        use_gpu=False,
+                        provider_order=["cpu"]
+                    )
+                    pose_analyzer.warmup()
                 provider = getattr(pose_analyzer, "provider", None)
                 _analyzer_framework = "BlazePose ONNX Runtime"
                 _analyzer_backend = "onnx"
@@ -464,7 +477,6 @@ def health_check():
                     'model': _analyzer_framework,
                     'backend': _analyzer_backend,
                     'provider': _analyzer_provider,
-                    'gpu_required': REQUIRE_GPU,
                     'provider_order': ONNX_PROVIDER_ORDER,
                     'landmarks': 33,
                     'complexity': POSE_MODEL_COMPLEXITY,
