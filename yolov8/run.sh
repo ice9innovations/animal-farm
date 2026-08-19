@@ -5,6 +5,9 @@ source "$SCRIPT_DIR/.env"
 
 cd "$SCRIPT_DIR"
 
+WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
+export TMPDIR="${TMPDIR:-$WORKSPACE_DIR/tmp}"
+
 export MPLCONFIGDIR="${MPLCONFIGDIR:-${TMPDIR:-/tmp}/matplotlib-yolov8}"
 export YOLO_CONFIG_DIR="${YOLO_CONFIG_DIR:-${TMPDIR:-/tmp}/ultralytics-yolov8}"
 mkdir -p "$MPLCONFIGDIR" "$YOLO_CONFIG_DIR"

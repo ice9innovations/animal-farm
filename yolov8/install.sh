@@ -14,6 +14,8 @@ SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 SERVICE_NAME="yolov8"
 CURRENT_USER="$(whoami)"
 
+source "$SCRIPT_DIR/.env"
+
 WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
 export TMPDIR="${TMPDIR:-$WORKSPACE_DIR/tmp}"
 mkdir -p "$TMPDIR"
