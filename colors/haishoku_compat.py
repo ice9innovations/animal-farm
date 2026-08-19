@@ -11,11 +11,13 @@ PaletteEntry = Tuple[float, Tuple[int, int, int]]
 
 
 def _get_thumbnail(image: Image.Image) -> Image.Image:
-    thumbnail = image.copy()
-    thumbnail.thumbnail((256, 256))
-    if thumbnail.mode != "RGB":
-        thumbnail = thumbnail.convert("RGB")
-    return thumbnail
+    # Callers always pass a private, single-use image (freshly built from an
+    # array, or a fresh image.crop() region), so resizing in place avoids
+    # copying the full-resolution buffer before it's downsized.
+    image.thumbnail((256, 256))
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    return image
 
 
 def get_colors(image: Image.Image) -> List[ColorCount]:
@@ -26,22 +28,26 @@ def get_colors(image: Image.Image) -> List[ColorCount]:
     return colors or []
 
 
-def sort_by_rgb(colors_tuple: Sequence[ColorCount]) -> List[ColorCount]:
-    return sorted(colors_tuple, key=lambda x: x[1])
-
-
 def rgb_maximum(colors_tuple: Sequence[ColorCount]) -> dict:
-    r_sorted_tuple = sorted(colors_tuple, key=lambda x: x[1][0])
-    g_sorted_tuple = sorted(colors_tuple, key=lambda x: x[1][1])
-    b_sorted_tuple = sorted(colors_tuple, key=lambda x: x[1][2])
-
-    r_min = r_sorted_tuple[0][1][0]
-    g_min = g_sorted_tuple[0][1][1]
-    b_min = b_sorted_tuple[0][1][2]
-
-    r_max = r_sorted_tuple[-1][1][0]
-    g_max = g_sorted_tuple[-1][1][1]
-    b_max = b_sorted_tuple[-1][1][2]
+    r_min = g_min = r_max = g_max = b_min = b_max = None
+    for _, (r, g, b) in colors_tuple:
+        if r_min is None:
+            r_min = r_max = r
+            g_min = g_max = g
+            b_min = b_max = b
+            continue
+        if r < r_min:
+            r_min = r
+        elif r > r_max:
+            r_max = r
+        if g < g_min:
+            g_min = g
+        elif g > g_max:
+            g_max = g
+        if b < b_min:
+            b_min = b
+        elif b > b_max:
+            b_max = b
 
     return {
         "r_max": r_max,
@@ -108,8 +114,9 @@ def get_colors_mean(image: Image.Image) -> List[ColorCount]:
     if not image_colors:
         return []
 
-    sorted_image_colors = sort_by_rgb(image_colors)
-    grouped_image_colors = group_by_accuracy(sorted_image_colors)
+    # group_by_accuracy() only needs one unordered pass over image_colors -
+    # sorting first has no effect on the resulting buckets.
+    grouped_image_colors = group_by_accuracy(image_colors)
 
     colors_mean = []
     for i in range(3):

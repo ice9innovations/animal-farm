@@ -49,7 +49,13 @@ class ColorsAnalyzer:
             
             with open(json_path, 'r', encoding='utf-8') as f:
                 color_data = json.load(f)
-            
+
+            # Convert RGB lists to tuples once here rather than on every
+            # get_color_name() lookup.
+            for color_dict in color_data.values():
+                for name, value in color_dict.items():
+                    color_dict[name] = tuple(value) if isinstance(value, list) else value
+
             logger.info(f"Loaded color data from {json_path}")
             return color_data
             
@@ -75,13 +81,12 @@ class ColorsAnalyzer:
             return None
 
         color_dict = self.color_data[style]
-        
+
+        tr, tg, tb = rgb
         min_distance = float("inf")
         closest_color = None
-        for color, value in color_dict.items():
-            # Convert list back to tuple for distance calculation
-            rgb_values = tuple(value) if isinstance(value, list) else value
-            distance = sum([(i - j) ** 2 for i, j in zip(rgb, rgb_values)])
+        for color, (cr, cg, cb) in color_dict.items():
+            distance = (tr - cr) ** 2 + (tg - cg) ** 2 + (tb - cb) ** 2
             if distance < min_distance:
                 min_distance = distance
                 closest_color = color
