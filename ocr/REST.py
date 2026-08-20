@@ -34,7 +34,8 @@ PORT_STR = os.getenv('PORT')
 PRIVATE_STR = os.getenv('PRIVATE')
 TIMEOUT_STR = os.getenv('TIMEOUT')
 AUTO_UPDATE_STR = os.getenv('AUTO_UPDATE')
-OCR_REQUIRE_GPU_STR = os.getenv('OCR_REQUIRE_GPU', os.getenv('OCR_USE_CUDA', 'true'))
+REQUIRE_GPU_STR = os.getenv('REQUIRE_GPU', os.getenv('OCR_REQUIRE_GPU', os.getenv('OCR_USE_CUDA', 'true')))
+WANT_GPU_STR = os.getenv('USE_GPU', 'true')  # set to false to force CPU even when a GPU is present
 
 # Step 2: Validate critical environment variables
 if not PORT_STR:
@@ -51,9 +52,11 @@ PORT = int(PORT_STR)
 PRIVATE = PRIVATE_STR.lower() in ['true', '1', 'yes']
 TIMEOUT = float(TIMEOUT_STR)
 AUTO_UPDATE = AUTO_UPDATE_STR.lower() == 'true'
-OCR_REQUIRE_GPU = OCR_REQUIRE_GPU_STR.lower() in ['true', '1', 'yes']
-OCR_CUDA_AVAILABLE = torch.cuda.is_available()
-OCR_DEVICE = "cuda" if OCR_CUDA_AVAILABLE else "cpu"
+REQUIRE_GPU = REQUIRE_GPU_STR.lower() in ['true', '1', 'yes']
+WANT_GPU = WANT_GPU_STR.lower() in ['true', '1', 'yes']
+CUDA_AVAILABLE = torch.cuda.is_available()
+USE_GPU = WANT_GPU and CUDA_AVAILABLE
+DEVICE = "cuda" if USE_GPU else "cpu"
 
 MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', str(32 * 1024 * 1024)))  # 32MB default
 RAW_IMAGE_CONTENT_TYPES = {
@@ -71,14 +74,18 @@ emoji_tokenizer = None
 def is_raw_image_request() -> bool:
     return (request.content_type or '').split(';', 1)[0].strip().lower() in RAW_IMAGE_CONTENT_TYPES
 
-# Initialize EasyOCR (run once). This service is intentionally GPU-required by
-# default; CPU fallback is not useful for the production OCR workload.
+# Initialize EasyOCR (run once). GPU-required by default (REQUIRE_GPU); set
+# USE_GPU=false to run on CPU even when a GPU is present and CUDA is
+# available -- useful on boxes with plenty of idle CPU cores to scale out
+# with multiple worker processes instead of contending for GPU/cuDNN.
 print("Initializing EasyOCR...")
-if OCR_REQUIRE_GPU and not OCR_CUDA_AVAILABLE:
-    raise RuntimeError("OCR requires CUDA, but torch.cuda.is_available() is false. Install CUDA-enabled PyTorch for this platform.")
-if OCR_CUDA_AVAILABLE:
+if REQUIRE_GPU and WANT_GPU and not CUDA_AVAILABLE:
+    raise RuntimeError("OCR requires CUDA, but torch.cuda.is_available() is false. Install CUDA-enabled PyTorch for this platform, or set USE_GPU=false.")
+if USE_GPU:
     print(f"EasyOCR CUDA device: {torch.cuda.get_device_name(0)}")
-ocr_engine = easyocr.Reader(['en'], gpu=OCR_CUDA_AVAILABLE)
+else:
+    print("EasyOCR running on CPU" + (" (USE_GPU=false)" if not WANT_GPU else ""))
+ocr_engine = easyocr.Reader(['en'], gpu=USE_GPU)
 print("EasyOCR initialized successfully")
 
 def create_ocr_response(data: Dict[str, Any], processing_time: float) -> Dict[str, Any]:
@@ -123,7 +130,7 @@ def create_ocr_response(data: Dict[str, Any], processing_time: float) -> Dict[st
             "model_info": {
                 "framework": "EasyOCR",
                 "runtime": "PyTorch",
-                "device": OCR_DEVICE
+                "device": DEVICE
             }
         }
     }
@@ -530,16 +537,16 @@ def health_check():
             "status": ocr_status,
             "version": "EasyOCR",
             "languages": ["English"],
-            "gpu_required": OCR_REQUIRE_GPU,
-            "gpu_enabled": OCR_CUDA_AVAILABLE,
-            "device": OCR_DEVICE,
+            "gpu_required": REQUIRE_GPU,
+            "gpu_enabled": USE_GPU,
+            "device": DEVICE,
             "torch_version": torch.__version__,
-            "cuda_device": torch.cuda.get_device_name(0) if OCR_CUDA_AVAILABLE else None
+            "cuda_device": torch.cuda.get_device_name(0) if USE_GPU else None
         },
         "features": {
             "text_angle_classification": True,
             "multilingual_support": False,
-            "gpu_acceleration": OCR_CUDA_AVAILABLE,
+            "gpu_acceleration": USE_GPU,
             "high_accuracy": True
         },
         "endpoints": [
