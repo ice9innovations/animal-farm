@@ -27,11 +27,22 @@ cd /home/sd/animal-farm/ocr
 bash install.sh
 ```
 
-`install.sh` is the only command needed on any platform. It detects Jetson (aarch64), desktop/server NVIDIA GPU, or CPU-only, installs the matching PyTorch build, installs EasyOCR and the rest of the dependencies, and generates the systemd service file — all in one run. It also recreates the venv automatically if it's missing or broken.
+`install.sh` is the only command needed on any platform. It detects Jetson, desktop/server NVIDIA GPU, Raspberry Pi/non-Jetson aarch64 CPU, or other CPU-only systems, installs the matching PyTorch build, installs EasyOCR and the rest of the dependencies, and generates the systemd service file in one run. It also recreates the venv automatically if it's missing, broken, or needs system-site packages.
 
 - **Jetson**: hands off to `install_jetson.sh`, which uses JetPack's system PyTorch/torchvision (`--system-site-packages` venv, `--no-deps` EasyOCR install).
 - **Desktop/server NVIDIA GPU**: calls `enable_gpu_desktop.sh` to install CUDA PyTorch from the PyTorch CUDA wheel index.
-- **CPU-only**: installs CPU PyTorch directly. Set `USE_GPU=false` in `.env` afterward to run in CPU mode (see Configuration).
+- **Raspberry Pi / non-Jetson aarch64 CPU**: creates a `--system-site-packages` venv and uses Debian/Raspberry Pi OS `python3-torch` and `python3-torchvision` packages. This avoids PyPI aarch64 Torch wheels that can pull CUDA packages and fail with `Bus error` on a Pi.
+- **Other CPU-only**: installs CPU PyTorch from the PyTorch CPU wheel index.
+
+On CPU-only installs, `install.sh` also sets `USE_GPU=false` in `.env` so the service starts in CPU mode.
+
+If a Raspberry Pi already has a broken PyPI Torch install in `ocr/venv`, rerun `bash install.sh`. The installer recreates the venv with system-site packages and removes local PyPI/CUDA Torch packages that would shadow the system CPU packages. If apt cannot run automatically, install the system packages manually and rerun:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y python3-torch python3-torchvision
+bash install.sh
+```
 
 `enable_gpu_desktop.sh` and `install_jetson.sh` remain runnable directly if you need to redo just the PyTorch step, but `install.sh` alone takes a fresh or partially broken install all the way to a runnable service.
 
