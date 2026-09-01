@@ -7,9 +7,9 @@
 
 ## Overview
 
-This service is a Paddle-free OCR replacement that requires GPU execution. It uses EasyOCR on CUDA-backed PyTorch and keeps the existing Animal Farm OCR API shape: combined text, per-region bounding boxes, confidence scores, and emoji mappings for meaningful words.
+This service is a Paddle-free OCR replacement built on EasyOCR and keeps the existing Animal Farm OCR API shape: combined text, per-region bounding boxes, confidence scores, and emoji mappings for meaningful words.
 
-CPU OCR is intentionally not a supported production mode. If CUDA PyTorch is unavailable, the service exits at startup by default.
+GPU execution is the default: if CUDA PyTorch is unavailable, the service exits at startup unless `USE_GPU=false` is set in `.env` (see Configuration).
 
 ## Features
 
@@ -18,36 +18,22 @@ CPU OCR is intentionally not a supported production mode. If CUDA PyTorch is una
 - Text regions with bounding boxes and confidence scores
 - Emoji enrichment using local or auto-updated mappings
 - No Paddle or PaddlePaddle dependency
-- Startup failure when GPU OCR is unavailable
+- Startup failure when GPU OCR is required but unavailable
 
-## Desktop NVIDIA Install
+## Install
 
 ```bash
 cd /home/sd/animal-farm/ocr
-bash enable_gpu_desktop.sh
 bash install.sh
 ```
 
-`enable_gpu_desktop.sh` installs CUDA PyTorch from the PyTorch CUDA wheel index and verifies `torch.cuda.is_available()`.
+`install.sh` is the only command needed on any platform. It detects Jetson (aarch64), desktop/server NVIDIA GPU, or CPU-only, installs the matching PyTorch build, installs EasyOCR and the rest of the dependencies, and generates the systemd service file — all in one run. It also recreates the venv automatically if it's missing or broken.
 
-## Jetson Install
+- **Jetson**: hands off to `install_jetson.sh`, which uses JetPack's system PyTorch/torchvision (`--system-site-packages` venv, `--no-deps` EasyOCR install).
+- **Desktop/server NVIDIA GPU**: calls `enable_gpu_desktop.sh` to install CUDA PyTorch from the PyTorch CUDA wheel index.
+- **CPU-only**: installs CPU PyTorch directly. Set `USE_GPU=false` in `.env` afterward to run in CPU mode (see Configuration).
 
-Use NVIDIA’s JetPack-matched PyTorch wheel plus matching torchvision system-wide, or an `l4t-pytorch` base/container. The Jetson installer creates the OCR venv with `--system-site-packages` so it can use that system Torch install, and EasyOCR is installed with `--no-deps` so it does not replace Torch.
-
-After system PyTorch reports CUDA, run:
-
-```bash
-cd /home/sd/animal-farm/ocr
-bash install_jetson.sh
-```
-
-Verify CUDA PyTorch before installing OCR:
-
-```bash
-ocr/venv/bin/python -c "import torch, torchvision; print(torch.__version__); print(torchvision.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
-```
-
-If `torch.cuda.is_available()` is false, do not start this OCR service; the GPU runtime is not installed correctly.
+`enable_gpu_desktop.sh` and `install_jetson.sh` remain runnable directly if you need to redo just the PyTorch step, but `install.sh` alone takes a fresh or partially broken install all the way to a runnable service.
 
 ## Configuration
 
@@ -67,7 +53,8 @@ OCR_REQUIRE_GPU=true
 | `PRIVATE` | Yes | - | Preserved for service compatibility |
 | `TIMEOUT` | Yes | - | Timeout for remote config downloads |
 | `AUTO_UPDATE` | Yes | - | Refresh emoji/MWE config from GitHub on startup |
-| `OCR_REQUIRE_GPU` | No | `true` | Exit at startup when CUDA PyTorch is unavailable |
+| `OCR_REQUIRE_GPU` | No | `true` | Exit at startup when CUDA PyTorch is unavailable (also settable as `REQUIRE_GPU` or `OCR_USE_CUDA`) |
+| `USE_GPU` | No | `true` | Set to `false` to run on CPU, even when a GPU is present, and to skip the `OCR_REQUIRE_GPU` startup check |
 | `MAX_FILE_SIZE` | No | `33554432` | Maximum upload/download size in bytes |
 
 ## API
