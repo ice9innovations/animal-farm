@@ -188,6 +188,49 @@ status_all() {
     done
 }
 
+monitor_once() {
+    mkdir -p "$LOG_DIR" "$PID_DIR"
+
+    if [ ! -f "$STATE_FILE" ]; then
+        bootstrap_state_from_running
+    fi
+
+    local enabled
+    enabled=$(get_enabled_services)
+    if [ -z "$enabled" ]; then
+        echo -e "${YELLOW}⚠️  No enabled services on this machine.${NC}"
+        return 0
+    fi
+
+    local restarted=0
+    for name in $enabled; do
+        if ! service_pid "$name" >/dev/null; then
+            echo -e "${YELLOW}⚠️  $name is not running; starting it...${NC}"
+            start_service "$name"
+            restarted=$((restarted + 1))
+        fi
+    done
+
+    if [ "$restarted" -eq 0 ]; then
+        echo -e "${GREEN}✅ All enabled services are running${NC}"
+    else
+        echo -e "${GREEN}✅ Restarted $restarted missing service(s)${NC}"
+    fi
+}
+
+monitor_loop() {
+    local interval="${2:-30}"
+    if ! [[ "$interval" =~ ^[0-9]+$ ]] || [ "$interval" -lt 5 ]; then
+        interval=30
+    fi
+
+    echo "👀 Monitoring enabled services every ${interval}s. Press CTRL+C to exit."
+    while true; do
+        monitor_once
+        sleep "$interval"
+    done
+}
+
 start_all() {
     mkdir -p "$LOG_DIR" "$PID_DIR"
 
@@ -249,8 +292,14 @@ case "$ACTION" in
     status)
         status_all
         ;;
+    monitor-once)
+        monitor_once
+        ;;
+    monitor)
+        monitor_loop "$@"
+        ;;
     *)
-        echo "Usage: $0 {start|stop|restart|status} [service]"
+        echo "Usage: $0 {start|stop|restart|status|monitor [seconds]|monitor-once} [service]"
         echo ""
         echo "Examples:"
         echo "  $0 start             # Start all services"
@@ -259,6 +308,9 @@ case "$ACTION" in
         echo "  $0 stop BLIP2        # Stop just BLIP2"
         echo "  $0 restart BLIP2     # Restart just BLIP2"
         echo "  $0 status            # Show status of all services"
+        echo "  $0 monitor           # Keep enabled services running (default 30s interval)"
+        echo "  $0 monitor 60        # Keep enabled services running, checking every 60s"
+        echo "  $0 monitor-once      # Start any missing enabled services once"
         exit 1
         ;;
 esac
