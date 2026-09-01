@@ -7,7 +7,7 @@ SERVICE_NAME="caption-summary"
 CURRENT_USER="$(whoami)"
 VENV_DIR="${CAPTION_SUMMARY_VENV:-$SCRIPT_DIR/venv}"
 
-python3 -m venv "$VENV_DIR"
+python3.11 -m venv "$VENV_DIR"
 "$VENV_DIR/bin/pip" install --upgrade pip
 "$VENV_DIR/bin/pip" install --no-cache-dir -r "$SCRIPT_DIR/requirements.txt"
 
