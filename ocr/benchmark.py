@@ -15,6 +15,7 @@ import json
 import statistics
 import sys
 import time
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -145,7 +146,16 @@ def run_once(endpoint: str, data: bytes, content_type: str, timeout: float) -> R
 
     processing_ms, has_text, region_count, text = extract_response_info(payload)
     ok = response.ok and json_ok and isinstance(payload, dict) and payload.get("status") == "success"
-    error = None if ok else response.text[:300]
+    error = None
+    if not ok:
+        if isinstance(payload, dict):
+            payload_error = payload.get("error")
+            if isinstance(payload_error, dict):
+                error = str(payload_error.get("message") or payload_error)[:300]
+            else:
+                error = str(payload_error or payload)[:300]
+        else:
+            error = response.text[:300]
     return Result(ok, elapsed_ms, response.status_code, json_ok, False, error, processing_ms, has_text, region_count, text)
 
 
@@ -157,7 +167,59 @@ def print_result(index: int, result: Result, sla_ms: float) -> None:
     service = f", service={result.service_processing_ms:.1f}ms" if result.service_processing_ms is not None else ""
     regions = f", regions={result.text_regions}" if result.text_regions is not None else ""
     status = f", http={result.status_code}" if result.status_code is not None else ""
-    print(f"run {index:03d}: {state:7s} {sla:4s} wall={result.elapsed_ms:.1f}ms{service}{regions}{status}")
+    error = f", error={result.error}" if result.error else ""
+    print(f"run {index:03d}: {state:7s} {sla:4s} wall={result.elapsed_ms:.1f}ms{service}{regions}{status}{error}")
+
+
+def status_key(result: Result) -> str:
+    if result.timed_out:
+        return "timeout"
+    if result.status_code is None:
+        return "request_error"
+    return str(result.status_code)
+
+
+def first_error(results: list[Result]) -> str:
+    for result in results:
+        if result.error:
+            return result.error.replace("\n", " ")[:160]
+    return "-"
+
+
+def health_ocr_status(payload: Any) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+
+    ocr_engine = payload.get("ocr_engine")
+    if isinstance(ocr_engine, dict) and isinstance(ocr_engine.get("status"), str):
+        return ocr_engine["status"]
+
+    model = payload.get("model")
+    if isinstance(model, dict):
+        details = model.get("details")
+        if isinstance(details, dict) and isinstance(details.get("status"), str):
+            return details["status"]
+        if isinstance(model.get("status"), str):
+            return model["status"]
+
+    return None
+
+
+def wait_until_not_busy(health_endpoint: str, timeout: float, poll_interval: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            response = requests.get(health_endpoint, timeout=min(2.0, max(0.2, poll_interval)))
+            payload = response.json()
+        except (requests.RequestException, json.JSONDecodeError):
+            time.sleep(poll_interval)
+            continue
+
+        if health_ocr_status(payload) != "busy":
+            return True
+        time.sleep(poll_interval)
+
+    return False
 
 
 def summarize(results: list[Result], sla_ms: float) -> tuple[int, int, int, int]:
@@ -169,6 +231,9 @@ def summarize(results: list[Result], sla_ms: float) -> tuple[int, int, int, int]
 
     print("\nsummary:")
     print(f"  measured={len(results)} ok={len(successes)} fail={failures} timeouts={timeouts} sla_pass={sla_passes}")
+    print(f"  statuses={dict(sorted(Counter(status_key(result) for result in results).items()))}")
+    if failures:
+        print(f"  first_error={first_error(results)}")
     if all_walls:
         print(
             "  wall_ms "
@@ -193,6 +258,9 @@ def run_benchmark(
     timeout: float,
     sla_ms: float,
     cooldown_on_timeout: float,
+    health_endpoint: str,
+    wait_ready_timeout: float,
+    wait_ready_interval: float,
     show_text: bool,
 ) -> int:
     total_runs = warmup + runs
@@ -217,6 +285,9 @@ def run_benchmark(
         if result.timed_out and cooldown_on_timeout > 0:
             print(f"  cooling down {cooldown_on_timeout:.1f}s after timeout")
             time.sleep(cooldown_on_timeout)
+            if wait_ready_timeout > 0:
+                ready = wait_until_not_busy(health_endpoint, wait_ready_timeout, wait_ready_interval)
+                print(f"  health wait after timeout: {'ready' if ready else 'still busy'}")
 
     successes, failures, _timeouts, sla_passes = summarize(measured, sla_ms)
     if show_text and last_text is not None:
@@ -234,6 +305,9 @@ def run_sweep(
     timeout: float,
     sla_ms: float,
     cooldown_on_timeout: float,
+    health_endpoint: str,
+    wait_ready_timeout: float,
+    wait_ready_interval: float,
 ) -> int:
     print(f"endpoint: {endpoint}")
     print(f"sweep: sizes={','.join(f'{w}x{h}' for w, h in sizes)}, warmup={warmup}, runs={runs}, timeout={timeout}s, sla={sla_ms:.0f}ms")
@@ -246,6 +320,8 @@ def run_sweep(
             result = run_once(endpoint, data, content_type, timeout)
             if result.timed_out and cooldown_on_timeout > 0:
                 time.sleep(cooldown_on_timeout)
+                if wait_ready_timeout > 0:
+                    wait_until_not_busy(health_endpoint, wait_ready_timeout, wait_ready_interval)
 
         measured = []
         for _ in range(runs):
@@ -253,11 +329,14 @@ def run_sweep(
             measured.append(result)
             if result.timed_out and cooldown_on_timeout > 0:
                 time.sleep(cooldown_on_timeout)
+                if wait_ready_timeout > 0:
+                    wait_until_not_busy(health_endpoint, wait_ready_timeout, wait_ready_interval)
 
         walls = [result.elapsed_ms for result in measured]
         ok_count = sum(1 for result in measured if result.ok)
         timeout_count = sum(1 for result in measured if result.timed_out)
         sla_count = sum(1 for result in measured if result.ok and result.elapsed_ms <= sla_ms)
+        statuses = ",".join(f"{key}:{value}" for key, value in sorted(Counter(status_key(result) for result in measured).items()))
         p50 = percentile(walls, 0.50) if walls else 0.0
         p95 = percentile(walls, 0.95) if walls else 0.0
         max_wall = max(walls) if walls else 0.0
@@ -265,7 +344,9 @@ def run_sweep(
         print(
             f"{dimensions[0]:4d}x{dimensions[1]:4d} bytes={len(data):7d} "
             f"{status:4s} ok={ok_count:2d}/{runs} sla={sla_count:2d}/{runs} "
-            f"timeouts={timeout_count:2d} p50={p50:7.1f}ms p95={p95:7.1f}ms max={max_wall:7.1f}ms"
+            f"timeouts={timeout_count:2d} statuses={statuses or '-':14s} "
+            f"p50={p50:7.1f}ms p95={p95:7.1f}ms max={max_wall:7.1f}ms "
+            f"first_error={first_error(measured)}"
         )
         if status != "pass":
             any_failure = True
@@ -299,14 +380,38 @@ def main() -> int:
         default=10.0,
         help="Seconds to wait after a client timeout so unfinished server-side OCR does not pile up.",
     )
+    parser.add_argument(
+        "--wait-ready-timeout",
+        type=float,
+        default=60.0,
+        help="Seconds to poll /health after a timeout until OCR is no longer busy. Use 0 to disable.",
+    )
+    parser.add_argument(
+        "--wait-ready-interval",
+        type=float,
+        default=1.0,
+        help="Polling interval for --wait-ready-timeout.",
+    )
     parser.add_argument("--show-text", action="store_true", help="Print the final OCR text sample")
     args = parser.parse_args()
 
     endpoint = args.url.rstrip("/") + "/analyze"
+    health_endpoint = args.url.rstrip("/") + "/health"
 
     if args.sweep and not args.image and not args.generate:
         sizes = [parse_size(item.strip()) for item in args.sweep.split(",") if item.strip()]
-        return run_sweep(endpoint, sizes, args.runs, args.warmup, args.timeout, args.sla_ms, args.cooldown_on_timeout)
+        return run_sweep(
+            endpoint,
+            sizes,
+            args.runs,
+            args.warmup,
+            args.timeout,
+            args.sla_ms,
+            args.cooldown_on_timeout,
+            health_endpoint,
+            args.wait_ready_timeout,
+            args.wait_ready_interval,
+        )
 
     if args.generate:
         data, content_type, dimensions = generated_image_bytes(args.generated_size)
@@ -329,6 +434,9 @@ def main() -> int:
         args.timeout,
         args.sla_ms,
         args.cooldown_on_timeout,
+        health_endpoint,
+        args.wait_ready_timeout,
+        args.wait_ready_interval,
         args.show_text,
     )
 
