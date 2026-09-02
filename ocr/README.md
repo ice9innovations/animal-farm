@@ -78,29 +78,6 @@ curl "http://localhost:7775/health"
 
 `/health` reports `gpu_required`, `gpu_enabled`, `device`, `torch_version`, and `cuda_device`.
 
-## Benchmark
-
-With the OCR service already running, benchmark the actual HTTP path:
-
-```bash
-cd /home/sd/animal-farm/ocr
-./venv/bin/python benchmark.py --image /path/to/image.jpg --runs 20 --warmup 3 --timeout 10 --sla-ms 1000
-```
-
-For a synthetic local image:
-
-```bash
-./venv/bin/python benchmark.py --generate --generated-size 1280x720 --runs 20 --timeout 10 --sla-ms 1000
-```
-
-To sweep generated image sizes and find the point where the Pi crosses the 1s SLA:
-
-```bash
-./venv/bin/python benchmark.py --runs 5 --warmup 1 --timeout 10 --sla-ms 1000
-```
-
-The script posts the image to `/analyze`, measures wall-clock latency, validates terminal JSON, reports percentiles, status-code buckets, timeout counts, and exits non-zero if any measured request fails or misses the SLA. Keep `--timeout` above `--sla-ms` when measuring latency; using a 1s HTTP timeout only measures client cancellation and can leave unfinished OCR work running on the server. After a timeout, the benchmark polls `/health` until OCR is no longer busy before continuing.
-
 ### Analyze URL
 
 ```bash
