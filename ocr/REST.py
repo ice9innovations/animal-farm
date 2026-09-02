@@ -5,6 +5,7 @@ import uuid
 import time
 import re
 import random
+import threading
 from typing import Dict, Any, Optional, List, Tuple
 
 from flask import Flask, request, jsonify
@@ -69,6 +70,7 @@ RAW_IMAGE_CONTENT_TYPES = {
 # Global emoji mappings and MWE tokenizer - loaded from API on startup
 emoji_mappings = {}
 emoji_tokenizer = None
+ocr_lock = threading.Lock()
 
 
 def is_raw_image_request() -> bool:
@@ -515,20 +517,26 @@ print("EasyOCR service: CORS enabled for direct browser communication")
 def health_check():
     """Health check endpoint"""
     # Test if EasyOCR is working by creating a small test image
-    try:
-        test_image = Image.new('RGB', (10, 10), color='white')
-        test_array = np.array(test_image)
-        ocr_engine.readtext(test_array, detail=1, paragraph=False)  # This will fail if OCR can't work
-        ocr_status = "loaded"
+    if ocr_lock.acquire(blocking=False):
+        try:
+            test_image = Image.new('RGB', (10, 10), color='white')
+            test_array = np.array(test_image)
+            ocr_engine.readtext(test_array, detail=1, paragraph=False)  # This will fail if OCR can't work
+            ocr_status = "loaded"
+            status = "healthy"
+        except Exception as e:
+            ocr_status = f"error: {str(e)}"
+            status = "unhealthy"
+            return jsonify({
+                "status": status,
+                "reason": f"EasyOCR engine error: {str(e)}",
+                "service": "OCR Text Recognition"
+            }), 503
+        finally:
+            ocr_lock.release()
+    else:
+        ocr_status = "busy"
         status = "healthy"
-    except Exception as e:
-        ocr_status = f"error: {str(e)}"
-        status = "unhealthy"
-        return jsonify({
-            "status": status,
-            "reason": f"EasyOCR engine error: {str(e)}",
-            "service": "OCR Text Recognition"
-        }), 503
     
     return jsonify({
         "status": status,
@@ -562,8 +570,10 @@ def health_check():
 def analyze():
     """Unified analyze endpoint - orchestrates input handling and processing"""
     start_time = time.time()
+    request_id = uuid.uuid4().hex[:12]
     
     def error_response(message: str, status_code: int = 400):
+        print(f"OCR request {request_id}: error status={status_code} elapsed={time.time() - start_time:.3f}s message={message}", flush=True)
         return jsonify({
             "service": "ocr",
             "status": "error",
@@ -573,94 +583,124 @@ def analyze():
         }), status_code
     
     try:
-        # Step 1: Get image into memory from any source
-        if request.method == 'POST' and is_raw_image_request():
-            try:
-                from io import BytesIO
-                file_data = request.get_data(cache=False)
-                if not file_data:
-                    return error_response("No image body provided")
-                if len(file_data) > MAX_FILE_SIZE:
-                    return error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB")
-                image = Image.open(BytesIO(file_data)).convert('RGB')
-            except Exception as e:
-                return error_response(f"Failed to process raw image body: {str(e)}", 500)
+        return _analyze_request(request_id, start_time, error_response)
 
-        elif request.method == 'POST' and 'file' in request.files:
-            # Handle file upload
-            uploaded_file = request.files['file']
-            if uploaded_file.filename == '':
-                return error_response("No file selected")
-            
-            # Validate file size
-            uploaded_file.seek(0, 2)  # Seek to end
-            file_size = uploaded_file.tell()
-            uploaded_file.seek(0)     # Seek back to beginning
-            
-            if file_size > MAX_FILE_SIZE:
-                return error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB")
-            
-            try:
-                from io import BytesIO
-                file_data = uploaded_file.read()
-                image = Image.open(BytesIO(file_data)).convert('RGB')
-            except Exception as e:
-                return error_response(f"Failed to process uploaded image: {str(e)}", 500)
-        
-        else:
-            # Handle URL or file parameter
-            url = request.args.get('url')
-            file_path = request.args.get('file')
-            
-            if not url and not file_path:
-                return error_response("Must provide either 'url' or 'file' parameter, or POST a file")
-            
-            if url and file_path:
-                return error_response("Cannot provide both 'url' and 'file' parameters")
-            
-            if url:
-                # Download from URL directly into memory
-                try:
-                    response = requests.get(url, timeout=10)
-                    response.raise_for_status()
-                    
-                    if len(response.content) > MAX_FILE_SIZE:
-                        return error_response("Downloaded file too large")
-                    
-                    from io import BytesIO
-                    image = Image.open(BytesIO(response.content)).convert('RGB')
-                    
-                except Exception as e:
-                    return error_response(f"Failed to download/process image: {str(e)}")
-            else:  # file_path
-                # Load file directly into memory
-                if not os.path.exists(file_path):
-                    return error_response(f"File not found: {file_path}")
-                
-                try:
-                    image = Image.open(file_path).convert('RGB')
-                except Exception as e:
-                    return error_response(f"Failed to load image file: {str(e)}", 500)
-        
-        # Step 2: Process the image (unified processing path)
-        processing_result = process_image_for_ocr(image)
-        
-        # Step 3: Handle processing result
-        if not processing_result["success"]:
-            return error_response(processing_result["error"], 500)
-        
-        # Step 4: Create response
-        response = create_ocr_response(
-            processing_result["data"],
-            processing_result["processing_time"]
-        )
-        
-        return jsonify(response)
-        
     except ValueError as e:
         return error_response(str(e))
     except Exception as e:
         return error_response(f"Internal error: {str(e)}", 500)
+
+
+def _analyze_request(request_id, start_time, error_response):
+    # Step 1: Get image into memory from any source
+    if request.method == 'POST' and is_raw_image_request():
+        try:
+            from io import BytesIO
+            file_data = request.get_data(cache=False)
+            if not file_data:
+                return error_response("No image body provided")
+            if len(file_data) > MAX_FILE_SIZE:
+                return error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB")
+            image = Image.open(BytesIO(file_data)).convert('RGB')
+            input_desc = f"raw body bytes={len(file_data)}"
+        except Exception as e:
+            return error_response(f"Failed to process raw image body: {str(e)}", 500)
+
+    elif request.method == 'POST' and 'file' in request.files:
+        # Handle file upload
+        uploaded_file = request.files['file']
+        if uploaded_file.filename == '':
+            return error_response("No file selected")
+
+        # Validate file size
+        uploaded_file.seek(0, 2)  # Seek to end
+        file_size = uploaded_file.tell()
+        uploaded_file.seek(0)     # Seek back to beginning
+
+        if file_size > MAX_FILE_SIZE:
+            return error_response(f"File too large. Maximum size: {MAX_FILE_SIZE//1024//1024}MB")
+
+        try:
+            from io import BytesIO
+            file_data = uploaded_file.read()
+            image = Image.open(BytesIO(file_data)).convert('RGB')
+            input_desc = f"multipart file={uploaded_file.filename} bytes={len(file_data)}"
+        except Exception as e:
+            return error_response(f"Failed to process uploaded image: {str(e)}", 500)
+
+    else:
+        # Handle URL or file parameter
+        url = request.args.get('url')
+        file_path = request.args.get('file')
+
+        if not url and not file_path:
+            return error_response("Must provide either 'url' or 'file' parameter, or POST a file")
+
+        if url and file_path:
+            return error_response("Cannot provide both 'url' and 'file' parameters")
+
+        if url:
+            # Download from URL directly into memory
+            try:
+                response = requests.get(url, timeout=10)
+                response.raise_for_status()
+
+                if len(response.content) > MAX_FILE_SIZE:
+                    return error_response("Downloaded file too large")
+
+                from io import BytesIO
+                image = Image.open(BytesIO(response.content)).convert('RGB')
+                input_desc = f"url={url} bytes={len(response.content)}"
+
+            except Exception as e:
+                return error_response(f"Failed to download/process image: {str(e)}")
+        else:  # file_path
+            # Load file directly into memory
+            if not os.path.exists(file_path):
+                return error_response(f"File not found: {file_path}")
+
+            try:
+                image = Image.open(file_path).convert('RGB')
+                input_desc = f"file={file_path}"
+            except Exception as e:
+                return error_response(f"Failed to load image file: {str(e)}", 500)
+
+    decode_elapsed = time.time() - start_time
+    width, height = image.size
+    print(
+        f"OCR request {request_id}: decoded {input_desc} image={width}x{height} "
+        f"device={DEVICE} elapsed={decode_elapsed:.3f}s",
+        flush=True,
+    )
+
+    # Step 2: Process the image (unified processing path)
+    if not ocr_lock.acquire(blocking=False):
+        return error_response("OCR engine is busy; retry this image later", 429)
+
+    try:
+        ocr_start = time.time()
+        print(f"OCR request {request_id}: easyocr start elapsed={ocr_start - start_time:.3f}s", flush=True)
+        processing_result = process_image_for_ocr(image)
+    finally:
+        ocr_lock.release()
+    print(
+        f"OCR request {request_id}: easyocr done ocr_elapsed={time.time() - ocr_start:.3f}s "
+        f"total_elapsed={time.time() - start_time:.3f}s success={processing_result.get('success')}",
+        flush=True,
+    )
+
+    # Step 3: Handle processing result
+    if not processing_result["success"]:
+        return error_response(processing_result["error"], 500)
+
+    # Step 4: Create response
+    response = create_ocr_response(
+        processing_result["data"],
+        processing_result["processing_time"]
+    )
+    print(f"OCR request {request_id}: response ready total_elapsed={time.time() - start_time:.3f}s", flush=True)
+
+    return jsonify(response)
 
 @app.route('/v3/analyze', methods=['GET', 'POST'])
 def analyze_v3_compat():
