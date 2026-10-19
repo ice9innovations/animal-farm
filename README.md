@@ -41,6 +41,7 @@ and are listed separately below.
 | **[qr](qr/)** | 7801 | QR code and barcode detection and decoding |
 | **[florence2](florence2/)** | 7803 | Florence-2 multi-task vision: captioning, detection, OCR, grounding, and segmentation |
 | **[xai](xai/)** | 7805 | xAI Grok vision API wrapper |
+| **[nsfw-segmentation](nsfw-segmentation/)** | 7806 | Anatomical segmentation for image content moderation |
 | **[sam3](sam3/)** | 9779 | Text-prompted open-vocabulary image segmentation |
 
 The root `docker-compose.yaml` currently covers the main RunPod deployment set:
