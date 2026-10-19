@@ -1,0 +1,71 @@
+#!/bin/bash
+# Install clip-score Flask API dependencies into clip-score/venv.
+# Run once before first use. Requires Python 3.11.
+#
+# Usage:
+#   bash install.sh
+#
+# After install, start the service with:
+#   bash run.sh  (RunPod)
+#   systemctl start clip-score  (systemd)
+set -e
+
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+SERVICE_NAME="clip-score"
+CURRENT_USER="$(whoami)"
+WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
+
+rm -rf "$SCRIPT_DIR/venv"
+python3.11 -m venv "$SCRIPT_DIR/venv"
+source "$SCRIPT_DIR/venv/bin/activate"
+
+# Route pip temp files to network volume — CUDA wheels exhaust the overlay /tmp
+export TMPDIR="${TMPDIR:-$WORKSPACE_DIR/tmp}"
+mkdir -p "$TMPDIR"
+
+pip install --upgrade pip
+
+# PyTorch with CUDA 12.8
+pip install --no-cache-dir \
+    torch==2.10.0+cu128 \
+    torchvision==0.25.0+cu128 \
+    --index-url https://download.pytorch.org/whl/cu128
+
+pip install --no-cache-dir -r "$SCRIPT_DIR/requirements.txt"
+
+# CLIP is installed from source (not PyPI) — depends on torch, so must come after it.
+pip install --no-cache-dir git+https://github.com/openai/CLIP.git
+
+# Generate systemd service file
+SERVICE_FILE="$SCRIPT_DIR/$SERVICE_NAME.service"
+cat > "$SERVICE_FILE" <<EOF
+[Unit]
+Description=Animal Farm CLIP Score/Embedding Service
+After=network.target
+
+[Service]
+Type=simple
+User=$CURRENT_USER
+WorkingDirectory=$SCRIPT_DIR
+EnvironmentFile=$SCRIPT_DIR/.env
+ExecStart=$SCRIPT_DIR/venv/bin/python $SCRIPT_DIR/REST.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+echo "Generated $SERVICE_FILE"
+
+if [ "$(id -u)" = "0" ]; then
+    cp "$SERVICE_FILE" /etc/systemd/system/
+    systemctl daemon-reload
+    echo "Service installed. Run: systemctl start $SERVICE_NAME"
+else
+    echo ""
+    echo "To install the service, run:"
+    echo "  sudo cp $SERVICE_FILE /etc/systemd/system/"
+    echo "  sudo systemctl daemon-reload"
+    echo "  sudo systemctl start $SERVICE_NAME"
+fi
